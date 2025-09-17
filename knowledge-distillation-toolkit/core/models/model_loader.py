@@ -1,0 +1,54 @@
+import torch
+from transformers import AutoModel, AutoTokenizer, AutoModelForCausalLM, AutoModelForSequenceClassification
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from core.config.config_manager import ConfigManager
+def get_device(device_str=None):
+    if device_str:
+        device = torch.device(device_str)
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    return device
+
+def load_models(cfg: "ConfigManager", device=None):
+    device = get_device(device)
+
+    model_cfg = cfg.get("model", {})
+    teacher_name = model_cfg["name"]
+    student_name = model_cfg.get("student_name", teacher_name)
+    model_type = model_cfg.get("type", "").lower()
+
+    if model_type == "causallm":
+        ModelClass = AutoModelForCausalLM
+        model_kwargs = {}
+    elif model_type in ["transformer", "sequenceclassification"]:
+        ModelClass = AutoModelForSequenceClassification
+        model_kwargs = {"num_labels": 2}
+    else:
+        ModelClass = AutoModel
+        model_kwargs = {}
+
+    print(f"Loading teacher model '{teacher_name}' with type '{model_type}' on device {device}")
+    teacher_model = ModelClass.from_pretrained(teacher_name, **model_kwargs)
+    teacher_model.to(device)
+
+    print(f"Loading student model '{student_name}' with type '{model_type}' on device {device}")
+    student_model = ModelClass.from_pretrained(student_name, **model_kwargs)
+    student_model.to(device)
+
+    tokenizer_name = cfg.get("tokenizer_name", teacher_name)
+    print(f"Loading tokenizer '{tokenizer_name}'")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    return teacher_model, student_model, tokenizer
+
+def model_summary(model):
+    name = getattr(model.config, "name_or_path", "unknown_model")
+    model_type = getattr(model.config, "model_type", "unknown_type")
+    param_count = sum(p.numel() for p in model.parameters())
+    device = next(model.parameters()).device
+    return {"name": name, "type": model_type, "parameters": param_count, "device": str(device)}

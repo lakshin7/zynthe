@@ -1,0 +1,22 @@
+# Core utilities
+tqdm
+matplotlib
+scikit-learn
+
+# CIFAR-10 dataset
+torchvision
+
+# Hugging Face ecosystem (model loading, distillation, quantization)
+transformers
+datasets
+accelerate
+peft
+optimum
+
+# Optional: LoRA and quantization tools
+bitsandbytes
+torch
+
+# For compatibility and stability
+scipy
+numpy

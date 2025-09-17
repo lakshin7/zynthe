@@ -1,0 +1,31 @@
+train:
+  epochs: 3
+  batch_size: 8        # small enough for M2 memory
+  lr: 5e-5
+  grad_accum_steps: 1
+  mixed_precision: false   # MPS prefers float32
+  early_stop_patience: 2   # stop if val_loss doesn't improve for 2 epochs
+
+model:
+  name: "distilbert-base-uncased"
+  type: "transformer"
+
+distillation:
+  method: "kd_hinton"
+  temperature: 2.0
+  alpha: 0.5
+
+data:
+  train_path: "data/sample_train.jsonl"
+  val_path: "data/sample_val.jsonl"
+
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+output_root: "experiments"
+seed: 42
+quantization:
+  enable: true
+  mode: ptq       # you can later switch to 'qat' if QAT is implemented
+similarity_transfer: true
