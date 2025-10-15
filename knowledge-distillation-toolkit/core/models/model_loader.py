@@ -15,19 +15,33 @@ def get_device(device_str=None):
     return device
 
 def load_models(cfg: "ConfigManager", device=None):
+    """Load teacher and student models based on ConfigManager.
+    
+    Args:
+        cfg: ConfigManager instance with resolved configuration
+        device: Target device (auto-detected if None)
+        
+    Returns:
+        tuple: (teacher_model, student_model, tokenizer)
+    """
     device = get_device(device)
 
     model_cfg = cfg.get("model", {})
-    teacher_name = model_cfg["name"]
-    student_name = model_cfg.get("student_name", teacher_name)
+    teacher_name = model_cfg.get("name")
+    student_name = model_cfg.get("student_name", teacher_name)  # Default to teacher if not specified
+    tokenizer_name = model_cfg.get("tokenizer_name", teacher_name)  # Default to teacher tokenizer
     model_type = model_cfg.get("type", "").lower()
 
+    if not teacher_name:
+        raise ValueError("Teacher model name must be specified in config.model.name")
+
+    # Determine model class based on type
     if model_type == "causallm":
         ModelClass = AutoModelForCausalLM
         model_kwargs = {}
     elif model_type in ["transformer", "sequenceclassification"]:
         ModelClass = AutoModelForSequenceClassification
-        model_kwargs = {"num_labels": 2}
+        model_kwargs = {"num_labels": 2}  # Binary classification by default
     else:
         ModelClass = AutoModel
         model_kwargs = {}
@@ -40,9 +54,12 @@ def load_models(cfg: "ConfigManager", device=None):
     student_model = ModelClass.from_pretrained(student_name, **model_kwargs)
     student_model.to(device)
 
-    tokenizer_name = cfg.get("tokenizer_name", teacher_name)
     print(f"Loading tokenizer '{tokenizer_name}'")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    
+    # Add padding token if not present (needed for some models)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
     return teacher_model, student_model, tokenizer
 

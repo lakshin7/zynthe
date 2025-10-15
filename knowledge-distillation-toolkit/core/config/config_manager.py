@@ -96,7 +96,7 @@ class ConfigManager:
 
     REQUIRED_SECTIONS = {
         "train": ["epochs", "batch_size", "lr"],
-        "model": ["name", "type"],
+        "model": ["name", "type"],  # student_name and tokenizer_name are optional with defaults
         "distillation": [],  # flexible, so no strict keys
         "data": ["train_path", "val_path"]
     }
@@ -116,6 +116,21 @@ class ConfigManager:
                 raise ConfigError(
                     f"Section '{section}' missing required keys: {missing_keys}"
                 )
+                
+        # Additional model configuration validation and defaults
+        model_cfg = self.raw_config.get("model", {})
+        
+        # Set student_name default if not specified
+        if "student_name" not in model_cfg:
+            model_cfg["student_name"] = model_cfg.get("name")
+            logger.info(f"student_name not specified, defaulting to teacher model: {model_cfg['student_name']}")
+            
+        # Set tokenizer_name default if not specified  
+        if "tokenizer_name" not in model_cfg:
+            model_cfg["tokenizer_name"] = model_cfg.get("name")
+            logger.info(f"tokenizer_name not specified, defaulting to teacher model: {model_cfg['tokenizer_name']}")
+            
+        self.raw_config["model"] = model_cfg
 
     def __init__(self,
                  config_path: Optional[str] = None,

@@ -1,0 +1,89 @@
+# Mac M2 optimized configuration for knowledge distillation
+# This config is specifically tuned for Mac M2 with 8GB unified memory
+# Models are chosen to be Mac M2-friendly while demonstrating knowledge distillation
+
+train:
+  epochs: 3                    # Quick training for testing
+  batch_size: 8                # Optimized for Mac M2 memory
+  lr: 5e-5                     # Conservative learning rate
+  grad_accum_steps: 2          # Effective batch size = 16
+  mixed_precision: false       # MPS stability (avoid AMP for now)
+  early_stop_patience: 2       # Stop if no improvement for 2 epochs
+  warmup_steps: 50            # Gentle learning rate warmup
+
+model:
+  # Teacher model: BERT-base (110M parameters, well-supported)
+  name: "bert-base-uncased"
+  
+  # Student model: DistilBERT (66M parameters, 40% smaller)
+  student_name: "distilbert-base-uncased"
+  
+  # Model type for sequence classification
+  type: "transformer"
+  
+  # Use teacher's tokenizer for consistency
+  tokenizer_name: "bert-base-uncased"
+  
+  # Model-specific optimizations
+  max_length: 128              # Shorter sequences for faster training
+  pad_to_max_length: true      # Consistent shapes for MPS
+
+distillation:
+  method: "kd_hinton"          # Start with classic knowledge distillation
+  temperature: 2.0             # Softmax temperature for soft targets
+  alpha: 0.5                  # Balance: 50% hard labels, 50% soft targets
+
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+  
+  # Preprocessing optimizations
+  preprocessing:
+    max_examples: 5000         # Limit dataset size for faster iteration
+    cache_tokenization: true   # Cache tokenized data
+    
+device:
+  prefer_mps: true             # Use Apple Silicon GPU
+  prefer_cuda: false           # Not available on Mac
+  fallback_cpu: true           # Automatic fallback if MPS has issues
+  
+  # Mac M2 memory management
+  memory_management:
+    enable: true
+    max_memory_gb: 6           # Leave 2GB for macOS (out of 8GB total)
+    gradient_checkpointing: false  # Keep disabled for speed (we have enough memory)
+    clear_cache_every_epoch: true  # Clear MPS cache between epochs
+
+# Output configuration
+output_root: "experiments"
+seed: 42                       # Reproducible results
+
+# Quantization (post-training)
+quantization:
+  enable: true
+  mode: "float16"              # MPS-compatible (better than int8 on MPS)
+  
+  # Post-training quantization settings
+  ptq:
+    calibration_samples: 64    # Small calibration set for speed
+
+# Similarity transfer (lightweight additional technique)
+similarity_transfer: 
+  enable: true
+  weight: 0.1                  # Light weight to avoid overwhelming main loss
+
+# Evaluation settings
+evaluate:
+  enable: true
+  metrics: ["accuracy", "f1"]  # Essential metrics
+  save_predictions: false      # Save space
+
+# Experiment tracking
+experiment:
+  save_checkpoints: false      # Save space, disable checkpointing
+  log_level: "INFO"
+  
+# Performance monitoring
+performance:
+  profile_memory: false        # Disable profiling for speed
+  log_timing: true            # Log timing information

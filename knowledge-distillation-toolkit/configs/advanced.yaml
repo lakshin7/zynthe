@@ -1,0 +1,131 @@
+# Advanced configuration for knowledge distillation on Mac M2
+# This configuration uses larger models but should still run on Mac M2 with adequate memory
+
+train:
+  epochs: 5                    # More epochs for better convergence
+  batch_size: 4                # Smaller batch size for larger models
+  lr: 3e-5                     # Lower learning rate for fine-tuning
+  grad_accum_steps: 2          # Effective batch size = 4 * 2 = 8
+  mixed_precision: false       # MPS doesn't support float16 well yet
+  early_stop_patience: 3       # More patience for larger models
+  warmup_steps: 100           # Gradual learning rate warmup
+  weight_decay: 0.01          # L2 regularization
+  max_grad_norm: 1.0          # Gradient clipping
+
+model:
+  # Teacher model (larger, state-of-the-art)
+  name: "microsoft/DialoGPT-medium"           # Teacher: DialoGPT-medium (117M params)
+  # Student model (smaller, efficient)  
+  student_name: "microsoft/DialoGPT-small"   # Student: DialoGPT-small (117M params)
+  type: "causallm"                           # Causal language models
+  # Alternative pairing for sequence classification:
+  # name: "roberta-base"                     # Teacher: RoBERTa-base (125M params)
+  # student_name: "distilroberta-base"       # Student: DistilRoBERTa (82M params)
+  # type: "transformer"
+  
+  # Tokenizer configuration
+  tokenizer_name: "microsoft/DialoGPT-medium"  # Use teacher's tokenizer
+  
+  # Model-specific settings
+  max_length: 256              # Maximum sequence length
+  pad_to_max_length: true      # Consistent input shapes for MPS
+
+distillation:
+  method: "multi_stage"        # Use multiple distillation strategies
+  strategies:
+    - name: "kd_hinton"        # Traditional knowledge distillation
+      temperature: 4.0         # Higher temperature for softer targets
+      alpha: 0.7              # More weight on distillation loss
+    - name: "attention_transfer"  # Attention mechanism transfer
+      beta: 1e-3              # Weight for attention transfer loss
+    - name: "similarity_transfer"  # Hidden state similarity
+      gamma: 2e-3             # Weight for similarity loss
+  
+  # Progressive distillation
+  progressive:
+    enable: true
+    stages: 3                  # Number of progressive stages
+    stage_epochs: [2, 2, 1]    # Epochs per stage
+
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+  
+  # Data augmentation
+  augmentation:
+    enable: true
+    techniques: ["synonym_replacement", "random_deletion"]
+    probability: 0.1
+  
+  # Advanced preprocessing
+  preprocessing:
+    lowercase: true
+    remove_special_chars: false
+    max_examples: 10000        # Limit for faster training on Mac M2
+
+device:
+  prefer_mps: true             # Use Apple Silicon GPU
+  prefer_cuda: false           # Not available on Mac
+  fallback_cpu: true           # Fallback if MPS fails
+  
+  # Memory management for Mac M2
+  memory_management:
+    enable: true
+    max_memory_gb: 8           # Conservative memory limit
+    gradient_checkpointing: true  # Trade compute for memory
+
+output_root: "experiments"
+seed: 42
+
+# Advanced quantization settings
+quantization:
+  enable: true
+  mode: "float16"              # Float16 works better on MPS than int8
+  
+  # Post-training quantization
+  ptq:
+    calibration_samples: 128   # Samples for calibration
+    quantization_approach: "static"  # Static quantization
+  
+  # Quantization-aware training (experimental)
+  qat:
+    enable: false              # Disable for now, experimental on MPS
+    fake_quant: true
+    observer: "histogram"
+
+# Enhanced similarity transfer
+similarity_transfer: 
+  enable: true
+  layers: ["attention", "intermediate", "output"]  # Which layers to align
+  similarity_metric: "cosine"  # cosine, mse, or kl_div
+  weight: 0.5
+
+# Evaluation settings
+evaluate:
+  enable: true
+  metrics: ["accuracy", "f1", "precision", "recall", "auc"]
+  save_predictions: true
+  confusion_matrix: true
+
+# Experiment tracking
+experiment:
+  save_checkpoints: true
+  checkpoint_every: 1          # Save every epoch
+  keep_last_n: 3              # Keep only last 3 checkpoints
+  
+  # Logging
+  log_level: "INFO"
+  wandb:
+    enable: false              # Set to true if you have W&B account
+    project: "knowledge-distillation"
+    tags: ["mac-m2", "advanced"]
+
+# Export settings
+export:
+  formats: ["pytorch", "onnx"]  # Export formats after training
+  optimize_for_inference: true
+  
+  # ONNX specific
+  onnx:
+    opset_version: 11
+    dynamic_axes: true

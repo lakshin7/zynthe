@@ -45,6 +45,42 @@ def parse_args():
     )
     return parser.parse_args()
 
+def parse_overrides(override_list):
+    """Convert list of KEY=VALUE strings to nested dictionary."""
+    overrides = {}
+    for override in override_list:
+        if '=' not in override:
+            print(f"WARNING: Invalid override format '{override}', expected KEY=VALUE")
+            continue
+        
+        key, value = override.split('=', 1)
+        
+        # Try to parse value as appropriate type
+        try:
+            # Try int first
+            if '.' not in value and value.isdigit():
+                value = int(value)
+            # Try float
+            elif value.replace('.', '').replace('-', '').isdigit():
+                value = float(value)
+            # Try boolean
+            elif value.lower() in ('true', 'false'):
+                value = value.lower() == 'true'
+        except ValueError:
+            # Keep as string if parsing fails
+            pass
+        
+        # Handle nested keys like "train.epochs" 
+        keys = key.split('.')
+        current = overrides
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+        current[keys[-1]] = value
+    
+    return overrides
+
 
 from pathlib import Path
 from core.config.config_manager import ConfigManager
@@ -175,9 +211,12 @@ def main():
     args = parse_args()
 
     try:
+        # Parse overrides from command line arguments
+        overrides_dict = parse_overrides(args.override)
+        
         cfg_manager = ConfigManager(
             config_path=args.config,
-            overrides=args.override
+            overrides=overrides_dict
         )
         print("✅ Config loaded successfully")
         print("Experiment ID:", cfg_manager.experiment_id)

@@ -6,6 +6,7 @@ from core.distillers.multi_stage_distiller import MultiStageDistiller
 import torch
 from torch.optim import AdamW
 import os
+import inspect
 
 class Trainer:
     def __init__(self, teacher, student, tokenizer, config, device, experiment_dir):
@@ -34,6 +35,34 @@ class Trainer:
         self.no_improve_epochs = 0
         self.last_preds = []
         self.last_labels = []
+        
+        # Cache model forward signatures for efficient parameter filtering
+        self._teacher_forward_params = self._get_forward_params(self.teacher)
+        self._student_forward_params = self._get_forward_params(self.student)
+
+    def _get_forward_params(self, model):
+        """Get the parameter names accepted by the model's forward method."""
+        try:
+            forward_signature = inspect.signature(model.forward)
+            return set(forward_signature.parameters.keys())
+        except Exception:
+            # Fallback: assume standard transformer parameters
+            return {'input_ids', 'attention_mask', 'labels'}
+    
+    def _filter_batch_for_model(self, batch, model_params):
+        """Filter batch to only include parameters accepted by the model."""
+        filtered_batch = {}
+        for key, value in batch.items():
+            if key in model_params:
+                filtered_batch[key] = value
+            else:
+                # Log first few times to help debug, then suppress
+                if not hasattr(self, '_param_warnings'):
+                    self._param_warnings = set()
+                if key not in self._param_warnings:
+                    print(f"[DEBUG] Parameter '{key}' not supported by model, filtering out")
+                    self._param_warnings.add(key)
+        return filtered_batch
 
     def train_epoch(self, dataloader):
         self.student.train()
@@ -49,14 +78,19 @@ class Trainer:
             except Exception as e:
                 print(f"[WARNING] Failed to move batch to device at index {batch_idx}: {e}")
                 continue
+            
+            # Filter batch for each model's specific requirements
+            teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
+            student_batch = self._filter_batch_for_model(batch, self._student_forward_params)
+            
             with torch.no_grad():
                 try:
-                    teacher_outputs = self.teacher(**batch)
+                    teacher_outputs = self.teacher(**teacher_batch)
                 except Exception as e:
                     print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
                     continue
             try:
-                student_outputs = self.student(**batch)
+                student_outputs = self.student(**student_batch)
             except Exception as e:
                 print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
                 continue
@@ -102,13 +136,18 @@ class Trainer:
                 except Exception as e:
                     print(f"[WARNING] Failed to move batch to device at index {batch_idx} during evaluation: {e}")
                     continue
+                
+                # Filter batch for each model's specific requirements
+                teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
+                student_batch = self._filter_batch_for_model(batch, self._student_forward_params)
+                
                 try:
-                    teacher_outputs = self.teacher(**batch)
+                    teacher_outputs = self.teacher(**teacher_batch)
                 except Exception as e:
                     print(f"[WARNING] Teacher forward pass failed at batch {batch_idx} during evaluation: {e}")
                     continue
                 try:
-                    student_outputs = self.student(**batch)
+                    student_outputs = self.student(**student_batch)
                 except Exception as e:
                     print(f"[WARNING] Student forward pass failed at batch {batch_idx} during evaluation: {e}")
                     continue
@@ -191,10 +230,18 @@ class Trainer:
         if self.best_model_state:
             self.student.load_state_dict(self.best_model_state)
             print('[INFO] Restored best model before saving.')
+            
+            # Save student model
             student_save_dir = os.path.join(self.experiment_dir, 'student_model')
             self.student.save_pretrained(student_save_dir)
             self.tokenizer.save_pretrained(student_save_dir)
             print(f'[INFO] Student model and tokenizer saved to {student_save_dir}')
+            
+            # Save teacher model for comparison
+            teacher_save_dir = os.path.join(self.experiment_dir, 'teacher_model')
+            self.teacher.save_pretrained(teacher_save_dir)
+            self.tokenizer.save_pretrained(teacher_save_dir)
+            print(f'[INFO] Teacher model and tokenizer saved to {teacher_save_dir}')
         else:
             print('[WARNING] No best model state found to restore.')
 

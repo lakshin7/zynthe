@@ -1,19 +1,25 @@
 train:
   epochs: 3                   # low for fast testing
   batch_size: 8               # fits Mac M2 memory
-  lr: 5e-5
+  lr: 2e-5                   # reduced learning rate for better convergence
   grad_accum_steps: 1
   mixed_precision: false       # MPS prefers float32
   early_stop_patience: 2       # stops if val_loss doesn't improve for 2 epochs
 
 model:
-  name: "distilbert-base-uncased"
-  type: "transformer"
+  # Teacher model (larger, more capable)
+  name: "bert-base-uncased"                    # Teacher: BERT-base (110M params)
+  # Student model (smaller, faster)
+  student_name: "distilbert-base-uncased"      # Student: DistilBERT (66M params, ~40% smaller)
+  type: "transformer"                          # Both are sequence classification transformers
+  # Tokenizer to use - use DistilBERT's tokenizer for better compatibility
+  tokenizer_name: "distilbert-base-uncased"   # DistilBERT tokenizer (no token_type_ids)
+  max_length: 128                             # Maximum sequence length
 
 distillation:
   method: "kd_hinton"
-  temperature: 2.0
-  alpha: 0.5
+  temperature: 1.5            # reduced temperature for sharper predictions
+  alpha: 0.4                  # slightly more weight on ground truth labels
 
 data:
   train_path: "data/imdb_train.jsonl"   # after splitting the downloaded CSV
