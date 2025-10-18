@@ -32,13 +32,38 @@ ls experiments/$(ls experiments/ | tail -1)/
 # config.yaml  student_model/  teacher_model/  training_metrics.json  evaluation_report.json
 ```
 
-### 4. Compare Teacher vs Student
+### 4. Review Automatic Comparison (NEW! ✨)
 ```bash
-# Run comprehensive comparison
-python examples/compare_teacher_student.py
+# Comparison runs automatically! Check the comparison directory
+cd experiments/$(ls -t experiments/ | head -1)/comparison/
+
+# View the markdown report
+cat COMPARISON_REPORT.md
+
+# Or open visualizations
+open metrics_comparison.png
+open confusion_matrices_comparison.png
+open final_report.pdf
+```
+
+**What you get:**
+- 📊 Side-by-side metrics comparison
+- 🎯 Confusion matrix analysis
+- 📈 Per-class performance breakdown
+- ⚡ Latency and efficiency benchmarks
+- 📄 Comprehensive PDF report
+- 💾 JSON metrics for further analysis
+
+### 5. Manual Comparison (Optional)
+```bash
+# Run comprehensive comparison on existing models
+python examples/compare_teacher_student.py --exp experiments/YOUR_EXP_ID
 
 # Or use the interactive notebook
 jupyter notebook examples/Teacher_vs_Student_Comparison.ipynb
+
+# Quick test on latest experiment
+python test_comparison.py --exp experiments/$(ls -t experiments | head -1)
 ```
 
 ## 🏗️ What You Get

@@ -41,7 +41,13 @@ def load_models(cfg: "ConfigManager", device=None):
         model_kwargs = {}
     elif model_type in ["transformer", "sequenceclassification"]:
         ModelClass = AutoModelForSequenceClassification
-        model_kwargs = {"num_labels": 2}  # Binary classification by default
+        # Binary classification by default with explicit label mappings
+        # This ensures the model's classifier head aligns with dataset labels
+        model_kwargs = {
+            "num_labels": 2,
+            "label2id": {"negative": 0, "positive": 1},
+            "id2label": {0: "negative", 1: "positive"}
+        }
     else:
         ModelClass = AutoModel
         model_kwargs = {}

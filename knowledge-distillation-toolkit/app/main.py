@@ -5,9 +5,15 @@ import importlib
 import logging
 from pathlib import Path
 import sys
+import os
 import typer
-
 import argparse
+
+# Add project root to sys.path to enable imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from core.config.config_manager import ConfigManager, ConfigError
 
 # Import model loader and summary utilities
@@ -18,8 +24,6 @@ try:
     from rich import print as rprint
 except Exception:
     rprint = print
-
-from core.config.config_manager import ConfigManager
 
 app = typer.Typer(name="zyn", help="Zynthe / Knowledge-distillation Toolkit CLI")
 
@@ -284,6 +288,85 @@ def main():
             except Exception as e:
                 LOG.exception("Evaluation after training failed: %s", e)
                 rprint("[red]Evaluation after training failed — check logs for details.[/red]")
+
+        # --- Teacher vs Student Comparison ---
+        comparison_enabled = cfg_manager.resolved_config.get("compare_models", True)
+        if comparison_enabled:
+            try:
+                from evaluation.model_comparison import ModelComparator
+                from pathlib import Path
+                
+                # Paths to saved models
+                teacher_path = Path(cfg_manager.experiment_dir) / "teacher_model"
+                student_path = Path(cfg_manager.experiment_dir) / "student_model"
+                comparison_dir = Path(cfg_manager.experiment_dir) / "comparison"
+                
+                if teacher_path.exists() and student_path.exists():
+                    rprint("\n" + "="*70)
+                    rprint("[bold cyan]🎯 TEACHER vs STUDENT COMPARISON[/bold cyan]")
+                    rprint("="*70)
+                    
+                    # Initialize comparator
+                    comparator = ModelComparator(
+                        teacher_path=str(teacher_path),
+                        student_path=str(student_path),
+                        device=str(cfg_manager.device()),
+                        use_same_tokenizer=True  # Use same tokenizer for fair comparison
+                    )
+                    
+                    # Run comparison
+                    rprint("\n[bold blue]📊 Running model comparison...[/bold blue]")
+                    teacher_results, student_results = comparator.compare_models(val_loader)
+                    
+                    # Generate visualizations
+                    rprint("\n[bold blue]📈 Generating comparison visualizations...[/bold blue]")
+                    comparator.visualize_comparison(
+                        teacher_results,
+                        student_results,
+                        save_dir=str(comparison_dir),
+                        show_plots=False
+                    )
+                    
+                    # Save results
+                    rprint("\n[bold blue]💾 Saving comparison results...[/bold blue]")
+                    comparator.save_results(
+                        teacher_results,
+                        student_results,
+                        save_dir=str(comparison_dir)
+                    )
+                    
+                    # Generate comprehensive report
+                    rprint("\n[bold blue]📄 Generating comparison report...[/bold blue]")
+                    comparator.generate_report(
+                        teacher_results,
+                        student_results,
+                        save_dir=str(comparison_dir)
+                    )
+                    
+                    # Print summary
+                    rprint("\n" + "="*70)
+                    rprint("[bold green]✅ COMPARISON SUMMARY[/bold green]")
+                    rprint("="*70)
+                    rprint(f"[bold]Teacher Accuracy:[/bold]  {teacher_results['accuracy']:.4f}")
+                    rprint(f"[bold]Student Accuracy:[/bold]  {student_results['accuracy']:.4f}")
+                    rprint(f"[bold]Accuracy Drop:[/bold]     {(teacher_results['accuracy'] - student_results['accuracy']):.4f}")
+                    rprint(f"[bold]Compression Ratio:[/bold] {comparator.compression_ratio:.2f}x smaller")
+                    rprint(f"[bold]Teacher Params:[/bold]    {comparator.teacher_params:,}")
+                    rprint(f"[bold]Student Params:[/bold]    {comparator.student_params:,}")
+                    rprint(f"\n[bold cyan]📁 Comparison results saved to:[/bold cyan] {comparison_dir}")
+                    rprint("="*70)
+                else:
+                    rprint("[yellow]⚠️  Teacher or Student model not found. Skipping comparison.[/yellow]")
+                    if not teacher_path.exists():
+                        rprint(f"[yellow]   Missing: {teacher_path}[/yellow]")
+                    if not student_path.exists():
+                        rprint(f"[yellow]   Missing: {student_path}[/yellow]")
+                        
+            except Exception as e:
+                LOG.exception("Model comparison failed: %s", e)
+                rprint("[red]❌ Model comparison failed — check logs for details.[/red]")
+                import traceback
+                rprint(f"[red]{traceback.format_exc()}[/red]")
 
     except ConfigError as e:
         print("❌ Config error:", e)

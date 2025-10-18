@@ -138,7 +138,11 @@ class ConfigManager:
                  overrides: Optional[Dict[str, Any]] = None,
                  experiments_root: str = "experiments"):
         self.config_path = config_path
-        self.defaults_path = defaults_path or os.path.join(os.path.dirname(__file__), _DEFAULTS_FILENAME)
+        # Look for default.yaml in configs/ directory (2 levels up from core/config/)
+        if defaults_path is None:
+            config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "configs"))
+            defaults_path = os.path.join(config_dir, _DEFAULTS_FILENAME)
+        self.defaults_path = defaults_path
         self.overrides = overrides or {}
         self.experiments_root = experiments_root
 
@@ -160,14 +164,21 @@ class ConfigManager:
         if os.path.exists(self.defaults_path):
             try:
                 defaults = _safe_load_yaml(self.defaults_path)
+                logger.info(f"Loaded default config from: {self.defaults_path}")
             except Exception as e:
                 raise ConfigError(f"Failed to load defaults from {self.defaults_path}: {e}")
+        else:
+            logger.warning(f"Default config not found at: {self.defaults_path}, using minimal defaults")
 
         user_cfg = {}
         if self.config_path:
             if not os.path.exists(self.config_path):
                 raise ConfigError(f"Config file not found: {self.config_path}")
-            user_cfg = _safe_load_yaml(self.config_path)
+            try:
+                user_cfg = _safe_load_yaml(self.config_path)
+                logger.info(f"Loaded user config from: {self.config_path}")
+            except Exception as e:
+                raise ConfigError(f"Failed to load user config from {self.config_path}: {e}")
 
         merged = _deep_update(defaults.copy(), user_cfg)
         merged = _deep_update(merged, self.overrides or {})
@@ -203,6 +214,7 @@ class ConfigManager:
             "lr": 5e-5,
             "grad_accum_steps": 1,
             "mixed_precision": False if resolved_device == "mps" else True,
+            "early_stop_patience": 2,
         }
 
         train_cfg = self.raw_config.get("train", {})
@@ -212,6 +224,7 @@ class ConfigManager:
         merged_train["epochs"] = int(merged_train.get("epochs", 3))
         merged_train["batch_size"] = int(merged_train.get("batch_size", 8))
         merged_train["grad_accum_steps"] = int(merged_train.get("grad_accum_steps", 1))
+        merged_train["early_stop_patience"] = int(merged_train.get("early_stop_patience", 2))
         merged_train["mixed_precision"] = bool(merged_train.get("mixed_precision", False))
         merged_train["lr"] = float(merged_train.get("lr", 5e-5))
 
@@ -225,10 +238,23 @@ class ConfigManager:
         }
         merged_explain = _deep_update(default_explain, explain_cfg)
 
+        # quantization defaults
+        quant_cfg = self.raw_config.get("quantization", {})
+        default_quant = {
+            "enable": False,
+            "mode": "ptq",  # ptq or qat
+        }
+        merged_quant = _deep_update(default_quant, quant_cfg)
+
+        # similarity transfer default
+        similarity_transfer = bool(self.raw_config.get("similarity_transfer", False))
+
         # final resolved config
         self.resolved_config = dict(self.raw_config)  # shallow copy
         self.resolved_config["train"] = merged_train
         self.resolved_config["explainability"] = merged_explain
+        self.resolved_config["quantization"] = merged_quant
+        self.resolved_config["similarity_transfer"] = similarity_transfer
         self.resolved_config.setdefault("runtime", {})
         self.resolved_config["runtime"]["device"] = resolved_device
 
@@ -338,3 +364,50 @@ class ConfigManager:
         if dev == "mps":
             return torch.device("mps")
         return torch.device("cpu")
+    
+    def get_nested(self, *keys, default: Any = None) -> Any:
+        """
+        Safely get nested config values using dot notation.
+        
+        Example:
+            cfg.get_nested("model", "name") -> returns cfg["model"]["name"]
+            cfg.get_nested("train", "lr", default=1e-5)
+        """
+        current = self.resolved_config
+        for key in keys:
+            if isinstance(current, dict):
+                current = current.get(key)
+                if current is None:
+                    return default
+            else:
+                return default
+        return current if current is not None else default
+    
+    def validate_required_paths(self):
+        """
+        Validate that required data paths exist.
+        """
+        train_path = self.get_nested("data", "train_path")
+        val_path = self.get_nested("data", "val_path")
+        
+        missing = []
+        if train_path and not os.path.exists(train_path):
+            missing.append(f"Training data: {train_path}")
+        if val_path and not os.path.exists(val_path):
+            missing.append(f"Validation data: {val_path}")
+        
+        if missing:
+            raise ConfigError(f"Missing required data files:\n" + "\n".join(f"  - {m}" for m in missing))
+        
+        logger.info("All required data paths validated successfully")
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return (
+            f"ConfigManager(\n"
+            f"  experiment_id={self.experiment_id},\n"
+            f"  device={self.get_runtime().get('device', 'unknown')},\n"
+            f"  config_path={self.config_path},\n"
+            f"  defaults_path={self.defaults_path}\n"
+            f")"
+        )

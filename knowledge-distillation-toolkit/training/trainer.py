@@ -17,6 +17,8 @@ class Trainer:
         self.device = device
         self.experiment_dir = experiment_dir
         self.optimizer = AdamW(self.student.parameters(), lr=self.config['train'].get('lr', 5e-5))
+        # Create separate optimizer for teacher fine-tuning
+        self.teacher_optimizer = AdamW(self.teacher.parameters(), lr=self.config['train'].get('lr', 5e-5))
         distil_cfg = self.config['distillation']
         # Currently using MultiStageDistiller, future: can select dynamically
         self.distiller = MultiStageDistiller(
@@ -31,6 +33,8 @@ class Trainer:
         self.metrics_history = {'accuracy': [], 'f1': [], 'precision': [], 'recall': []}
         self.best_val_loss = float('inf')
         self.best_model_state = None
+        self.best_teacher_state = None
+        self.best_teacher_loss = float('inf')
         self.early_stop_patience = self.config['train'].get('early_stop_patience', 2)
         self.no_improve_epochs = 0
         self.last_preds = []
@@ -63,6 +67,119 @@ class Trainer:
                     print(f"[DEBUG] Parameter '{key}' not supported by model, filtering out")
                     self._param_warnings.add(key)
         return filtered_batch
+
+    def finetune_teacher(self, dataloader, val_loader, epochs=None):
+        """
+        Fine-tune the teacher model on the task before distillation.
+        This ensures the teacher has good performance to transfer knowledge.
+        """
+        if epochs is None:
+            epochs = self.config['train'].get('teacher_epochs', 2)
+        
+        print(f"\n{'='*70}")
+        print(f"👨‍🏫 FINE-TUNING TEACHER MODEL ({epochs} epochs)")
+        print(f"{'='*70}\n")
+        
+        self.teacher.train()
+        teacher_train_losses = []
+        teacher_val_losses = []
+        best_teacher_loss = float('inf')
+        best_teacher_state = None
+        
+        for epoch in range(epochs):
+            print(f"[TEACHER] Starting epoch {epoch+1}/{epochs}")
+            
+            # Training
+            self.teacher.train()
+            total_loss = 0.0
+            num_batches = 0
+            
+            for batch_idx, batch in enumerate(dataloader):
+                if not batch or not isinstance(batch, dict):
+                    continue
+                    
+                try:
+                    batch = {k: v.to(self.device) for k, v in batch.items() if hasattr(v, 'to')}
+                except Exception as e:
+                    print(f"[WARNING] Failed to move batch to device: {e}")
+                    continue
+                
+                teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
+                
+                try:
+                    outputs = self.teacher(**teacher_batch)
+                    loss = outputs.loss
+                    
+                    self.teacher_optimizer.zero_grad()
+                    loss.backward()
+                    self.teacher_optimizer.step()
+                    
+                    total_loss += loss.item()
+                    num_batches += 1
+                    
+                except Exception as e:
+                    print(f"[WARNING] Teacher training failed at batch {batch_idx}: {e}")
+                    continue
+            
+            avg_train_loss = total_loss / max(num_batches, 1)
+            teacher_train_losses.append(avg_train_loss)
+            
+            # Validation
+            self.teacher.eval()
+            val_loss = 0.0
+            val_batches = 0
+            all_preds = []
+            all_labels = []
+            
+            with torch.no_grad():
+                for batch in val_loader:
+                    if not batch or not isinstance(batch, dict):
+                        continue
+                    
+                    try:
+                        batch = {k: v.to(self.device) for k, v in batch.items() if hasattr(v, 'to')}
+                        teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
+                        
+                        outputs = self.teacher(**teacher_batch)
+                        val_loss += outputs.loss.item()
+                        val_batches += 1
+                        
+                        # Collect predictions
+                        preds = torch.argmax(outputs.logits, dim=-1)
+                        all_preds.extend(preds.cpu().numpy().tolist())
+                        all_labels.extend(batch['labels'].cpu().numpy().tolist())
+                        
+                    except Exception as e:
+                        continue
+            
+            avg_val_loss = val_loss / max(val_batches, 1)
+            teacher_val_losses.append(avg_val_loss)
+            
+            # Compute metrics
+            metrics = {}
+            if all_preds and all_labels:
+                try:
+                    metrics = compute_all_metrics(all_preds, all_labels)
+                except Exception:
+                    pass
+            
+            print(f"[TEACHER] Epoch {epoch+1}: Train Loss={avg_train_loss:.4f}, "
+                  f"Val Loss={avg_val_loss:.4f}, Accuracy={metrics.get('accuracy', 0):.4f}")
+            
+            # Save best teacher
+            if avg_val_loss < best_teacher_loss:
+                best_teacher_loss = avg_val_loss
+                best_teacher_state = copy.deepcopy(self.teacher.state_dict())
+                print(f"[TEACHER] New best validation loss: {avg_val_loss:.4f}")
+        
+        # Restore best teacher
+        if best_teacher_state:
+            self.teacher.load_state_dict(best_teacher_state)
+            self.best_teacher_state = best_teacher_state
+            self.best_teacher_loss = best_teacher_loss
+            print(f"\n[TEACHER] ✅ Fine-tuning complete! Best val loss: {best_teacher_loss:.4f}\n")
+        
+        return teacher_train_losses, teacher_val_losses
 
     def train_epoch(self, dataloader):
         self.student.train()
@@ -191,9 +308,31 @@ class Trainer:
         return avg_loss, metrics
 
     def fit(self, train_loader, val_loader):
+        """
+        Complete training pipeline:
+        1. Fine-tune teacher model
+        2. Distill knowledge to student model
+        """
+        # Step 1: Fine-tune teacher
+        finetune_teacher = self.config.get('train', {}).get('finetune_teacher', True)
+        teacher_epochs = self.config.get('train', {}).get('teacher_epochs', 2)
+        
+        if finetune_teacher:
+            print("\n" + "="*70)
+            print("PHASE 1: TEACHER FINE-TUNING")
+            print("="*70)
+            self.finetune_teacher(train_loader, val_loader, epochs=teacher_epochs)
+        else:
+            print("\n[INFO] Skipping teacher fine-tuning (finetune_teacher=False)")
+        
+        # Step 2: Distillation
+        print("\n" + "="*70)
+        print("PHASE 2: KNOWLEDGE DISTILLATION")
+        print("="*70 + "\n")
+        
         metrics_history = []
         epochs = self.config['train']['epochs']
-        print(f"[INFO] Training started for {epochs} epochs.")
+        print(f"[INFO] Starting distillation for {epochs} epochs.")
         for epoch in range(epochs):
             print(f"[INFO] Starting epoch {epoch+1}/{epochs}")
             train_loss = self.train_epoch(train_loader)
@@ -229,19 +368,23 @@ class Trainer:
         # Restore best model and save
         if self.best_model_state:
             self.student.load_state_dict(self.best_model_state)
-            print('[INFO] Restored best model before saving.')
+            print('[INFO] Restored best student model before saving.')
             
             # Save student model
             student_save_dir = os.path.join(self.experiment_dir, 'student_model')
             self.student.save_pretrained(student_save_dir)
             self.tokenizer.save_pretrained(student_save_dir)
-            print(f'[INFO] Student model and tokenizer saved to {student_save_dir}')
+            print(f'[INFO] ✅ Student model and tokenizer saved to {student_save_dir}')
             
-            # Save teacher model for comparison
+            # Save fine-tuned teacher model for comparison
             teacher_save_dir = os.path.join(self.experiment_dir, 'teacher_model')
+            # Restore best teacher state if available
+            if self.best_teacher_state:
+                self.teacher.load_state_dict(self.best_teacher_state)
+                print(f'[INFO] Restored best teacher model (val_loss={self.best_teacher_loss:.4f})')
             self.teacher.save_pretrained(teacher_save_dir)
             self.tokenizer.save_pretrained(teacher_save_dir)
-            print(f'[INFO] Teacher model and tokenizer saved to {teacher_save_dir}')
+            print(f'[INFO] ✅ Teacher model and tokenizer saved to {teacher_save_dir}')
         else:
             print('[WARNING] No best model state found to restore.')
 

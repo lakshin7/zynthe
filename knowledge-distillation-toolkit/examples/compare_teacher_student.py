@@ -6,20 +6,33 @@ Run comprehensive comparison between trained teacher and student models.
 import sys
 import os
 from pathlib import Path
+import argparse
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
-from data.dataloaders import get_imdb_dataloaders
+from data.dataloaders import get_imdb_dataloaders, JsonlDataset
+from torch.utils.data import DataLoader
 from evaluation.model_comparison import ModelComparator
 
 
 def main():
     """Run teacher vs student comparison."""
-    
-    # Configuration
-    EXPERIMENT_DIR = "experiments/20250926T052444Z_ba9f0508"  # Latest experiment
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exp", dest="experiment_dir", type=str, required=True,
+                        help="Path to experiment directory (e.g., experiments/20251015T064334Z_79be4fb2)")
+    parser.add_argument(
+        "--tokenizer-mode",
+        choices=["separate", "student", "teacher"],
+        default="separate",
+        help="Which tokenizer(s) to use for evaluation: separate (recommended), or force student/teacher for both."
+    )
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--max-length", type=int, default=128)
+    args = parser.parse_args()
+
+    EXPERIMENT_DIR = args.experiment_dir
     TEACHER_PATH = f"{EXPERIMENT_DIR}/teacher_model"
     STUDENT_PATH = f"{EXPERIMENT_DIR}/student_model"
     OUTPUT_DIR = f"{EXPERIMENT_DIR}/comparison"
@@ -61,29 +74,53 @@ def main():
         teacher_path=TEACHER_PATH,
         student_path=STUDENT_PATH,
         device=device,
-        use_same_tokenizer=True
+        use_same_tokenizer=False  # always load both to allow flexible evaluation
     )
     
     # Load dataset
     print("\n" + "-"*60)
     print("📚 Loading evaluation dataset...")
     
+    VAL_PATH = "data/imdb_val.jsonl"
     try:
-        train_loader, val_loader = get_imdb_dataloaders(
-            train_path="data/imdb_train.jsonl",
-            val_path="data/imdb_val.jsonl",
-            tokenizer=comparator.tokenizer,
-            batch_size=8,
-            max_length=128
-        )
-        print(f"✅ Loaded validation set: {len(val_loader.dataset)} samples")
+        if args.tokenizer_mode == "separate":
+            print("🔀 Using separate tokenizers for teacher and student (recommended).")
+            teacher_val_loader = DataLoader(
+                JsonlDataset(VAL_PATH, comparator.teacher_tokenizer, max_length=args.max_length),
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=False,
+            )
+            student_val_loader = DataLoader(
+                JsonlDataset(VAL_PATH, comparator.student_tokenizer, max_length=args.max_length),
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=False,
+            )
+            print(f"✅ Loaded validation set: {len(student_val_loader.dataset)} samples")
+        else:
+            chosen = comparator.student_tokenizer if args.tokenizer_mode == "student" else comparator.teacher_tokenizer
+            print(f"🔁 Using {args.tokenizer_mode} tokenizer for BOTH models (may skew results).")
+            _, val_loader = get_imdb_dataloaders(
+                train_path="data/imdb_train.jsonl",
+                val_path=VAL_PATH,
+                tokenizer=chosen,
+                batch_size=args.batch_size,
+                max_length=args.max_length,
+            )
+            print(f"✅ Loaded validation set: {len(val_loader.dataset)} samples")
     except Exception as e:
         print(f"❌ Error loading dataset: {e}")
         return
     
     # Run comparison
     print("\n" + "-"*60)
-    teacher_results, student_results = comparator.compare_models(val_loader)
+    if args.tokenizer_mode == "separate":
+        teacher_results, student_results = comparator.compare_models_dual_loaders(teacher_val_loader, student_val_loader)
+    else:
+        teacher_results, student_results = comparator.compare_models(val_loader)
     
     # Generate visualizations
     print("\n" + "-"*60)
@@ -97,6 +134,13 @@ def main():
     # Save results
     print("\n" + "-"*60)
     comparator.save_results(
+        teacher_results,
+        student_results,
+        save_dir=OUTPUT_DIR
+    )
+
+    # Export expected artifacts (latency CSV, metrics JSON, compression summary, final_report.pdf)
+    comparator.export_expected_artifacts(
         teacher_results,
         student_results,
         save_dir=OUTPUT_DIR
