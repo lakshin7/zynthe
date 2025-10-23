@@ -42,7 +42,9 @@ def apply_ptq(model, device, dtype=torch.qint8, mode=None):
     Returns:
         The quantized model.
     """
-    is_mps = device.lower() == "mps" and getattr(torch.backends, "mps", None) is not None
+    # Handle device as string or torch.device object
+    device_str = str(device).lower() if isinstance(device, torch.device) else device.lower()
+    is_mps = device_str == "mps" and getattr(torch.backends, "mps", None) is not None
 
     if mode is None:
         print("Select quantization mode:")

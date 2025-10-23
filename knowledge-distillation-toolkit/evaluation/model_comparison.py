@@ -7,7 +7,7 @@ import torch
 import json
 import os
 from pathlib import Path
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from torch.utils.data import DataLoader
 import numpy as np
@@ -22,24 +22,13 @@ from sklearn.metrics import (
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
-import time
-import csv
-
-try:
-    # Optional dependency for generating PDF reports
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.utils import ImageReader
-    REPORTLAB_AVAILABLE = True
-except Exception:
-    REPORTLAB_AVAILABLE = False
 
 
 class ModelComparator:
     """Compare Teacher and Student models with comprehensive analysis."""
     
     def __init__(
-        self,
+        self, 
         teacher_path: str,
         student_path: str,
         device: str = "mps",
@@ -60,20 +49,10 @@ class ModelComparator:
         
         print(f"🔍 Loading models on device: {device}")
         
-        # Load tokenizers
-        if use_same_tokenizer:
-            tokenizer_path = student_path
-            print(f"📝 Loading tokenizer from: {tokenizer_path}")
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-            self.teacher_tokenizer = self.tokenizer
-            self.student_tokenizer = self.tokenizer
-        else:
-            print(f"📝 Loading teacher tokenizer from: {teacher_path}")
-            self.teacher_tokenizer = AutoTokenizer.from_pretrained(teacher_path)
-            print(f"📝 Loading student tokenizer from: {student_path}")
-            self.student_tokenizer = AutoTokenizer.from_pretrained(student_path)
-            # Default tokenizer for helper methods
-            self.tokenizer = self.student_tokenizer
+        # Load tokenizer (using student tokenizer for consistency)
+        tokenizer_path = student_path if use_same_tokenizer else teacher_path
+        print(f"📝 Loading tokenizer from: {tokenizer_path}")
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
         
         # Load models
         print(f"👨‍🏫 Loading Teacher model from: {teacher_path}")
@@ -118,7 +97,6 @@ class ModelComparator:
         all_labels = []
         all_logits = []
         total_loss = 0.0
-        label_counts = {}
         
         print(f"\n🔬 Evaluating {model_name}...")
         
@@ -142,13 +120,9 @@ class ModelComparator:
                 
                 # Store results
                 all_predictions.extend(predictions.cpu().numpy())
-                batch_labels = labels.cpu().numpy()
-                all_labels.extend(batch_labels)
+                all_labels.extend(labels.cpu().numpy())
                 all_logits.extend(logits.cpu().numpy())
                 total_loss += outputs.loss.item()
-                # Track label distribution for sanity checks
-                for lbl in batch_labels.tolist():
-                    label_counts[lbl] = label_counts.get(lbl, 0) + 1
         
         # Convert to numpy
         predictions = np.array(all_predictions)
@@ -168,7 +142,7 @@ class ModelComparator:
         
         # Confusion matrix
         cm = confusion_matrix(labels, predictions)
-
+        
         # Classification report
         class_report = classification_report(labels, predictions, output_dict=True)
         
@@ -189,9 +163,7 @@ class ModelComparator:
             'predictions': predictions.tolist(),
             'labels': labels.tolist(),
             'logits': logits.tolist(),
-            'num_parameters': sum(p.numel() for p in model.parameters()),
-            'label_counts': {str(k): int(v) for k, v in label_counts.items()},
-            'num_labels': int(getattr(model.config, 'num_labels', int(cm.shape[0])))
+            'num_parameters': sum(p.numel() for p in model.parameters())
         }
         
         print(f"\n✅ {model_name} Results:")
@@ -200,11 +172,6 @@ class ModelComparator:
         print(f"   Recall:    {recall:.4f}")
         print(f"   F1-Score:  {f1:.4f}")
         print(f"   Avg Loss:  {avg_loss:.4f}")
-        # Basic sanity warnings
-        if results['num_labels'] == 2 and 0.45 <= accuracy <= 0.55:
-            print("   ⚠️ Accuracy around chance level. This can indicate tokenizer/label mismatch or an untrained model.")
-        if any(v == 0 for v in results['label_counts'].values()):
-            print("   ⚠️ Some labels not present in dataset split. Metrics may be unstable.")
         
         return results
     
@@ -241,19 +208,6 @@ class ModelComparator:
         student_results['compression_ratio'] = self.compression_ratio
         
         return teacher_results, student_results
-
-    def compare_models_dual_loaders(self, teacher_loader: DataLoader, student_loader: DataLoader) -> Tuple[Dict, Dict]:
-        """Compare models using different dataloaders (e.g., different tokenizers)."""
-        print("\n" + "="*60)
-        print("🎯 TEACHER vs STUDENT COMPARISON (Dual Loaders)")
-        print("="*60)
-
-        teacher_results = self.evaluate_model(self.teacher, teacher_loader, "Teacher Model")
-        student_results = self.evaluate_model(self.student, student_loader, "Student Model")
-
-        teacher_results['compression_ratio'] = 1.0
-        student_results['compression_ratio'] = self.compression_ratio
-        return teacher_results, student_results
     
     def visualize_comparison(
         self,
@@ -276,16 +230,10 @@ class ModelComparator:
         
         print(f"\n📊 Creating comparison visualizations...")
         
-        # 1. Metrics Bar Chart (save two names to meet expected outputs)
-        metrics_path = self._plot_metrics_comparison(teacher_results, student_results, save_dir)
-        # Also duplicate as visual_comparison.png for expected artifact name
-        try:
-            import shutil
-            shutil.copyfile(metrics_path, Path(save_dir) / 'visual_comparison.png')
-        except Exception:
-            pass
+        # 1. Metrics Bar Chart
+        self._plot_metrics_comparison(teacher_results, student_results, save_dir)
         
-        # 2. Confusion Matrices Side-by-Side and per-model
+        # 2. Confusion Matrices Side-by-Side
         self._plot_confusion_matrices(teacher_results, student_results, save_dir)
         
         # 3. Per-Class Performance
@@ -302,7 +250,7 @@ class ModelComparator:
         if not show_plots:
             plt.close('all')
     
-    def _plot_metrics_comparison(self, teacher_res: Dict, student_res: Dict, save_dir: Path) -> Path:
+    def _plot_metrics_comparison(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot main metrics comparison bar chart."""
         metrics = ['accuracy', 'precision', 'recall', 'f1']
         teacher_vals = [teacher_res[m] for m in metrics]
@@ -333,11 +281,9 @@ class ModelComparator:
                        ha='center', va='bottom', fontsize=9)
         
         plt.tight_layout()
-        out_path = save_dir / 'metrics_comparison.png'
-        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.savefig(save_dir / 'metrics_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
         print(f"   ✓ Saved: metrics_comparison.png")
-        return out_path
     
     def _plot_confusion_matrices(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot confusion matrices side-by-side."""
@@ -350,13 +296,6 @@ class ModelComparator:
         axes[0].set_title('Teacher Model\nConfusion Matrix', fontsize=12, fontweight='bold')
         axes[0].set_xlabel('Predicted', fontsize=11)
         axes[0].set_ylabel('Actual', fontsize=11)
-        # Try to apply label names if available
-        try:
-            t_labels = [self.teacher.config.id2label[i] for i in range(cm_teacher.shape[0])]
-            axes[0].set_xticklabels(t_labels)
-            axes[0].set_yticklabels(t_labels, rotation=0)
-        except Exception:
-            pass
         
         # Student confusion matrix
         cm_student = np.array(student_res['confusion_matrix'])
@@ -365,37 +304,11 @@ class ModelComparator:
         axes[1].set_title('Student Model\nConfusion Matrix', fontsize=12, fontweight='bold')
         axes[1].set_xlabel('Predicted', fontsize=11)
         axes[1].set_ylabel('Actual', fontsize=11)
-        try:
-            s_labels = [self.student.config.id2label[i] for i in range(cm_student.shape[0])]
-            axes[1].set_xticklabels(s_labels)
-            axes[1].set_yticklabels(s_labels, rotation=0)
-        except Exception:
-            pass
         
         plt.tight_layout()
         plt.savefig(save_dir / 'confusion_matrices_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
         print(f"   ✓ Saved: confusion_matrices_comparison.png")
-        # Save individual confusion matrices in a subfolder as requested
-        cm_dir = save_dir / 'confusion_matrices'
-        cm_dir.mkdir(parents=True, exist_ok=True)
-
-        # Teacher-only
-        plt.figure(figsize=(6, 5))
-        sns.heatmap(cm_teacher, annot=True, fmt='d', cmap='Blues', cbar_kws={'label': 'Count'})
-        plt.title('Teacher Model - Confusion Matrix')
-        plt.xlabel('Predicted'); plt.ylabel('Actual')
-        plt.tight_layout(); plt.savefig(cm_dir / 'teacher_confusion_matrix.png', dpi=300)
-        plt.close()
-
-    # Student-only
-        plt.figure(figsize=(6, 5))
-        sns.heatmap(cm_student, annot=True, fmt='d', cmap='Purples', cbar_kws={'label': 'Count'})
-        plt.title('Student Model - Confusion Matrix')
-        plt.xlabel('Predicted'); plt.ylabel('Actual')
-        plt.tight_layout(); plt.savefig(cm_dir / 'student_confusion_matrix.png', dpi=300)
-        plt.close()
-        print(f"   ✓ Saved: confusion_matrices/teacher_confusion_matrix.png, student_confusion_matrix.png")
     
     def _plot_per_class_metrics(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot per-class performance metrics."""
@@ -454,20 +367,15 @@ class ModelComparator:
         ax.set_title('Model Efficiency: Size vs Performance', fontsize=14, fontweight='bold', pad=20)
         ax.grid(True, alpha=0.3, linestyle='--')
         ax.set_ylim([min(accuracies) - 0.05, 1.0])
-
+        
         # Add compression annotation
         compression = teacher_res['num_parameters'] / student_res['num_parameters']
-        acc_delta = (student_res['accuracy'] - teacher_res['accuracy']) * 100
-        trend = "+" if acc_delta >= 0 else ""
-        ax.text(
-            0.05,
-            0.95,
-            f'Compression: {compression:.2f}x\nAccuracy Δ (student-teacher): {trend}{acc_delta:.2f}%',
-            transform=ax.transAxes,
-            fontsize=11,
-            verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
-        )
+        accuracy_drop = (teacher_res['accuracy'] - student_res['accuracy']) * 100
+        ax.text(0.05, 0.95, 
+               f'Compression: {compression:.2f}x\nAccuracy Drop: {accuracy_drop:.2f}%',
+               transform=ax.transAxes, fontsize=11,
+               verticalalignment='top',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         plt.tight_layout()
         plt.savefig(save_dir / 'efficiency_comparison.png', dpi=300, bbox_inches='tight')
@@ -607,28 +515,6 @@ class ModelComparator:
         report.append("![Per-Class Metrics](per_class_comparison.png)\n\n")
         report.append("### Efficiency Analysis\n")
         report.append("![Efficiency](efficiency_comparison.png)\n\n")
-
-        # Sanity checks
-        report.append("## 🧪 Sanity checks\n\n")
-        def _flags(res):
-            flags = []
-            if int(res.get('num_labels', 2)) == 2 and 0.45 <= float(res.get('accuracy', 0)) <= 0.55:
-                flags.append("Accuracy is near chance level (50%) for binary classification. This often indicates tokenizer/label mismatch or an untrained head.")
-            lc = res.get('label_counts', {})
-            if any(int(v) == 0 for v in lc.values()):
-                flags.append("Some labels are absent in this split; per-class metrics may be unstable.")
-            return flags
-        t_flags = _flags(teacher_results)
-        s_flags = _flags(student_results)
-        if t_flags or s_flags:
-            report.append("Potential issues detected during evaluation:\n\n")
-            if t_flags:
-                report.append("- Teacher: " + " ".join(t_flags) + "\n")
-            if s_flags:
-                report.append("- Student: " + " ".join(s_flags) + "\n")
-            report.append("\n")
-        else:
-            report.append("No obvious issues detected.\n\n")
         
         # Conclusion
         report.append("## 🎯 Conclusion\n\n")
@@ -651,176 +537,3 @@ class ModelComparator:
             f.writelines(report)
         
         print(f"\n📝 Report generated: {report_path}")
-
-    # -----------------------------
-    # Benchmarking and Artifact I/O
-    # -----------------------------
-    def measure_latency(self, model: torch.nn.Module, texts: List[str], runs: int = 50) -> float:
-        """Measure average latency (seconds) per forward pass over a list of texts."""
-        model.eval()
-        times: List[float] = []
-        with torch.no_grad():
-            for text in texts:
-                inputs = self.tokenizer(text, return_tensors='pt')
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                # Warmup
-                _ = model(**inputs)
-                start = time.time()
-                for _ in range(runs):
-                    _ = model(**inputs)
-                end = time.time()
-                times.append((end - start) / runs)
-        return float(np.mean(times)) if times else float('nan')
-
-    def compute_model_file_size(self, model_dir: Path) -> int:
-        """Compute total bytes of files under a model directory."""
-        total = 0
-        for root, _, files in os.walk(model_dir):
-            for f in files:
-                try:
-                    total += os.path.getsize(os.path.join(root, f))
-                except Exception:
-                    pass
-        return total
-
-    def estimate_flops(self, model: torch.nn.Module, seq_len: int = 128) -> Optional[float]:
-        """Estimate FLOPs using thop if available. Returns FLOPs count or None.
-        Note: Estimates for transformer models can be approximate.
-        """
-        try:
-            from thop import profile
-        except Exception:
-            return None
-        model.eval()
-        with torch.no_grad():
-            sample = self.tokenizer("This is a sample input for FLOPs estimation.", return_tensors='pt', max_length=seq_len, padding='max_length', truncation=True)
-            sample = {k: v.to(self.device) for k, v in sample.items()}
-            try:
-                flops, params = profile(model, inputs=(sample,), verbose=False)
-                return float(flops)
-            except Exception:
-                # Some models expect kwargs, adapt call
-                try:
-                    flops, params = profile(model, inputs=(sample['input_ids'], sample.get('attention_mask', None)), verbose=False)
-                    return float(flops)
-                except Exception:
-                    return None
-
-    def export_expected_artifacts(
-        self,
-        teacher_results: Dict,
-        student_results: Dict,
-        save_dir: str,
-        sample_texts: Optional[List[str]] = None
-    ):
-        """Produce all artifacts requested by the comparison spec."""
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-
-        # 1) Separate metrics JSON
-        with open(save_path / 'teacher_metrics.json', 'w') as f:
-            json.dump(teacher_results, f, indent=2)
-        with open(save_path / 'student_metrics.json', 'w') as f:
-            json.dump(student_results, f, indent=2)
-
-        # 2) Latency benchmarking CSV
-        if sample_texts is None:
-            sample_texts = [
-                "The movie was absolutely wonderful!", 
-                "This film was disappointing and too long.",
-                "Average storyline but great acting."
-            ]
-        teacher_lat = self.measure_latency(self.teacher, sample_texts, runs=25)
-        student_lat = self.measure_latency(self.student, sample_texts, runs=25)
-        with open(save_path / 'latency_results.csv', 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(["model", "avg_latency_seconds", "num_texts"])
-            writer.writerow(["teacher", f"{teacher_lat:.6f}", len(sample_texts)])
-            writer.writerow(["student", f"{student_lat:.6f}", len(sample_texts)])
-
-        # 3) Compression summary (size on disk + params)
-        teacher_size_bytes = self.compute_model_file_size(self.teacher_path)
-        student_size_bytes = self.compute_model_file_size(self.student_path)
-        size_ratio = (teacher_size_bytes / student_size_bytes) if student_size_bytes else float('inf')
-        # FLOPs (optional)
-        teacher_flops = self.estimate_flops(self.teacher)
-        student_flops = self.estimate_flops(self.student)
-        with open(save_path / 'compression_summary.txt', 'w') as f:
-            f.write("Model Compression Summary\n")
-            f.write("==========================\n")
-            f.write(f"Teacher params: {teacher_results['num_parameters']:,}\n")
-            f.write(f"Student params: {student_results['num_parameters']:,}\n")
-            f.write(f"Parameter compression: {teacher_results['num_parameters'] / max(1, student_results['num_parameters']):.2f}x\n\n")
-            f.write(f"Teacher size (bytes): {teacher_size_bytes:,}\n")
-            f.write(f"Student size (bytes): {student_size_bytes:,}\n")
-            f.write(f"File size compression: {size_ratio:.2f}x\n\n")
-            if teacher_flops is not None or student_flops is not None:
-                f.write("FLOPs (approximate)\n")
-                f.write(f"Teacher FLOPs: {teacher_flops if teacher_flops is not None else 'N/A'}\n")
-                f.write(f"Student FLOPs: {student_flops if student_flops is not None else 'N/A'}\n")
-                if teacher_flops and student_flops:
-                    f.write(f"FLOPs compression: {teacher_flops / max(1e-9, student_flops):.2f}x\n\n")
-            f.write(f"Teacher latency (s): {teacher_lat:.6f}\n")
-            f.write(f"Student latency (s): {student_lat:.6f}\n")
-            f.write(f"Speedup: {(teacher_lat / student_lat) if student_lat else float('inf'):.2f}x\n")
-
-        # 4) Attempt to create final_report.pdf by embedding images and summary
-        pdf_path = save_path / 'final_report.pdf'
-        if REPORTLAB_AVAILABLE:
-            try:
-                c = canvas.Canvas(str(pdf_path), pagesize=A4)
-                width, height = A4
-                margin = 40
-                y = height - margin
-                # Title
-                c.setFont("Helvetica-Bold", 16)
-                c.drawString(margin, y, "Teacher vs Student Comparison Report")
-                y -= 24
-                c.setFont("Helvetica", 10)
-                c.drawString(margin, y, f"Compression: {student_results['compression_ratio']:.2f}x; Accuracy Drop: {(teacher_results['accuracy']-student_results['accuracy'])*100:.2f}%")
-                y -= 16
-                # Images to place (if exist)
-                images = [
-                    save_path / 'visual_comparison.png',
-                    save_path / 'confusion_matrices_comparison.png',
-                    save_path / 'per_class_comparison.png',
-                    save_path / 'efficiency_comparison.png',
-                    save_path / 'comparison_table.png'
-                ]
-                for img_path in images:
-                    if img_path.exists():
-                        img = ImageReader(str(img_path))
-                        iw, ih = img.getSize()
-                        scale = min((width - 2*margin) / iw, (height/2 - 2*margin) / ih)
-                        tw, th = iw * scale, ih * scale
-                        if y - th < margin:
-                            c.showPage(); y = height - margin
-                        c.drawImage(img, margin, y - th, width=tw, height=th)
-                        y -= th + 12
-                c.showPage(); c.save()
-                print(f"   ✓ Saved: {pdf_path}")
-            except Exception as e:
-                print(f"[WARN] Could not generate PDF report: {e}")
-        else:
-            # Fallback: use matplotlib PdfPages to bundle images into a PDF
-            try:
-                from matplotlib.backends.backend_pdf import PdfPages
-                images = [
-                    save_path / 'visual_comparison.png',
-                    save_path / 'confusion_matrices_comparison.png',
-                    save_path / 'per_class_comparison.png',
-                    save_path / 'efficiency_comparison.png',
-                    save_path / 'comparison_table.png'
-                ]
-                with PdfPages(pdf_path) as pdf:
-                    for img_path in images:
-                        if img_path.exists():
-                            img = plt.imread(str(img_path))
-                            fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait inches
-                            ax.imshow(img)
-                            ax.axis('off')
-                            pdf.savefig(fig, bbox_inches='tight')
-                            plt.close(fig)
-                print(f"   ✓ Saved (fallback): {pdf_path}")
-            except Exception as e:
-                print(f"[INFO] Could not create PDF (fallback) due to: {e}")

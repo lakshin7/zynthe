@@ -22,11 +22,13 @@ class JsonlDataset(Dataset):
         
         # Tokenize with explicit parameters to avoid model incompatibility issues
         encoding = self.tokenizer(
-            text,
-            truncation=True,
-            padding='max_length',
+            text, 
+            truncation=True, 
+            padding='max_length', 
             max_length=self.max_length,
-            return_tensors='pt'
+            return_tensors='pt',
+            # Let the tokenizer decide whether to include token_type_ids based on model type
+            return_token_type_ids=None  # This will use the tokenizer's default behavior
         )
         
         item = {key: val.squeeze(0) for key, val in encoding.items()}
@@ -58,28 +60,4 @@ def create_dataloaders(cfg, tokenizer):
         pin_memory=False
     )
 
-    return train_loader, val_loader
-
-
-def get_imdb_dataloaders(train_path: str, val_path: str, tokenizer, batch_size: int = 8, max_length: int = 128):
-    """
-    Backward-compatible wrapper used by examples to build IMDB dataloaders directly.
-    """
-    train_dataset = JsonlDataset(train_path, tokenizer, max_length=max_length)
-    val_dataset = JsonlDataset(val_path, tokenizer, max_length=max_length)
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=False
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=False
-    )
     return train_loader, val_loader

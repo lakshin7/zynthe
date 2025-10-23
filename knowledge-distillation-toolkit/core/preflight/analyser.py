@@ -1,0 +1,793 @@
+"""
+Preflight Analyzer - Main Orchestrator
+=======================================
+
+Coordinates all preflight checks before distillation:
+1. Model inspection (compatibility, architecture, parameters)
+2. Data validation (schema, task type, distribution)
+3. Resource probing (devices, memory, precision)
+4. Auto-configuration (batch size, precision, device)
+5. Comprehensive reporting (go/no-go decision)
+
+Usage:
+    analyzer = PreflightAnalyzer(
+        teacher_model=teacher,
+        student_model=student,
+        dataset=train_dataset,
+        config=config
+    )
+    
+    report = analyzer.run_preflight()
+    
+    if report['can_proceed']:
+        # Start training with optimized config
+        optimized_config = report['optimized_config']
+    else:
+        # Fix issues
+        print(report['blockers'])
+"""
+
+from typing import Dict, List, Optional, Any, Tuple
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset
+import yaml
+import json
+from pathlib import Path
+import warnings
+from datetime import datetime
+
+from .model_inspector import ModelInspector
+from .data_inspector import DataInspector
+from .resource_probe import ResourceProbe
+
+
+class PreflightAnalyzer:
+    """
+    Main orchestrator for all preflight checks.
+    
+    Runs comprehensive analysis before distillation:
+    - Model compatibility checking
+    - Data validation
+    - Resource profiling
+    - Configuration optimization
+    - Go/no-go decision with detailed reasoning
+    """
+    
+    def __init__(
+        self,
+        teacher_model: Optional[nn.Module] = None,
+        student_model: Optional[nn.Module] = None,
+        dataset: Optional[Dataset] = None,
+        config: Optional[Dict] = None,
+        output_dir: Optional[str] = None
+    ):
+        """
+        Initialize preflight analyzer.
+        
+        Args:
+            teacher_model: Teacher model
+            student_model: Student model
+            dataset: Training dataset
+            config: Configuration dictionary
+            output_dir: Directory to save reports
+        """
+        self.teacher_model = teacher_model
+        self.student_model = student_model
+        self.dataset = dataset
+        self.config = config or {}
+        self.output_dir = Path(output_dir) if output_dir else Path("preflight_reports")
+        
+        # Initialize inspectors
+        self.model_inspector = ModelInspector(teacher_model, student_model)
+        self.data_inspector = DataInspector(dataset, config)
+        self.resource_probe = ResourceProbe()
+        
+        # Results storage
+        self.results = {}
+    
+    def validate_config(self) -> Dict[str, Any]:
+        """
+        Validate configuration structure before model loading.
+        
+        This is Step 1.1 in the workflow - catches config errors early.
+        
+        Returns:
+            Validation report with errors and warnings
+        """
+        validation = {
+            'is_valid': True,
+            'errors': [],
+            'warnings': [],
+            'info': []
+        }
+        
+        if not self.config:
+            validation['is_valid'] = False
+            validation['errors'].append("No configuration provided")
+            return validation
+        
+        # Check model configuration
+        model_cfg = self.config.get('model', {})
+        
+        if not model_cfg.get('name'):
+            validation['is_valid'] = False
+            validation['errors'].append("Missing 'model.name' (teacher model) in config")
+        else:
+            validation['info'].append(f"Teacher model: {model_cfg['name']}")
+        
+        if not model_cfg.get('student_name'):
+            validation['warnings'].append(
+                "Missing 'model.student_name' - will default to teacher model (no compression)"
+            )
+        else:
+            validation['info'].append(f"Student model: {model_cfg['student_name']}")
+        
+        if not model_cfg.get('type'):
+            validation['warnings'].append("Missing 'model.type' - will default to AutoModel")
+        
+        # Check data configuration
+        data_cfg = self.config.get('data', {})
+        
+        if not data_cfg.get('train_path'):
+            validation['is_valid'] = False
+            validation['errors'].append("Missing 'data.train_path' in config")
+        else:
+            train_path = Path(data_cfg['train_path'])
+            if not train_path.exists():
+                validation['is_valid'] = False
+                validation['errors'].append(f"Training data not found: {train_path}")
+            else:
+                validation['info'].append(f"Training data: {train_path} ✓")
+        
+        if not data_cfg.get('val_path'):
+            validation['warnings'].append("Missing 'data.val_path' - validation will be skipped")
+        else:
+            val_path = Path(data_cfg['val_path'])
+            if not val_path.exists():
+                validation['warnings'].append(f"Validation data not found: {val_path}")
+            else:
+                validation['info'].append(f"Validation data: {val_path} ✓")
+        
+        # Check distillation configuration
+        distill_cfg = self.config.get('distillation', {})
+        valid_methods = ['kd_hinton', 'feature', 'attention', 'similarity', 'multi_stage']
+        
+        if distill_cfg.get('method') and distill_cfg['method'] not in valid_methods:
+            validation['warnings'].append(
+                f"Unknown distillation method '{distill_cfg['method']}'. "
+                f"Valid: {', '.join(valid_methods)}"
+            )
+        
+        # Check device configuration
+        device_cfg = self.config.get('device', {})
+        
+        if device_cfg.get('prefer_cuda') and not torch.cuda.is_available():
+            validation['warnings'].append("Config prefers CUDA but CUDA not available")
+        
+        if device_cfg.get('prefer_mps') and not torch.backends.mps.is_available():
+            validation['warnings'].append("Config prefers MPS but MPS not available")
+        
+        # Check training configuration
+        train_cfg = self.config.get('train', {})
+        
+        if train_cfg.get('batch_size', 0) > 128:
+            validation['warnings'].append(
+                f"Very large batch size ({train_cfg['batch_size']}) may cause OOM"
+            )
+        
+        if train_cfg.get('batch_size', 0) < 1:
+            validation['is_valid'] = False
+            validation['errors'].append("Invalid batch size (must be >= 1)")
+        
+        return validation
+    
+    def run_preflight(self, verbose: bool = True) -> Dict[str, Any]:
+        """
+        Run complete preflight analysis.
+        
+        Args:
+            verbose: Print reports during execution
+            
+        Returns:
+            Comprehensive analysis report with go/no-go decision
+        """
+        print("=" * 70)
+        print("RUNNING PREFLIGHT ANALYSIS")
+        print("=" * 70)
+        print()
+        
+        # 0. Config Validation (Phase 1.1 - NEW)
+        print("🔍 Validating configuration...")
+        config_validation = self.validate_config()
+        self.results['config_validation'] = config_validation
+        
+        if verbose:
+            print(self._format_config_validation(config_validation))
+            print()
+        
+        if not config_validation['is_valid']:
+            print("❌ Config validation failed. Cannot proceed.")
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'can_proceed': False,
+                'confidence': 'none',
+                'blockers': config_validation['errors'],
+                'warnings': config_validation['warnings'],
+                'recommendations': ['Fix config errors before proceeding'],
+                'config_validation': config_validation
+            }
+        
+        # 1. Model Inspection
+        print("📋 Inspecting models...")
+        model_report = self.model_inspector.inspect()
+        self.results['model'] = model_report
+        
+        if verbose:
+            print(self.model_inspector.generate_report())
+            print()
+        
+        # 2. Data Inspection
+        print("📊 Inspecting dataset...")
+        data_report = self.data_inspector.validate()
+        self.results['data'] = data_report
+        
+        if verbose:
+            print(self.data_inspector.generate_report())
+            print()
+        
+        # 3. Resource Probing
+        print("🔍 Probing hardware resources...")
+        resource_report = self.resource_probe.probe()
+        self.results['resources'] = resource_report
+        
+        if verbose:
+            print(self.resource_probe.generate_report())
+            print()
+        
+        # 4. Cross-validate and optimize
+        print("⚙️  Optimizing configuration...")
+        optimization_report = self._optimize_configuration()
+        self.results['optimization'] = optimization_report
+        
+        # 5. Make go/no-go decision
+        print("🎯 Evaluating readiness...")
+        decision = self._make_decision()
+        self.results['decision'] = decision
+        
+        # 6. Generate comprehensive report
+        comprehensive_report = self._generate_comprehensive_report()
+        
+        if verbose:
+            print(self._format_final_report(comprehensive_report))
+        
+        return comprehensive_report
+    
+    def _optimize_configuration(self) -> Dict[str, Any]:
+        """
+        Optimize configuration based on all inspections.
+        
+        Returns:
+            Optimized configuration
+        """
+        optimization = {
+            'device': None,
+            'precision': None,
+            'batch_size': None,
+            'num_workers': None,
+            'pin_memory': None,
+            'distillation_strategy': None,
+            'layer_mapping': None,
+            'use_amp': False,
+            'changes': []
+        }
+        
+        # Get recommendations from each inspector
+        resource_rec = self.results['resources']['recommendations']
+        model_rec = self.results['model'].get('recommended_strategy', {})
+        data_rec = self.results['data'].get('batch_recommendations', {})
+        
+        # Device selection
+        optimization['device'] = resource_rec['device']
+        optimization['changes'].append(f"Device: {optimization['device']}")
+        
+        # Precision selection
+        optimization['precision'] = resource_rec['precision']
+        optimization['use_amp'] = resource_rec['use_amp']
+        optimization['changes'].append(
+            f"Precision: {optimization['precision']} (AMP: {optimization['use_amp']})"
+        )
+        
+        # Batch size optimization
+        base_batch = data_rec.get('optimal_batch_size', 32)
+        multiplier = resource_rec.get('batch_size_multiplier', 1.0)
+        optimal_batch = int(base_batch * multiplier)
+        
+        # Ensure batch size is power of 2 for efficiency
+        optimal_batch = 2 ** int(torch.log2(torch.tensor(optimal_batch)).item())
+        optimization['batch_size'] = max(1, optimal_batch)
+        optimization['changes'].append(
+            f"Batch size: {optimization['batch_size']} "
+            f"(base: {base_batch}, multiplier: {multiplier}x)"
+        )
+        
+        # DataLoader workers
+        optimization['num_workers'] = resource_rec['num_workers']
+        optimization['pin_memory'] = resource_rec['pin_memory']
+        optimization['changes'].append(
+            f"Workers: {optimization['num_workers']}, Pin memory: {optimization['pin_memory']}"
+        )
+        
+        # Distillation strategy
+        if model_rec:
+            optimization['distillation_strategy'] = model_rec
+            optimization['changes'].append(
+                f"Strategy: {model_rec.get('primary_method', 'unknown')}"
+            )
+        
+        # Layer mapping
+        layer_mapping = self.results['model'].get('layer_mapping', [])
+        if layer_mapping:
+            optimization['layer_mapping'] = layer_mapping
+            optimization['changes'].append(
+                f"Layer mapping: {len(layer_mapping)} pairs auto-mapped"
+            )
+        
+        # Memory estimation
+        if self.student_model:
+            student_params = self.results['model'].get('student', {}).get('total_params', 0)
+            available_memory = self._get_available_memory(optimization['device'])
+            
+            if available_memory:
+                memory_rec = self.resource_probe.recommend_optimal_batch_size(
+                    student_params,
+                    available_memory,
+                    sequence_length=self._estimate_sequence_length(),
+                    precision=optimization['precision']
+                )
+                
+                optimization['memory_estimate'] = memory_rec
+                
+                # Adjust batch size if needed
+                if memory_rec['optimal_batch_size'] < optimization['batch_size']:
+                    optimization['batch_size'] = memory_rec['optimal_batch_size']
+                    optimization['changes'].append(
+                        f"Batch size reduced to {optimization['batch_size']} "
+                        f"due to memory constraints"
+                    )
+        
+        return optimization
+    
+    def _get_available_memory(self, device: str) -> Optional[float]:
+        """Get available memory for device in GB."""
+        memory_info = self.results['resources']['memory']
+        
+        if device == 'cuda':
+            if memory_info['gpu']:
+                return memory_info['gpu'][0].get('free', memory_info['gpu'][0]['total'])
+        
+        elif device == 'mps':
+            # MPS uses system memory
+            return memory_info['system']['available']
+        
+        elif device == 'cpu':
+            return memory_info['system']['available']
+        
+        return None
+    
+    def _estimate_sequence_length(self) -> Optional[int]:
+        """Estimate sequence length from data."""
+        data_info = self.results['data'].get('dataset_info', {})
+        sample_structure = data_info.get('sample_structure', {})
+        
+        # Look for sequence dimensions
+        for field, props in sample_structure.get('fields', {}).items():
+            shape = props.get('shape', [])
+            if len(shape) >= 2 and shape[0] > 10:  # Likely sequence
+                return shape[0]
+        
+        # Default for transformers
+        data_type = self.results['data'].get('data_type')
+        if data_type == 'text':
+            return 512  # Common max length
+        
+        return None
+    
+    def _make_decision(self) -> Dict[str, Any]:
+        """
+        Make go/no-go decision based on all checks.
+        
+        Returns:
+            Decision with reasoning
+        """
+        decision = {
+            'can_proceed': True,
+            'blockers': [],
+            'warnings': [],
+            'recommendations': [],
+            'confidence': 'high'
+        }
+        
+        # Check for blockers
+        model_report = self.results['model']
+        data_report = self.results['data']
+        
+        # Model blockers
+        model_compat = model_report.get('compatibility', {})
+        if not model_compat.get('is_compatible', True):
+            decision['can_proceed'] = False
+            decision['blockers'].extend(model_compat.get('errors', []))
+        
+        # Data blockers
+        if not data_report['is_valid']:
+            decision['can_proceed'] = False
+            decision['blockers'].extend(data_report.get('errors', []))
+        
+        # Collect warnings
+        decision['warnings'].extend(model_compat.get('warnings', []))
+        decision['warnings'].extend(data_report.get('warnings', []))
+        
+        # Collect recommendations
+        decision['recommendations'].extend(model_compat.get('recommendations', []))
+        
+        # Adjust confidence based on warnings
+        if len(decision['warnings']) > 5:
+            decision['confidence'] = 'medium'
+        elif len(decision['warnings']) > 10:
+            decision['confidence'] = 'low'
+        
+        # Add specific recommendations
+        if decision['can_proceed']:
+            decision['recommendations'].append(
+                "All checks passed. Ready to start distillation."
+            )
+            
+            # Add optimization recommendations
+            opt = self.results['optimization']
+            if opt.get('use_amp'):
+                decision['recommendations'].append(
+                    "Enable Automatic Mixed Precision (AMP) for faster training."
+                )
+            
+            if opt.get('batch_size', 0) > 32:
+                decision['recommendations'].append(
+                    f"Large batch size ({opt['batch_size']}) detected. "
+                    f"Consider using gradient accumulation if memory is limited."
+                )
+        
+        return decision
+    
+    def _generate_comprehensive_report(self) -> Dict[str, Any]:
+        """
+        Generate comprehensive report combining all results.
+        
+        Returns:
+            Full report dictionary
+        """
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'can_proceed': self.results['decision']['can_proceed'],
+            'confidence': self.results['decision']['confidence'],
+            'blockers': self.results['decision']['blockers'],
+            'warnings': self.results['decision']['warnings'],
+            'recommendations': self.results['decision']['recommendations'],
+            'model_analysis': self.results['model'],
+            'data_analysis': self.results['data'],
+            'resource_profile': self.results['resources'],
+            'optimized_config': self.results['optimization']
+        }
+    
+    def _format_config_validation(self, validation: Dict[str, Any]) -> str:
+        """Format config validation results."""
+        lines = []
+        
+        if validation['is_valid']:
+            lines.append("✅ Configuration is valid")
+        else:
+            lines.append("❌ Configuration has errors")
+        
+        if validation['errors']:
+            lines.append("\n🚫 ERRORS:")
+            for error in validation['errors']:
+                lines.append(f"  • {error}")
+        
+        if validation['warnings']:
+            lines.append(f"\n⚠️  WARNINGS ({len(validation['warnings'])}):")
+            for warning in validation['warnings'][:3]:
+                lines.append(f"  • {warning}")
+            if len(validation['warnings']) > 3:
+                lines.append(f"  ... and {len(validation['warnings']) - 3} more")
+        
+        if validation['info']:
+            lines.append("\nℹ️  INFO:")
+            for info in validation['info']:
+                lines.append(f"  • {info}")
+        
+        return "\n".join(lines)
+    
+    def _format_final_report(self, report: Dict[str, Any]) -> str:
+        """
+        Format comprehensive report as human-readable string.
+        
+        Args:
+            report: Report dictionary
+            
+        Returns:
+            Formatted report string
+        """
+        lines = [
+            "",
+            "=" * 70,
+            "PREFLIGHT ANALYSIS SUMMARY",
+            "=" * 70,
+            ""
+        ]
+        
+        # Decision
+        if report['can_proceed']:
+            lines.append("✅ READY TO PROCEED")
+            lines.append(f"Confidence: {report['confidence'].upper()}")
+        else:
+            lines.append("❌ CANNOT PROCEED")
+            lines.append("Critical issues must be resolved first.")
+        lines.append("")
+        
+        # Blockers
+        if report['blockers']:
+            lines.append("🚫 BLOCKERS:")
+            for blocker in report['blockers']:
+                lines.append(f"  • {blocker}")
+            lines.append("")
+        
+        # Warnings
+        if report['warnings']:
+            lines.append(f"⚠️  WARNINGS ({len(report['warnings'])}):")
+            for warning in report['warnings'][:5]:  # Show first 5
+                lines.append(f"  • {warning}")
+            if len(report['warnings']) > 5:
+                lines.append(f"  ... and {len(report['warnings']) - 5} more")
+            lines.append("")
+        
+        # Recommendations
+        if report['recommendations']:
+            lines.append("💡 RECOMMENDATIONS:")
+            for rec in report['recommendations'][:5]:  # Show first 5
+                lines.append(f"  • {rec}")
+            if len(report['recommendations']) > 5:
+                lines.append(f"  ... and {len(report['recommendations']) - 5} more")
+            lines.append("")
+        
+        # Optimized Configuration
+        opt = report['optimized_config']
+        lines.extend([
+            "⚙️  OPTIMIZED CONFIGURATION:",
+            f"  Device: {opt['device']}",
+            f"  Precision: {opt['precision']}",
+            f"  Batch Size: {opt['batch_size']}",
+            f"  Workers: {opt['num_workers']}",
+            f"  Use AMP: {opt['use_amp']}",
+            ""
+        ])
+        
+        if opt.get('distillation_strategy'):
+            strategy = opt['distillation_strategy']
+            lines.append(f"  Recommended Strategy: {strategy.get('primary_method', 'unknown')}")
+            lines.append("")
+        
+        # Summary
+        model = report['model_analysis']
+        data = report['data_analysis']
+        resources = report['resource_profile']
+        
+        lines.extend([
+            "📊 ANALYSIS SUMMARY:",
+            f"  Teacher: {model.get('teacher', {}).get('type', 'unknown')} "
+            f"({model.get('teacher', {}).get('total_params', 0) / 1e6:.1f}M params)",
+            f"  Student: {model.get('student', {}).get('type', 'unknown')} "
+            f"({model.get('student', {}).get('total_params', 0) / 1e6:.1f}M params)",
+            f"  Compression: {model.get('compression_ratio', 0):.1f}x",
+            f"  Dataset: {data.get('statistics', {}).get('num_samples', 'unknown')} samples",
+            f"  Task: {data.get('task_type', 'unknown')}",
+            f"  Device: {resources['devices']['primary']}",
+            ""
+        ])
+        
+        lines.append("=" * 70)
+        
+        return "\n".join(lines)
+    
+    def save_report(
+        self,
+        report: Optional[Dict[str, Any]] = None,
+        format: str = 'json'
+    ) -> Path:
+        """
+        Save report to file.
+        
+        Args:
+            report: Report dictionary (uses last run if not provided)
+            format: Output format ('json', 'yaml', or 'txt')
+            
+        Returns:
+            Path to saved report
+        """
+        if report is None:
+            report = self._generate_comprehensive_report()
+        
+        # Create output directory
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"preflight_report_{timestamp}.{format}"
+        filepath = self.output_dir / filename
+        
+        # Save based on format
+        if format == 'json':
+            with open(filepath, 'w') as f:
+                json.dump(report, f, indent=2, default=str)
+        
+        elif format == 'yaml':
+            with open(filepath, 'w') as f:
+                yaml.dump(report, f, default_flow_style=False)
+        
+        elif format == 'txt':
+            with open(filepath, 'w') as f:
+                f.write(self._format_final_report(report))
+                f.write("\n\n")
+                
+                # Add detailed reports
+                f.write("=" * 70 + "\n")
+                f.write("DETAILED MODEL ANALYSIS\n")
+                f.write("=" * 70 + "\n")
+                f.write(self.model_inspector.generate_report())
+                f.write("\n\n")
+                
+                f.write("=" * 70 + "\n")
+                f.write("DETAILED DATA ANALYSIS\n")
+                f.write("=" * 70 + "\n")
+                f.write(self.data_inspector.generate_report())
+                f.write("\n\n")
+                
+                f.write("=" * 70 + "\n")
+                f.write("DETAILED RESOURCE PROFILE\n")
+                f.write("=" * 70 + "\n")
+                f.write(self.resource_probe.generate_report())
+        
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+        
+        print(f"Report saved to: {filepath}")
+        return filepath
+    
+    def update_config(
+        self,
+        config: Optional[Dict] = None,
+        save_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update configuration with optimized settings.
+        
+        Args:
+            config: Config to update (uses self.config if not provided)
+            save_path: Path to save updated config
+            
+        Returns:
+            Updated configuration
+        """
+        if config is None:
+            config = self.config.copy()
+        
+        opt = self.results['optimization']
+        
+        # Update training settings
+        if 'training' not in config:
+            config['training'] = {}
+        
+        config['training']['device'] = opt['device']
+        config['training']['precision'] = opt['precision']
+        config['training']['use_amp'] = opt['use_amp']
+        
+        # Update data settings
+        if 'data' not in config:
+            config['data'] = {}
+        
+        config['data']['batch_size'] = opt['batch_size']
+        config['data']['num_workers'] = opt['num_workers']
+        config['data']['pin_memory'] = opt['pin_memory']
+        
+        # Update distillation settings
+        if opt.get('distillation_strategy'):
+            if 'distillation' not in config:
+                config['distillation'] = {}
+            
+            strategy = opt['distillation_strategy']
+            config['distillation']['method'] = strategy.get('primary_method', 'kd_hinton')
+            
+            if opt.get('layer_mapping'):
+                config['distillation']['layer_mapping'] = opt['layer_mapping']
+        
+        # Save if path provided
+        if save_path:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(save_path, 'w') as f:
+                yaml.dump(config, f, default_flow_style=False)
+            
+            print(f"Updated config saved to: {save_path}")
+        
+        return config
+
+
+# Convenience function
+def run_preflight_check(
+    teacher_model: Optional[nn.Module] = None,
+    student_model: Optional[nn.Module] = None,
+    dataset: Optional[Dataset] = None,
+    config: Optional[Dict] = None,
+    save_report: bool = True,
+    output_dir: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Convenience function to run complete preflight check.
+    
+    Args:
+        teacher_model: Teacher model
+        student_model: Student model
+        dataset: Training dataset
+        config: Configuration dictionary
+        save_report: Whether to save report to file
+        output_dir: Directory for reports
+        
+    Returns:
+        Comprehensive analysis report
+    """
+    analyzer = PreflightAnalyzer(
+        teacher_model=teacher_model,
+        student_model=student_model,
+        dataset=dataset,
+        config=config,
+        output_dir=output_dir
+    )
+    
+    report = analyzer.run_preflight(verbose=True)
+    
+    if save_report:
+        analyzer.save_report(report, format='json')
+        analyzer.save_report(report, format='txt')
+    
+    return report
+
+
+def validate_config_only(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate configuration before model loading (Phase 1.1).
+    
+    Use this as the first step to catch config errors early.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Validation report with errors and warnings
+        
+    Example:
+        >>> from core.preflight.analyser import validate_config_only
+        >>> validation = validate_config_only(cfg_manager.resolved_config)
+        >>> if not validation['is_valid']:
+        >>>     print("Config errors:", validation['errors'])
+        >>>     exit(1)
+    """
+    analyzer = PreflightAnalyzer(config=config)
+    validation = analyzer.validate_config()
+    
+    print("=" * 70)
+    print("CONFIG VALIDATION")
+    print("=" * 70)
+    print()
+    print(analyzer._format_config_validation(validation))
+    print()
+    print("=" * 70)
+    
+    return validation

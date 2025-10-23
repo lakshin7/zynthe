@@ -5,15 +5,14 @@ import importlib
 import logging
 from pathlib import Path
 import sys
-import os
 import typer
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import argparse
-
-# Add project root to sys.path to enable imports
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
 from core.config.config_manager import ConfigManager, ConfigError
 
 # Import model loader and summary utilities
@@ -24,6 +23,8 @@ try:
     from rich import print as rprint
 except Exception:
     rprint = print
+
+from core.config.config_manager import ConfigManager
 
 app = typer.Typer(name="zyn", help="Zynthe / Knowledge-distillation Toolkit CLI")
 
@@ -109,10 +110,7 @@ def distill(
     """
     Run a distillation pipeline.
 
-    This command:
-      1. loads the config,
-      2. tries to import core.distillers.multi_stage_distiller.MultiStageDistiller (fallbacks allowed),
-      3. instantiates it with the loaded config and calls .run()
+    This command loads models, dataloaders, and runs MultiStageDistiller.
     """
     cm, cfg = load_config(config)
     rprint(f"[bold green]Loaded distill config:[/bold green] {config}")
@@ -122,14 +120,41 @@ def distill(
         rprint(cfg)
         raise typer.Exit()
 
-    # Dynamic import so the CLI works even while modules are under development
     try:
-        mod = importlib.import_module("core.distillers.multi_stage_distiller")
-        Distiller = getattr(mod, "MultiStageDistiller", None) or getattr(mod, "Distiller", None)
-        if Distiller is None:
-            raise ImportError("No MultiStageDistiller/Distiller class found in module.")
-        distiller = Distiller(cfg)
-        distiller.run()
+        # Load models
+        rprint("[bold blue]Loading models...[/bold blue]")
+        teacher, student, tokenizer = load_models(cm, cm.device())
+        rprint(f"[green]✓ Teacher loaded: {model_summary(teacher)['name']}[/green]")
+        rprint(f"[green]✓ Student loaded: {model_summary(student)['name']}[/green]")
+        
+        # Load dataloaders
+        rprint("[bold blue]Loading dataloaders...[/bold blue]")
+        from data.dataloaders import create_dataloaders
+        train_loader, val_loader = create_dataloaders(cfg, tokenizer)
+        rprint(f"[green]✓ Dataloaders created[/green]")
+        
+        # Create multi-stage distiller
+        rprint("[bold blue]Initializing MultiStageDistiller...[/bold blue]")
+        from core.distillers.multi_stage_distiller import MultiStageDistiller
+        distiller = MultiStageDistiller(
+            teacher=teacher,
+            student=student,
+            config=cfg,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=cm.device()
+        )
+        rprint(f"[green]✓ Distiller initialized[/green]")
+        
+        # Run distillation
+        rprint("[bold blue]Starting distillation...[/bold blue]")
+        report = distiller.run()
+        
+        rprint("\n[bold green]🎉 Distillation completed successfully![/bold green]")
+        if 'summary' in report:
+            rprint(f"Total stages: {report['summary'].get('total_stages', 0)}")
+            rprint(f"Final accuracy gain: {report['summary'].get('total_accuracy_gain', 0):.2f}%")
+        
     except Exception as exc:
         LOG.exception("Failed to run distillation: %s", exc)
         rprint("[red]Distillation failed — check logs for details.[/red]")
@@ -215,6 +240,13 @@ def main():
     args = parse_args()
 
     try:
+        # ========================================================================
+        # PHASE 0: Environment & Configuration Setup
+        # ========================================================================
+        print("\n" + "="*70)
+        print("PHASE 0: Environment & Configuration Setup")
+        print("="*70 + "\n")
+        
         # Parse overrides from command line arguments
         overrides_dict = parse_overrides(args.override)
         
@@ -227,19 +259,77 @@ def main():
         print("Paths:", cfg_manager.paths)
         print("Resolved config:", dict(cfg_manager.resolved_config))
 
-        # --- Load models and tokenizer ---
-        teacher, student, tokenizer = load_models(cfg_manager.resolved_config, cfg_manager.device())
+        # ========================================================================
+        # PHASE 1: Preflight Analysis & Model Loading
+        # ========================================================================
+        print("\n" + "="*70)
+        print("PHASE 1: Preflight Analysis & Model Loading")
+        print("="*70 + "\n")
+        
+        # 1.1 Config Validation (NEW - Critical!)
+        print("📋 Step 1.1: Validating configuration...")
+        from core.preflight.analyser import validate_config_only
+        
+        config_validation = validate_config_only(cfg_manager.resolved_config)
+        
+        if not config_validation['is_valid']:
+            print("\n❌ Config validation failed. Cannot proceed.\n")
+            print("ERRORS:")
+            for error in config_validation['errors']:
+                print(f"  • {error}")
+            if config_validation['warnings']:
+                print("\nWARNINGS:")
+                for warning in config_validation['warnings']:
+                    print(f"  • {warning}")
+            return
+        
+        print("✅ Configuration validated successfully\n")
+
+        # 1.2 Load models and tokenizer
+        print("📋 Step 1.2: Loading models...")
+        teacher, student, tokenizer = load_models(cfg_manager, cfg_manager.device())
         print("[Model Summary] Teacher model:")
         print(model_summary(teacher))
         print("[Model Summary] Student model:")
         print(model_summary(student))
         print(f"Tokenizer loaded: {type(tokenizer).__name__}")
 
-        # --- Trainer initialization ---
-        from training.trainer import Trainer
+        # ========================================================================
+        # PHASE 2: Dataset Preparation
+        # ========================================================================
+        print("\n" + "="*70)
+        print("PHASE 2: Dataset Preparation")
+        print("="*70 + "\n")
+        
         from data.dataloaders import create_dataloaders
         train_loader, val_loader = create_dataloaders(cfg_manager.resolved_config, tokenizer)
+        print(f"✅ Train loader: {len(train_loader)} batches")
+        print(f"✅ Val loader: {len(val_loader)} batches")
 
+        # 1.3 & 1.4: Preflight Analysis (Model Compatibility) - Optional but recommended
+        # Uncomment below to enable full preflight analysis with model inspection
+        # from core.preflight.analyser import run_preflight_check
+        # print("\n📋 Step 1.3-1.4: Running preflight analysis...")
+        # preflight_report = run_preflight_check(
+        #     teacher_model=teacher,
+        #     student_model=student,
+        #     dataset=train_loader.dataset,
+        #     config=cfg_manager.resolved_config,
+        #     save_report=True,
+        #     output_dir=str(Path(cfg_manager.paths['logs']) / "preflight")
+        # )
+        # if not preflight_report['can_proceed']:
+        #     print("\n❌ Preflight checks failed.")
+        #     return
+
+        # ========================================================================
+        # PHASE 3-4: Distillation Training
+        # ========================================================================
+        print("\n" + "="*70)
+        print("PHASE 3-4: Distillation Engine & Training")
+        print("="*70 + "\n")
+        
+        from training.trainer import Trainer
         trainer = Trainer(
             teacher=teacher,
             student=student,
@@ -251,11 +341,17 @@ def main():
         print("[INFO] Starting training...")
         trainer.fit(train_loader, val_loader)
 
-        # --- Reasoning-based Quantization ---
+        # ========================================================================
+        # PHASE 6: Quantization
+        # ========================================================================
         quantized_model = None
         if cfg_manager.resolved_config.get("quantization", {}).get("enable", False):
+            print("\n" + "="*70)
+            print("PHASE 6: Quantization")
+            print("="*70 + "\n")
+            
             from core.quant.ptq import apply_ptq
-            runtime_device = cfg_manager.get_runtime().get("device", "cpu")
+            runtime_device = cfg_manager.device()
             cfg_mode = str(cfg_manager.resolved_config.get("quantization", {}).get("mode", "ptq")).lower()
 
             # Reasoning logic
@@ -269,10 +365,16 @@ def main():
             quantized_model = apply_ptq(student, runtime_device, mode=mode)
             rprint(f"[green]PTQ applied using mode: {mode} on device {runtime_device}[/green]")
 
-        # --- Final metrics visualization already handled by trainer ---
+        # ========================================================================
+        # PHASE 5 & 8: Evaluation & Reporting
+        # ========================================================================
+        print("\n" + "="*70)
+        print("PHASE 5 & 8: Evaluation & Reporting")
+        print("="*70 + "\n")
+        
         rprint(f"[bold green]Training completed successfully! Check experiment directory: {cfg_manager.experiment_dir}[/bold green]")
 
-        # --- Evaluation after training and quantization ---
+        # Final evaluation
         evaluate_enabled = cfg_manager.resolved_config.get("evaluate", True)
         if evaluate_enabled:
             try:
@@ -288,85 +390,6 @@ def main():
             except Exception as e:
                 LOG.exception("Evaluation after training failed: %s", e)
                 rprint("[red]Evaluation after training failed — check logs for details.[/red]")
-
-        # --- Teacher vs Student Comparison ---
-        comparison_enabled = cfg_manager.resolved_config.get("compare_models", True)
-        if comparison_enabled:
-            try:
-                from evaluation.model_comparison import ModelComparator
-                from pathlib import Path
-                
-                # Paths to saved models
-                teacher_path = Path(cfg_manager.experiment_dir) / "teacher_model"
-                student_path = Path(cfg_manager.experiment_dir) / "student_model"
-                comparison_dir = Path(cfg_manager.experiment_dir) / "comparison"
-                
-                if teacher_path.exists() and student_path.exists():
-                    rprint("\n" + "="*70)
-                    rprint("[bold cyan]🎯 TEACHER vs STUDENT COMPARISON[/bold cyan]")
-                    rprint("="*70)
-                    
-                    # Initialize comparator
-                    comparator = ModelComparator(
-                        teacher_path=str(teacher_path),
-                        student_path=str(student_path),
-                        device=str(cfg_manager.device()),
-                        use_same_tokenizer=True  # Use same tokenizer for fair comparison
-                    )
-                    
-                    # Run comparison
-                    rprint("\n[bold blue]📊 Running model comparison...[/bold blue]")
-                    teacher_results, student_results = comparator.compare_models(val_loader)
-                    
-                    # Generate visualizations
-                    rprint("\n[bold blue]📈 Generating comparison visualizations...[/bold blue]")
-                    comparator.visualize_comparison(
-                        teacher_results,
-                        student_results,
-                        save_dir=str(comparison_dir),
-                        show_plots=False
-                    )
-                    
-                    # Save results
-                    rprint("\n[bold blue]💾 Saving comparison results...[/bold blue]")
-                    comparator.save_results(
-                        teacher_results,
-                        student_results,
-                        save_dir=str(comparison_dir)
-                    )
-                    
-                    # Generate comprehensive report
-                    rprint("\n[bold blue]📄 Generating comparison report...[/bold blue]")
-                    comparator.generate_report(
-                        teacher_results,
-                        student_results,
-                        save_dir=str(comparison_dir)
-                    )
-                    
-                    # Print summary
-                    rprint("\n" + "="*70)
-                    rprint("[bold green]✅ COMPARISON SUMMARY[/bold green]")
-                    rprint("="*70)
-                    rprint(f"[bold]Teacher Accuracy:[/bold]  {teacher_results['accuracy']:.4f}")
-                    rprint(f"[bold]Student Accuracy:[/bold]  {student_results['accuracy']:.4f}")
-                    rprint(f"[bold]Accuracy Drop:[/bold]     {(teacher_results['accuracy'] - student_results['accuracy']):.4f}")
-                    rprint(f"[bold]Compression Ratio:[/bold] {comparator.compression_ratio:.2f}x smaller")
-                    rprint(f"[bold]Teacher Params:[/bold]    {comparator.teacher_params:,}")
-                    rprint(f"[bold]Student Params:[/bold]    {comparator.student_params:,}")
-                    rprint(f"\n[bold cyan]📁 Comparison results saved to:[/bold cyan] {comparison_dir}")
-                    rprint("="*70)
-                else:
-                    rprint("[yellow]⚠️  Teacher or Student model not found. Skipping comparison.[/yellow]")
-                    if not teacher_path.exists():
-                        rprint(f"[yellow]   Missing: {teacher_path}[/yellow]")
-                    if not student_path.exists():
-                        rprint(f"[yellow]   Missing: {student_path}[/yellow]")
-                        
-            except Exception as e:
-                LOG.exception("Model comparison failed: %s", e)
-                rprint("[red]❌ Model comparison failed — check logs for details.[/red]")
-                import traceback
-                rprint(f"[red]{traceback.format_exc()}[/red]")
 
     except ConfigError as e:
         print("❌ Config error:", e)
