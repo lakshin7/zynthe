@@ -136,15 +136,32 @@ def plot_metrics(metrics, save_dir, labels=None):
 
     cm = metrics.get("confusion_matrix")
     if cm is not None:
-        plt.figure(figsize=(6, 5))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-                    xticklabels=labels if labels is not None else "auto",
-                    yticklabels=labels if labels is not None else "auto")
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-        plt.title("Confusion Matrix")
+        plt.figure(figsize=(8, 6))
+        
+        # Add class labels if not provided
+        if labels is None:
+            num_classes = cm.shape[0]
+            labels = [f"Class {i}" for i in range(num_classes)]
+        
+        # Create heatmap with better formatting
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=True,
+                    xticklabels=labels,
+                    yticklabels=labels,
+                    square=True)
+        
+        plt.xlabel("Predicted Label", fontsize=12, fontweight='bold')
+        plt.ylabel("True Label", fontsize=12, fontweight='bold')
+        plt.title("Confusion Matrix\n(Rows=Actual, Columns=Predicted)", fontsize=14, fontweight='bold')
+        
+        # Add accuracy text
+        accuracy = metrics.get('accuracy', 0)
+        if accuracy > 0:
+            plt.text(0.5, -0.15, f'Overall Accuracy: {accuracy:.2%}', 
+                    transform=plt.gca().transAxes,
+                    ha='center', fontsize=11, style='italic')
+        
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, "confusion_matrix.png"))
+        plt.savefig(os.path.join(save_dir, "confusion_matrix.png"), dpi=150, bbox_inches='tight')
         plt.close()
 
     roc_auc = metrics.get("roc_auc")

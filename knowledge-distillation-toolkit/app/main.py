@@ -366,36 +366,246 @@ def main():
             rprint(f"[green]PTQ applied using mode: {mode} on device {runtime_device}[/green]")
 
         # ========================================================================
-        # PHASE 5 & 8: Evaluation & Reporting
+        # PHASE 5: Evaluation (with Extended Metrics & DEI/CAS)
         # ========================================================================
         print("\n" + "="*70)
-        print("PHASE 5 & 8: Evaluation & Reporting")
+        print("PHASE 5: Evaluation (Extended Metrics)")
         print("="*70 + "\n")
         
-        rprint(f"[bold green]Training completed successfully! Check experiment directory: {cfg_manager.experiment_dir}[/bold green]")
-
-        # Final evaluation
+        # Final evaluation with DualEvaluator
         evaluate_enabled = cfg_manager.resolved_config.get("evaluate", True)
+        metrics = {}
+        extended_metrics = {}
+        
         if evaluate_enabled:
             try:
-                import evaluation.evaluator
-                Evaluator = getattr(evaluation.evaluator, "Evaluator")
+                from evaluation.evaluator_extended import DualEvaluator
+                from evaluation.metrics_extended import DistillationEfficacyIndex, CompressionAwareScore
+                import json
+                
                 model_to_eval = quantized_model if quantized_model is not None else student
-                # Ensure model is on the correct device
                 model_to_eval = model_to_eval.to(cfg_manager.device())
-                evaluator = Evaluator(model=model_to_eval, tokenizer=tokenizer, dataloader=val_loader, device=cfg_manager.device())
-                rprint("[bold blue]Running final evaluation on the model...[/bold blue]")
-                metrics = evaluator.run_all()
-                rprint(f"[bold green]Final evaluation metrics:[/bold green] {metrics}")
+                
+                rprint("[bold blue]Running dual evaluation (Teacher vs Student)...[/bold blue]")
+                
+                # Use DualEvaluator for side-by-side comparison
+                dual_evaluator = DualEvaluator(
+                    teacher_model=teacher,
+                    student_model=model_to_eval,
+                    tokenizer=tokenizer,
+                    dataloader=val_loader,
+                    device=cfg_manager.device()
+                )
+                
+                eval_results = dual_evaluator.evaluate()
+                
+                # Extract metrics
+                metrics = eval_results.get('student', {})
+                teacher_metrics = eval_results.get('teacher', {})
+                extended_metrics = eval_results.get('extended', {})
+                
+                # Display results
+                rprint(f"[bold green]Teacher Metrics:[/bold green]")
+                rprint(f"  Accuracy: {teacher_metrics.get('accuracy', 'N/A'):.4f}")
+                rprint(f"  F1 Score: {teacher_metrics.get('f1', 'N/A'):.4f}")
+                rprint(f"  Loss: {teacher_metrics.get('loss', 'N/A'):.4f}")
+                
+                rprint(f"\n[bold green]Student Metrics:[/bold green]")
+                rprint(f"  Accuracy: {metrics.get('accuracy', 'N/A'):.4f}")
+                rprint(f"  F1 Score: {metrics.get('f1', 'N/A'):.4f}")
+                rprint(f"  Loss: {metrics.get('loss', 'N/A'):.4f}")
+                
+                rprint(f"\n[bold cyan]Extended Distillation Metrics:[/bold cyan]")
+                rprint(f"  KL Divergence: {extended_metrics.get('kl_divergence', 'N/A'):.4f}")
+                rprint(f"  JS Divergence: {extended_metrics.get('js_divergence', 'N/A'):.4f}")
+                rprint(f"  Prediction Agreement: {extended_metrics.get('prediction_agreement', 'N/A'):.2%}")
+                rprint(f"  Confidence Correlation: {extended_metrics.get('confidence_correlation', 'N/A'):.4f}")
+                
+                # Compute DEI & CAS
+                teacher_params = sum(p.numel() for p in teacher.parameters())
+                student_params = sum(p.numel() for p in model_to_eval.parameters())
+                
+                teacher_acc = teacher_metrics.get('accuracy', 0.0)
+                student_acc = metrics.get('accuracy', 0.0)
+                
+                dei_results = DistillationEfficacyIndex.compute_dei(
+                    teacher_accuracy=teacher_acc,
+                    student_accuracy=student_acc,
+                    teacher_params=teacher_params,
+                    student_params=student_params
+                )
+                
+                cas_results = CompressionAwareScore.compute_cas(
+                    teacher_accuracy=teacher_acc,
+                    student_accuracy=student_acc,
+                    teacher_params=teacher_params,
+                    student_params=student_params
+                )
+                
+                # Display DEI & CAS
+                rprint(f"\n[bold magenta]Distillation Efficacy Index (DEI):[/bold magenta]")
+                rprint(f"  DEI Score: {dei_results['dei']:.4f}")
+                rprint(f"  Rating: {dei_results['efficiency_rating']}")
+                rprint(f"  Interpretation: {dei_results['interpretation']}")
+                
+                rprint(f"\n[bold magenta]Compression-Aware Score (CAS):[/bold magenta]")
+                rprint(f"  CAS Score: {cas_results['cas']:.4f}")
+                rprint(f"  Rating: {cas_results['rating']}")
+                
+                # Save extended evaluation results
+                extended_eval_path = Path(cfg_manager.experiment_dir) / "extended_evaluation.json"
+                with open(extended_eval_path, 'w') as f:
+                    json.dump({
+                        'teacher': teacher_metrics,
+                        'student': metrics,
+                        'extended_metrics': extended_metrics,
+                        'dei': dei_results,
+                        'cas': cas_results
+                    }, f, indent=2)
+                
+                print(f"✅ Extended evaluation saved to: {extended_eval_path}")
+                
             except Exception as e:
                 LOG.exception("Evaluation after training failed: %s", e)
                 rprint("[red]Evaluation after training failed — check logs for details.[/red]")
+        
+        # ========================================================================
+        # PHASE 9: Visualization & Showcasing
+        # ========================================================================
+        print("\n" + "="*70)
+        print("PHASE 9: Visualization & Showcasing")
+        print("="*70 + "\n")
+        
+        viz_enabled = cfg_manager.resolved_config.get("visualization", {}).get("enable", True)
+        if viz_enabled:
+            try:
+                from evaluation.visualizer import plot_training_curves
+                from evaluation.metrics import plot_metrics
+                from pathlib import Path
+                
+                viz_dir = Path(cfg_manager.experiment_dir) / "visualizations"
+                viz_dir.mkdir(exist_ok=True)
+                
+                print("📊 Generating visualizations...")
+                
+                # Training curves already saved by trainer, but let's confirm
+                curves_path = Path(cfg_manager.experiment_dir) / "training_curves.png"
+                if curves_path.exists():
+                    print(f"✅ Training curves: {curves_path}")
+                else:
+                    print("⚠️  Training curves not found (may not have been generated)")
+                
+                # Create comparison visualization if we have teacher and student
+                try:
+                    import matplotlib.pyplot as plt
+                    
+                    # Model size comparison
+                    teacher_params = sum(p.numel() for p in teacher.parameters())
+                    student_params = sum(p.numel() for p in student.parameters())
+                    compression_ratio = teacher_params / student_params
+                    
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    models = ['Teacher', 'Student']
+                    params = [teacher_params / 1e6, student_params / 1e6]  # Convert to millions
+                    colors = ['#3498db', '#2ecc71']
+                    
+                    bars = ax.bar(models, params, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+                    ax.set_ylabel('Parameters (Millions)', fontsize=12, fontweight='bold')
+                    ax.set_title(f'Model Size Comparison\nCompression Ratio: {compression_ratio:.2f}x', 
+                                fontsize=14, fontweight='bold')
+                    ax.grid(axis='y', alpha=0.3, linestyle='--')
+                    
+                    # Add value labels on bars
+                    for bar in bars:
+                        height = bar.get_height()
+                        ax.text(bar.get_x() + bar.get_width()/2., height,
+                               f'{height:.1f}M',
+                               ha='center', va='bottom', fontweight='bold')
+                    
+                    plt.tight_layout()
+                    comparison_path = viz_dir / "model_comparison.png"
+                    plt.savefig(comparison_path, dpi=150, bbox_inches='tight')
+                    plt.close()
+                    print(f"✅ Model comparison: {comparison_path}")
+                    
+                except Exception as viz_e:
+                    print(f"⚠️  Could not create model comparison: {viz_e}")
+                
+                # Summary report with extended metrics
+                summary_path = Path(cfg_manager.experiment_dir) / "EXPERIMENT_SUMMARY.md"
+                with open(summary_path, 'w') as f:
+                    resolved_cfg = cfg_manager.resolved_config
+                    f.write(f"# Experiment Summary\n\n")
+                    f.write(f"**Experiment ID**: {cfg_manager.experiment_id}\n\n")
+                    f.write(f"**Date**: {Path(cfg_manager.experiment_dir).name.split('_')[0]}\n\n")
+                    f.write(f"## Models\n\n")
+                    f.write(f"- **Teacher**: {resolved_cfg.get('model', {}).get('name')} ({teacher_params/1e6:.1f}M params)\n")
+                    f.write(f"- **Student**: {resolved_cfg.get('model', {}).get('student_name')} ({student_params/1e6:.1f}M params)\n")
+                    f.write(f"- **Compression**: {compression_ratio:.2f}x\n\n")
+                    f.write(f"## Training\n\n")
+                    f.write(f"- **Epochs**: {resolved_cfg.get('train', {}).get('epochs')}\n")
+                    f.write(f"- **Batch Size**: {resolved_cfg.get('train', {}).get('batch_size')}\n")
+                    f.write(f"- **Learning Rate**: {resolved_cfg.get('train', {}).get('lr')}\n")
+                    f.write(f"- **Device**: {cfg_manager.device()}\n\n")
+                    f.write(f"## Results\n\n")
+                    if evaluate_enabled and 'metrics' in locals():
+                        f.write(f"### Standard Metrics\n\n")
+                        f.write(f"- **Student Accuracy**: {metrics.get('accuracy', 'N/A'):.4f}\n")
+                        f.write(f"- **Student F1 Score**: {metrics.get('f1', 'N/A'):.4f}\n")
+                        if 'teacher_metrics' in locals():
+                            f.write(f"- **Teacher Accuracy**: {teacher_metrics.get('accuracy', 'N/A'):.4f}\n")
+                            f.write(f"- **Teacher F1 Score**: {teacher_metrics.get('f1', 'N/A'):.4f}\n")
+                        
+                        f.write(f"\n### Extended Distillation Metrics\n\n")
+                        if 'extended_metrics' in locals() and extended_metrics:
+                            f.write(f"- **KL Divergence**: {extended_metrics.get('kl_divergence', 'N/A'):.4f}\n")
+                            f.write(f"- **JS Divergence**: {extended_metrics.get('js_divergence', 'N/A'):.4f}\n")
+                            f.write(f"- **Prediction Agreement**: {extended_metrics.get('prediction_agreement', 'N/A'):.2%}\n")
+                            f.write(f"- **Confidence Correlation**: {extended_metrics.get('confidence_correlation', 'N/A'):.4f}\n")
+                        
+                        f.write(f"\n### Distillation Quality Scores\n\n")
+                        if 'dei_results' in locals():
+                            f.write(f"- **DEI Score**: {dei_results['dei']:.4f} ({dei_results['efficiency_rating']})\n")
+                            f.write(f"  - Interpretation: {dei_results['interpretation']}\n")
+                        if 'cas_results' in locals():
+                            f.write(f"- **CAS Score**: {cas_results['cas']:.4f} ({cas_results['rating']})\n")
+                    
+                    f.write(f"\n## Artifacts\n\n")
+                    f.write(f"- Teacher model: `teacher_model/`\n")
+                    f.write(f"- Student model: `student_model/`\n")
+                    f.write(f"- Training curves: `training_curves.png`\n")
+                    f.write(f"- Extended metrics: `extended_metrics.json`\n")
+                    f.write(f"- Extended evaluation: `extended_evaluation.json`\n")
+                    f.write(f"- Model comparison: `visualizations/model_comparison.png`\n")
+                    f.write(f"- Config: `resolved_config.yaml`\n")
+                
+                print(f"✅ Experiment summary: {summary_path}")
+                
+                rprint(f"\n[bold green]🎉 Complete! All artifacts saved to:[/bold green]")
+                rprint(f"[cyan]{cfg_manager.experiment_dir}[/cyan]")
+                
+            except Exception as e:
+                LOG.exception("Visualization failed: %s", e)
+                rprint("[yellow]⚠️  Visualization failed — check logs for details.[/yellow]")
+        else:
+            print("ℹ️  Visualization disabled in config")
+        
+        # ========================================================================
+        # PHASE 8: Reporting (Summary)
+        # ========================================================================
+        print("\n" + "="*70)
+        print("✅ ALL PHASES COMPLETE")
+        print("="*70 + "\n")
+        rprint(f"[bold green]Training completed successfully![/bold green]")
+        rprint(f"[bold]Experiment directory:[/bold] [cyan]{cfg_manager.experiment_dir}[/cyan]")
 
     except ConfigError as e:
         print("❌ Config error:", e)
         
     except Exception as e:
         print("❌ Unexpected error:", e)
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
