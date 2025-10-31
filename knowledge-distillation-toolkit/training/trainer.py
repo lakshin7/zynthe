@@ -180,11 +180,11 @@ class Trainer:
             if self.config['train'].get('centralize_grads', False):
                 GradientManager.centralize_gradients(self.student)
             
-            # Log gradient statistics if needed
-            if batch_idx % 100 == 0:
+            # Log gradient statistics if needed (every 100 batches)
+            if batch_idx % 100 == 0 and grad_norm > 0:
                 grad_stats = GradientManager.get_gradient_stats(self.student)
-                if grad_stats['max'] > 10.0:  # Warn about potential gradient explosion
-                    print(f"[WARN] Large gradient detected: max={grad_stats['max']:.2f}, mean={grad_stats['mean']:.2f}")
+                if grad_stats['grad_norm'] > 10.0:  # Warn about potential gradient explosion
+                    print(f"[WARN] Large gradient detected: norm={grad_stats['grad_norm']:.2f}, mean={grad_stats['grad_mean']:.4f}")
             
             self.optimizer.step()
             

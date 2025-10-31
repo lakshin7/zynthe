@@ -381,6 +381,7 @@ def main():
             try:
                 from evaluation.evaluator_extended import DualEvaluator
                 from evaluation.metrics_extended import DistillationEfficacyIndex, CompressionAwareScore
+                from pathlib import Path
                 import json
                 
                 model_to_eval = quantized_model if quantized_model is not None else student
