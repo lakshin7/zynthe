@@ -584,5 +584,6 @@ def create_similarity_config(
         config['layer'] = layer
     else:
         config['layer'] = -1  # Default to last layer
+        3
     
     return config

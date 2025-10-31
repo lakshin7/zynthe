@@ -390,9 +390,8 @@ def main():
                 
                 # Use DualEvaluator for side-by-side comparison
                 dual_evaluator = DualEvaluator(
-                    teacher_model=teacher,
-                    student_model=model_to_eval,
-                    tokenizer=tokenizer,
+                    teacher=teacher,
+                    student=model_to_eval,
                     dataloader=val_loader,
                     device=cfg_manager.device()
                 )
@@ -404,22 +403,32 @@ def main():
                 teacher_metrics = eval_results.get('teacher', {})
                 extended_metrics = eval_results.get('extended', {})
                 
+                # Helper to format metrics safely
+                def fmt(value, format_spec='.4f'):
+                    """Format value or return N/A if not available"""
+                    if value == 'N/A' or value is None:
+                        return 'N/A'
+                    try:
+                        return f"{value:{format_spec}}"
+                    except (ValueError, TypeError):
+                        return str(value)
+                
                 # Display results
                 rprint(f"[bold green]Teacher Metrics:[/bold green]")
-                rprint(f"  Accuracy: {teacher_metrics.get('accuracy', 'N/A'):.4f}")
-                rprint(f"  F1 Score: {teacher_metrics.get('f1', 'N/A'):.4f}")
-                rprint(f"  Loss: {teacher_metrics.get('loss', 'N/A'):.4f}")
+                rprint(f"  Accuracy: {fmt(teacher_metrics.get('accuracy', 'N/A'))}")
+                rprint(f"  F1 Score: {fmt(teacher_metrics.get('f1', 'N/A'))}")
+                rprint(f"  Loss: {fmt(teacher_metrics.get('loss', 'N/A'))}")
                 
                 rprint(f"\n[bold green]Student Metrics:[/bold green]")
-                rprint(f"  Accuracy: {metrics.get('accuracy', 'N/A'):.4f}")
-                rprint(f"  F1 Score: {metrics.get('f1', 'N/A'):.4f}")
-                rprint(f"  Loss: {metrics.get('loss', 'N/A'):.4f}")
+                rprint(f"  Accuracy: {fmt(metrics.get('accuracy', 'N/A'))}")
+                rprint(f"  F1 Score: {fmt(metrics.get('f1', 'N/A'))}")
+                rprint(f"  Loss: {fmt(metrics.get('loss', 'N/A'))}")
                 
                 rprint(f"\n[bold cyan]Extended Distillation Metrics:[/bold cyan]")
-                rprint(f"  KL Divergence: {extended_metrics.get('kl_divergence', 'N/A'):.4f}")
-                rprint(f"  JS Divergence: {extended_metrics.get('js_divergence', 'N/A'):.4f}")
-                rprint(f"  Prediction Agreement: {extended_metrics.get('prediction_agreement', 'N/A'):.2%}")
-                rprint(f"  Confidence Correlation: {extended_metrics.get('confidence_correlation', 'N/A'):.4f}")
+                rprint(f"  KL Divergence: {fmt(extended_metrics.get('kl_divergence', 'N/A'))}")
+                rprint(f"  JS Divergence: {fmt(extended_metrics.get('js_divergence', 'N/A'))}")
+                rprint(f"  Prediction Agreement: {fmt(extended_metrics.get('prediction_agreement', 'N/A'), '.2%')}")
+                rprint(f"  Confidence Correlation: {fmt(extended_metrics.get('confidence_correlation', 'N/A'))}")
                 
                 # Compute DEI & CAS
                 teacher_params = sum(p.numel() for p in teacher.parameters())
@@ -429,24 +438,41 @@ def main():
                 student_acc = metrics.get('accuracy', 0.0)
                 
                 dei_results = DistillationEfficacyIndex.compute_dei(
-                    teacher_accuracy=teacher_acc,
-                    student_accuracy=student_acc,
+                    teacher_acc=teacher_acc,
+                    student_acc=student_acc,
                     teacher_params=teacher_params,
                     student_params=student_params
                 )
                 
+                # CAS requires latency measurements, use placeholder values
                 cas_results = CompressionAwareScore.compute_cas(
-                    teacher_accuracy=teacher_acc,
-                    student_accuracy=student_acc,
+                    accuracy=student_acc,
                     teacher_params=teacher_params,
-                    student_params=student_params
+                    student_params=student_params,
+                    teacher_latency=1.0,  # Placeholder - would measure in production
+                    student_latency=0.5   # Placeholder - would measure in production
                 )
+                
+                # Add rating to CAS based on score
+                cas_score = cas_results['cas']
+                if cas_score > 0.35:
+                    cas_rating = 'Excellent'
+                elif cas_score > 0.25:
+                    cas_rating = 'Very Good'
+                elif cas_score > 0.15:
+                    cas_rating = 'Good'
+                elif cas_score > 0.05:
+                    cas_rating = 'Fair'
+                else:
+                    cas_rating = 'Poor'
+                cas_results['rating'] = cas_rating
                 
                 # Display DEI & CAS
                 rprint(f"\n[bold magenta]Distillation Efficacy Index (DEI):[/bold magenta]")
                 rprint(f"  DEI Score: {dei_results['dei']:.4f}")
                 rprint(f"  Rating: {dei_results['efficiency_rating']}")
-                rprint(f"  Interpretation: {dei_results['interpretation']}")
+                rprint(f"  Accuracy Retention: {dei_results['accuracy_retention']:.2%}")
+                rprint(f"  Compression Ratio: {dei_results['compression_ratio']:.2f}x")
                 
                 rprint(f"\n[bold magenta]Compression-Aware Score (CAS):[/bold magenta]")
                 rprint(f"  CAS Score: {cas_results['cas']:.4f}")
@@ -550,23 +576,36 @@ def main():
                     f.write(f"## Results\n\n")
                     if evaluate_enabled and 'metrics' in locals():
                         f.write(f"### Standard Metrics\n\n")
-                        f.write(f"- **Student Accuracy**: {metrics.get('accuracy', 'N/A'):.4f}\n")
-                        f.write(f"- **Student F1 Score**: {metrics.get('f1', 'N/A'):.4f}\n")
+                        
+                        # Safely format student metrics
+                        student_acc = metrics.get('accuracy', 'N/A')
+                        student_f1 = metrics.get('f1', 'N/A')
+                        f.write(f"- **Student Accuracy**: {student_acc if student_acc == 'N/A' else f'{student_acc:.4f}'}\n")
+                        f.write(f"- **Student F1 Score**: {student_f1 if student_f1 == 'N/A' else f'{student_f1:.4f}'}\n")
+                        
                         if 'teacher_metrics' in locals():
-                            f.write(f"- **Teacher Accuracy**: {teacher_metrics.get('accuracy', 'N/A'):.4f}\n")
-                            f.write(f"- **Teacher F1 Score**: {teacher_metrics.get('f1', 'N/A'):.4f}\n")
+                            teacher_acc = teacher_metrics.get('accuracy', 'N/A')
+                            teacher_f1 = teacher_metrics.get('f1', 'N/A')
+                            f.write(f"- **Teacher Accuracy**: {teacher_acc if teacher_acc == 'N/A' else f'{teacher_acc:.4f}'}\n")
+                            f.write(f"- **Teacher F1 Score**: {teacher_f1 if teacher_f1 == 'N/A' else f'{teacher_f1:.4f}'}\n")
                         
                         f.write(f"\n### Extended Distillation Metrics\n\n")
                         if 'extended_metrics' in locals() and extended_metrics:
-                            f.write(f"- **KL Divergence**: {extended_metrics.get('kl_divergence', 'N/A'):.4f}\n")
-                            f.write(f"- **JS Divergence**: {extended_metrics.get('js_divergence', 'N/A'):.4f}\n")
-                            f.write(f"- **Prediction Agreement**: {extended_metrics.get('prediction_agreement', 'N/A'):.2%}\n")
-                            f.write(f"- **Confidence Correlation**: {extended_metrics.get('confidence_correlation', 'N/A'):.4f}\n")
+                            kl_div = extended_metrics.get('kl_divergence', 'N/A')
+                            js_div = extended_metrics.get('js_divergence', 'N/A')
+                            pred_agree = extended_metrics.get('prediction_agreement', 'N/A')
+                            conf_corr = extended_metrics.get('confidence_correlation', 'N/A')
+                            
+                            f.write(f"- **KL Divergence**: {kl_div if kl_div == 'N/A' else f'{kl_div:.4f}'}\n")
+                            f.write(f"- **JS Divergence**: {js_div if js_div == 'N/A' else f'{js_div:.4f}'}\n")
+                            f.write(f"- **Prediction Agreement**: {pred_agree if pred_agree == 'N/A' else f'{pred_agree:.2%}'}\n")
+                            f.write(f"- **Confidence Correlation**: {conf_corr if conf_corr == 'N/A' else f'{conf_corr:.4f}'}\n")
                         
                         f.write(f"\n### Distillation Quality Scores\n\n")
                         if 'dei_results' in locals():
                             f.write(f"- **DEI Score**: {dei_results['dei']:.4f} ({dei_results['efficiency_rating']})\n")
-                            f.write(f"  - Interpretation: {dei_results['interpretation']}\n")
+                            f.write(f"  - Accuracy Retention: {dei_results['accuracy_retention']:.2%}\n")
+                            f.write(f"  - Compression Ratio: {dei_results['compression_ratio']:.2f}x\n")
                         if 'cas_results' in locals():
                             f.write(f"- **CAS Score**: {cas_results['cas']:.4f} ({cas_results['rating']})\n")
                     

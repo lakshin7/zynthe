@@ -14,17 +14,13 @@ train:
 
 model:
   # Teacher model (larger, state-of-the-art)
-  name: "microsoft/DialoGPT-medium"           # Teacher: DialoGPT-medium (117M params)
+  name: "roberta-base"                     # Teacher: RoBERTa-base (125M params)
   # Student model (smaller, efficient)  
-  student_name: "microsoft/DialoGPT-small"   # Student: DialoGPT-small (117M params)
-  type: "causallm"                           # Causal language models
-  # Alternative pairing for sequence classification:
-  # name: "roberta-base"                     # Teacher: RoBERTa-base (125M params)
-  # student_name: "distilroberta-base"       # Student: DistilRoBERTa (82M params)
-  # type: "transformer"
+  student_name: "distilroberta-base"       # Student: DistilRoBERTa (82M params)
+  type: "transformer"                      # Sequence classification transformers
   
   # Tokenizer configuration
-  tokenizer_name: "microsoft/DialoGPT-medium"  # Use teacher's tokenizer
+  tokenizer_name: "roberta-base"  # Use teacher's tokenizer
   
   # Model-specific settings
   max_length: 256              # Maximum sequence length
