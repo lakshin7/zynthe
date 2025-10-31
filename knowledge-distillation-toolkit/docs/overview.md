@@ -54,6 +54,11 @@ This toolkit provides a robust, extensible, and enterprise-ready framework for k
    - Use `ConfigManager` to load and resolve configs.
    - `load_models(cfg, device)` loads both teacher and student models, as well as the tokenizer, on the correct device.
    - Models are wrapped with `ModelWrapper` for unified operations (forward, save, quantize, etc.).
+   - **Teacher-Student Pairs**: The toolkit supports various model combinations:
+     - **BERT → DistilBERT**: Standard distillation (110M → 66M parameters)
+     - **RoBERTa → DistilRoBERTa**: More robust representations (125M → 82M parameters) 
+     - **GPT-2 → DistilGPT-2**: Generative model distillation
+     - **Custom pairs**: Any compatible Hugging Face models
 
 3. **Distillation:**
    - Choose a distillation strategy (e.g., Hinton KD, Attention, Feature, Similarity) via config.
@@ -96,18 +101,66 @@ from core.models.model_wrapper import ModelWrapper
 from core.distillers.kd_hinton import KDHintonDistiller
 import torch
 
+# Load configuration with teacher and student models
 cfg = ConfigManager(config_path="configs/default.yaml")
 device = cfg.device()
-teacher, student, tokenizer = load_models(cfg, device=device)
+
+# Load teacher (BERT-base) and student (DistilBERT) models
+teacher, student, tokenizer = load_models(cfg.resolved_config, device=device)
+
+# Wrap student model for training
 student_wrapper = ModelWrapper(student, device=device, tokenizer=tokenizer)
+
+# Create sample input
 input_ids = torch.randint(0, 100, (2, 8)).to(device)
 labels = torch.randint(0, 2, (2,)).to(device)
+
+# Get teacher predictions (no gradients needed)
 with torch.no_grad():
     teacher_logits = teacher(input_ids).logits
+
+# Get student predictions
 student_logits = student_wrapper.forward(input_ids).logits
+
+# Apply knowledge distillation
 distiller = KDHintonDistiller(temperature=2.0, alpha=0.5)
 loss = distiller.compute_loss(student_logits, teacher_logits, labels)
 print(f"Distillation loss: {loss.item():.4f}")
+```
+
+## Configuration Examples
+
+### Basic Configuration (configs/default.yaml)
+```yaml
+model:
+  name: "bert-base-uncased"              # Teacher model
+  student_name: "distilbert-base-uncased" # Student model  
+  type: "transformer"                     # Model type
+  tokenizer_name: "bert-base-uncased"     # Tokenizer (usually same as teacher)
+
+distillation:
+  method: "kd_hinton"                     # Hinton knowledge distillation
+  temperature: 2.0                        # Softmax temperature
+  alpha: 0.5                             # Balance between hard and soft targets
+```
+
+### Advanced Multi-Stage Configuration (configs/advanced.yaml)
+```yaml
+model:
+  name: "roberta-base"                    # Larger teacher
+  student_name: "distilroberta-base"      # Efficient student
+  type: "transformer"
+
+distillation:
+  method: "multi_stage"
+  strategies:
+    - name: "kd_hinton"                   # Knowledge distillation
+      temperature: 4.0
+      alpha: 0.7
+    - name: "attention_transfer"          # Attention matching
+      beta: 1e-3
+    - name: "similarity_transfer"         # Feature similarity
+      gamma: 2e-3
 ```
 
 ## Directory Structure

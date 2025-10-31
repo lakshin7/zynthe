@@ -8,9 +8,34 @@ train:
   grad_accum_steps: 2          # Effective batch size = 4 * 2 = 8
   mixed_precision: false       # MPS doesn't support float16 well yet
   early_stop_patience: 3       # More patience for larger models
-  warmup_steps: 100           # Gradual learning rate warmup
-  weight_decay: 0.01          # L2 regularization
-  max_grad_norm: 1.0          # Gradient clipping
+  
+  # Advanced Optimizer Configuration (NEW - OptimizerFactory)
+  optimizer: adamw             # adamw, adam, sgd, lion, adamw_8bit, adam_1bit
+  weight_decay: 0.01           # L2 regularization
+  max_grad_norm: 1.0           # Gradient clipping (prevents explosion)
+  centralize_grads: true       # Gradient centralization (stabilizes distillation)
+  dynamic_lr: true             # Enable adaptive LR tuning based on DEI/CAS metrics
+  
+  # Advanced Scheduler Configuration (NEW - SchedulerFactory)
+  scheduler: cosine            # cosine, linear, polynomial, step, multistep, exponential, plateau, onecycle, cyclic
+  warmup_steps: 100            # Gradual learning rate warmup
+  warmup_type: linear          # linear, cosine, or constant warmup
+  warmup_ratio: 0.0            # Alternative to warmup_steps: 0.1 = 10% of total steps
+  eta_min: 0.0                 # Minimum LR for cosine scheduler
+  
+  # Additional scheduler options (uncomment as needed):
+  # For step scheduler:
+  # step_size: 2                # Decay LR every N epochs
+  # gamma: 0.1                  # LR multiplier
+  
+  # For plateau scheduler:
+  # mode: max                   # 'max' for accuracy, 'min' for loss
+  # patience: 3                 # Epochs to wait before reducing LR
+  # factor: 0.5                 # LR reduction factor
+  
+  # For onecycle scheduler:
+  # max_lr: 1e-3                # Peak learning rate
+  # pct_start: 0.3              # Percentage of cycle spent increasing LR
 
 model:
   # Teacher model (larger, state-of-the-art)

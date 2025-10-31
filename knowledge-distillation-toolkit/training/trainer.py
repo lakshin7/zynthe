@@ -9,6 +9,8 @@ from evaluation.metrics_extended import (
     LossComponentTracker
 )
 from core.distillers.multi_stage_distiller import DistillerRegistry
+from training.optimizer import OptimizerFactory, GradientManager, AdaptiveOptimizer
+from training.scheduler import SchedulerFactory
 import torch
 from torch.optim import AdamW
 import os
@@ -24,7 +26,25 @@ class Trainer:
         self.config = config
         self.device = device
         self.experiment_dir = experiment_dir
-        self.optimizer = AdamW(self.student.parameters(), lr=self.config['train'].get('lr', 5e-5))
+        
+        # Create optimizer using OptimizerFactory (phase-aware, gradient management)
+        self.optimizer = OptimizerFactory.get_optimizer(
+            self.student,
+            self.config['train'],
+            phase='distillation'
+        )
+        
+        # Create learning rate scheduler
+        num_epochs = self.config['train'].get('num_epochs', 10)
+        # Estimate steps per epoch (will be updated in train())
+        self.scheduler = None  # Will be initialized in train() with actual steps_per_epoch
+        
+        # Create adaptive optimizer wrapper (DEI/CAS-based LR tuning)
+        enable_adaptive = self.config['train'].get('dynamic_lr', True)
+        self.adaptive_opt = AdaptiveOptimizer(
+            self.optimizer,
+            enable_auto_tune=enable_adaptive
+        )
         
         # Teacher training configuration
         self.should_train_teacher = self.config['train'].get('train_teacher', False)
@@ -144,9 +164,36 @@ class Trainer:
             except Exception as e:
                 print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
                 loss = torch.tensor(0.0, device=self.device)
+            
             self.optimizer.zero_grad()
             loss.backward()
+            
+            # Gradient management (clipping, centralization, monitoring)
+            max_grad_norm = self.config['train'].get('max_grad_norm', 1.0)
+            grad_norm = GradientManager.clip_gradients(
+                self.student,
+                max_norm=max_grad_norm,
+                norm_type=2.0
+            )
+            
+            # Centralize gradients for distillation stability (optional)
+            if self.config['train'].get('centralize_grads', False):
+                GradientManager.centralize_gradients(self.student)
+            
+            # Log gradient statistics if needed
+            if batch_idx % 100 == 0:
+                grad_stats = GradientManager.get_gradient_stats(self.student)
+                if grad_stats['max'] > 10.0:  # Warn about potential gradient explosion
+                    print(f"[WARN] Large gradient detected: max={grad_stats['max']:.2f}, mean={grad_stats['mean']:.2f}")
+            
             self.optimizer.step()
+            
+            # Step scheduler if it's per-step (OneCycle, Cyclic, etc.)
+            if self.scheduler is not None and hasattr(self.scheduler, 'step'):
+                scheduler_name = type(self.scheduler).__name__
+                if 'OneCycle' in scheduler_name or 'Cyclic' in scheduler_name:
+                    self.scheduler.step()
+            
             total_loss += loss.item()
             num_batches += 1
         avg_loss = total_loss / max(num_batches, 1)
@@ -275,6 +322,16 @@ class Trainer:
         return avg_loss, metrics, extended_metrics
 
     def fit(self, train_loader, val_loader):
+        # Initialize scheduler now that we know steps_per_epoch
+        if self.scheduler is None:
+            steps_per_epoch = len(train_loader)
+            num_epochs = self.config['train'].get('epochs', 10)
+            total_steps = steps_per_epoch * num_epochs
+            
+            scheduler_factory = SchedulerFactory(self.optimizer, self.config['train'])
+            self.scheduler = scheduler_factory.get_scheduler(num_training_steps=total_steps)
+            print(f"[INFO] Scheduler initialized: {type(self.scheduler).__name__}")
+        
         # Optional: Train teacher first if configured
         if self.should_train_teacher:
             print(f"\n{'='*70}")
@@ -302,6 +359,28 @@ class Trainer:
             })
 
             print(f"[INFO] Epoch {epoch+1} summary: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, Metrics={val_metrics_dict}")
+
+            # Step scheduler (for epoch-based schedulers)
+            if self.scheduler is not None:
+                scheduler_name = type(self.scheduler).__name__
+                # Don't step OneCycle/Cyclic here (they step per batch)
+                if 'OneCycle' not in scheduler_name and 'Cyclic' not in scheduler_name:
+                    if 'ReduceLROnPlateau' in scheduler_name:
+                        # ReduceLROnPlateau needs a metric
+                        metric_value = val_metrics_dict.get('accuracy', val_loss)
+                        self.scheduler.step(metric_value)
+                    else:
+                        self.scheduler.step()
+            
+            # Adaptive LR tuning based on extended metrics (DEI/CAS)
+            if hasattr(self, 'adaptive_opt') and extended:
+                actions = self.adaptive_opt.auto_tune(extended, epoch=epoch+1)
+                if actions:
+                    print(f"[ADAPTIVE] LR tuning actions: {', '.join(actions)}")
+            
+            # Log current learning rate
+            current_lr = self.optimizer.param_groups[0]['lr']
+            print(f"[INFO] Current learning rate: {current_lr:.6e}")
 
             # Early stopping
             if val_loss < self.best_val_loss:
