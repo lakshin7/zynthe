@@ -75,7 +75,7 @@ class HintRegressor(nn.Module):
         self.regressor_type = regressor_type
         
         if regressor_type == '1x1conv' or regressor_type == 'conv1x1':
-            layers = [nn.Conv2d(student_dim, teacher_dim, 1, bias=not use_bn)]
+            layers: List[nn.Module] = [nn.Conv2d(student_dim, teacher_dim, 1, bias=not use_bn)]
             if use_bn:
                 layers.append(nn.BatchNorm2d(teacher_dim))
             if activation == 'relu':
@@ -85,7 +85,7 @@ class HintRegressor(nn.Module):
             self.regressor = nn.Sequential(*layers)
         
         elif regressor_type == 'linear':
-            layers = [nn.Linear(student_dim, teacher_dim, bias=not use_bn)]
+            layers: List[nn.Module] = [nn.Linear(student_dim, teacher_dim, bias=not use_bn)]
             if use_bn:
                 layers.append(nn.BatchNorm1d(teacher_dim))
             if activation == 'relu':
@@ -120,19 +120,24 @@ class HintRegressor(nn.Module):
             if len(x.shape) == 4:
                 b, c, h, w = x.shape
                 x_flat = x.flatten(2).transpose(1, 2)  # [B, H*W, C]
+                
+                Q = self.query(x_flat)
+                K = self.key(x_flat)
+                V = self.value(x_flat)
+                
+                attn = torch.softmax(Q @ K.transpose(-2, -1) * self.scale, dim=-1)
+                out = attn @ V
+                out = out.transpose(1, 2).reshape(b, -1, h, w)
+                return out
             else:
                 x_flat = x
-            
-            Q = self.query(x_flat)
-            K = self.key(x_flat)
-            V = self.value(x_flat)
-            
-            attn = torch.softmax(Q @ K.transpose(-2, -1) * self.scale, dim=-1)
-            out = attn @ V
-            
-            if len(x.shape) == 4:
-                out = out.transpose(1, 2).reshape(b, -1, h, w)
-            return out
+                Q = self.query(x_flat)
+                K = self.key(x_flat)
+                V = self.value(x_flat)
+                
+                attn = torch.softmax(Q @ K.transpose(-2, -1) * self.scale, dim=-1)
+                out = attn @ V
+                return out
         else:
             return self.regressor(x)
 
@@ -575,7 +580,11 @@ class KDHintonDistiller(BaseDistiller):
             
             if hint_loss_total > 0:
                 total_loss += hint_loss_total
-                loss_dict['hint_total'] = hint_loss_total.item()
+                # Ensure hint_loss_total is tensor before calling .item()
+                if isinstance(hint_loss_total, torch.Tensor):
+                    loss_dict['hint_total'] = hint_loss_total.item()
+                else:
+                    loss_dict['hint_total'] = float(hint_loss_total)
                 loss_dict['hint_weight'] = current_hint_weight
         
         loss_dict['temperature'] = current_temp
