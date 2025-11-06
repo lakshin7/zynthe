@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowLeft, Download, TrendingUp, TrendingDown, Activity, BarChart3 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, Button, StatusBadge, ProgressBar } from '../components/base';
+import { EvaluationMonitor } from '../components/EvaluationMonitor';
 
 interface TrainingMetrics {
   step: number;
@@ -23,6 +24,7 @@ interface EvaluationMetrics {
 export function TrainingMonitor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'training' | 'evaluation'>('training');
   const [experiment, setExperiment] = useState<any>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [evaluation, setEvaluation] = useState<EvaluationMetrics | null>(null);
@@ -158,11 +160,42 @@ export function TrainingMonitor() {
         <div className="mt-4">
           <ProgressBar progress={progress} status="running" animated />
         </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mt-4 border-b border-border-light">
+          <button
+            onClick={() => setActiveTab('training')}
+            className={`px-6 py-3 font-medium text-sm transition-all relative ${
+              activeTab === 'training'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4" />
+              Training Metrics
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('evaluation')}
+            className={`px-6 py-3 font-medium text-sm transition-all relative ${
+              activeTab === 'evaluation'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Evaluation
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto custom-scrollbar">
-        <div className="p-8 space-y-6">
+        {activeTab === 'training' ? (
+          <div className="p-8 space-y-6">{/* Training content */}
           {/* Metrics Overview */}
           <div className="grid grid-cols-4 gap-4">
             <Card padding="md">
@@ -378,7 +411,19 @@ export function TrainingMonitor() {
               <div ref={logsEndRef} />
             </div>
           </Card>
-        </div>
+          </div>
+        ) : (
+          /* Evaluation Tab */
+          <div className="p-8">
+            <EvaluationMonitor
+              experimentId={id || ''}
+              onComplete={(result) => {
+                console.log('Evaluation completed:', result);
+                setEvaluation(result);
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

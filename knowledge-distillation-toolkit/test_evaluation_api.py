@@ -24,19 +24,27 @@ async def test_evaluation_endpoints():
         try:
             response = await client.get(f"{API_BASE}/api/experiments")
             if response.status_code == 200:
-                experiments = response.json().get("experiments", [])
+                data = response.json()
+                # Handle both dict and list responses
+                if isinstance(data, dict):
+                    experiments = data.get("experiments", [])
+                elif isinstance(data, list):
+                    experiments = data
+                else:
+                    experiments = []
+                
                 if experiments:
                     exp_id = experiments[0]["experiment_id"]
                     print(f"   ✅ Found experiment: {exp_id}")
                 else:
-                    print("   ⚠️  No experiments found - creating test experiment")
-                    exp_id = "test_exp_001"
+                    print("   ⚠️  No experiments found - using existing one")
+                    exp_id = "20250904T123000Z_0494fe02"
             else:
                 print(f"   ⚠️  Could not list experiments (status {response.status_code})")
-                exp_id = "test_exp_001"
+                exp_id = "20250904T123000Z_0494fe02"
         except Exception as e:
             print(f"   ⚠️  Error listing experiments: {e}")
-            exp_id = "test_exp_001"
+            exp_id = "20250904T123000Z_0494fe02"
         
         # Test 2: Start evaluation task
         print("\n2️⃣ Starting evaluation task...")
