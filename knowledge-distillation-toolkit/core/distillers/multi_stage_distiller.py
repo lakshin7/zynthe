@@ -45,7 +45,7 @@ except ImportError:
     warnings.warn("AttentionTransfer not available")
 
 try:
-    from ..quant.qat import QATDistiller
+    from ..quant.qat import QATDistiller  # type: ignore[import]
     HAS_QAT = True
 except ImportError:
     HAS_QAT = False
