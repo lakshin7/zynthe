@@ -1,10 +1,24 @@
 import torch
 import evaluation.metrics
+from typing import Optional, Callable, Dict, Any
 
 class Evaluator:
-    def __init__(self, model, dataloader, tokenizer, device, loss_fn=None, task_type='classification', explainer=None):
+    def __init__(
+        self, 
+        model, 
+        dataloader, 
+        tokenizer, 
+        device, 
+        loss_fn=None, 
+        task_type='classification', 
+        explainer=None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        update_frequency: int = 10
+    ):
         """
         task_type: 'classification', 'multi_label', or 'regression'
+        progress_callback: Optional callback for real-time progress updates (WebSocket streaming)
+        update_frequency: Update progress every N batches (default: 10)
         """
         self.model = model
         self.dataloader = dataloader
@@ -13,6 +27,10 @@ class Evaluator:
         self.loss_fn = loss_fn
         self.task_type = task_type
         self.explainer = explainer
+        
+        # Real-time progress streaming for UI
+        self.progress_callback = progress_callback
+        self.update_frequency = update_frequency
 
     def evaluate(self):
         self.model.eval()
@@ -20,6 +38,10 @@ class Evaluator:
         total_samples = 0
         all_preds = []
         all_labels = []
+        
+        # Calculate total batches for progress tracking
+        total_batches = len(self.dataloader) if hasattr(self.dataloader, '__len__') else None
+        batch_count = 0
 
         with torch.no_grad():
             for batch in self.dataloader:
@@ -79,6 +101,34 @@ class Evaluator:
                     all_labels.extend(labels)
                 else:
                     all_labels.append(labels)
+                
+                batch_count += 1
+                
+                # ========== REAL-TIME PROGRESS STREAMING ==========
+                # Send progress updates to UI via WebSocket
+                if self.progress_callback and batch_count % self.update_frequency == 0:
+                    # Calculate running accuracy for classification tasks
+                    running_accuracy = None
+                    if self.task_type in ['classification', 'multi_label'] and len(all_preds) > 0:
+                        correct = sum(p == l for p, l in zip(all_preds, all_labels))
+                        running_accuracy = correct / len(all_preds)
+                    
+                    progress_payload = {
+                        'type': 'evaluation_progress',
+                        'stage': 'evaluation',
+                        'batch': batch_count,
+                        'total_batches': total_batches,
+                        'progress': (batch_count / total_batches * 100) if total_batches else None,
+                        'samples_processed': total_samples,
+                        'current_accuracy': running_accuracy,
+                        'current_loss': (total_loss / total_samples) if total_samples > 0 and self.loss_fn else None
+                    }
+                    
+                    try:
+                        self.progress_callback(progress_payload)
+                    except Exception as e:
+                        print(f"[WARNING] Progress callback failed: {e}")
+                # ================================================
 
         avg_loss = total_loss / total_samples if self.loss_fn is not None else None
 

@@ -5,7 +5,7 @@ Supports side-by-side teacher-student evaluation with extended metrics
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Tuple, List, Any
+from typing import Dict, Optional, Tuple, List, Any, Callable
 import numpy as np
 import time
 from evaluation.metrics import compute_all_metrics
@@ -29,7 +29,9 @@ class DualEvaluator:
                  dataloader,
                  device: str,
                  temperature: float = 2.0,
-                 compute_features: bool = False):
+                 compute_features: bool = False,
+                 progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+                 update_frequency: int = 10):
         """
         Args:
             teacher: Teacher model
@@ -38,6 +40,8 @@ class DualEvaluator:
             device: Device (cpu/cuda/mps)
             temperature: Temperature for KL divergence
             compute_features: Whether to extract and compare features
+            progress_callback: Optional callback for real-time progress updates
+            update_frequency: Update progress every N batches
         """
         self.teacher = teacher
         self.student = student
@@ -45,6 +49,10 @@ class DualEvaluator:
         self.device = device
         self.temperature = temperature
         self.compute_features = compute_features
+        
+        # Real-time progress streaming for UI
+        self.progress_callback = progress_callback
+        self.update_frequency = update_frequency
         
         # Move models to device
         self.teacher.to(device)
@@ -85,6 +93,9 @@ class DualEvaluator:
         # Timing
         teacher_time = 0.0
         student_time = 0.0
+        
+        # Calculate total batches for progress tracking
+        total_batches = len(self.dataloader) if hasattr(self.dataloader, '__len__') else None
         
         with torch.no_grad():
             for batch_idx, batch in enumerate(self.dataloader):
@@ -143,6 +154,34 @@ class DualEvaluator:
                 kl_divs.append(batch_metrics['kl_divergence'])
                 js_divs.append(batch_metrics['js_divergence'])
                 confidence_corrs.append(batch_metrics['confidence_correlation'])
+                
+                # ========== REAL-TIME PROGRESS STREAMING ==========
+                # Send progress updates to UI via WebSocket
+                if self.progress_callback and (batch_idx + 1) % self.update_frequency == 0:
+                    running_teacher_acc = teacher_correct / total_samples if total_samples > 0 else 0
+                    running_student_acc = student_correct / total_samples if total_samples > 0 else 0
+                    running_agreement = agreement_count / total_samples if total_samples > 0 else 0
+                    
+                    progress_payload = {
+                        'type': 'evaluation_progress',
+                        'stage': 'dual_evaluation',
+                        'batch': batch_idx + 1,
+                        'total_batches': total_batches,
+                        'progress': ((batch_idx + 1) / total_batches * 100) if total_batches else None,
+                        'samples_processed': total_samples,
+                        'teacher_accuracy': running_teacher_acc,
+                        'student_accuracy': running_student_acc,
+                        'prediction_agreement': running_agreement,
+                        'avg_kl_divergence': np.mean(kl_divs) if kl_divs else None,
+                        'teacher_latency_ms': (teacher_time / total_samples * 1000) if total_samples > 0 else None,
+                        'student_latency_ms': (student_time / total_samples * 1000) if total_samples > 0 else None
+                    }
+                    
+                    try:
+                        self.progress_callback(progress_payload)
+                    except Exception as e:
+                        print(f"[WARNING] Progress callback failed: {e}")
+                # ================================================
                 
                 if (batch_idx + 1) % 20 == 0:
                     print(f"[DUAL EVAL] Processed {batch_idx + 1}/{len(self.dataloader)} batches")

@@ -16,17 +16,23 @@ from pathlib import Path
 from datetime import datetime
 
 from training_manager import TrainingManager
+from evaluation_tasks import init_task_manager, get_task_manager, EvaluationType
 
 # Training manager for subprocess handling
 training_manager = None
+evaluation_task_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize training manager on startup"""
-    global training_manager
+    """Initialize training manager and evaluation task manager on startup"""
+    global training_manager, evaluation_task_manager
     training_manager = TrainingManager(websocket_broadcast=broadcast_message)
+    # Initialize evaluation task manager with WebSocket support
+    evaluation_task_manager = init_task_manager(max_workers=2, websocket_manager=None)  # Will set websocket later
     yield
-    # Cleanup on shutdown (if needed)
+    # Cleanup on shutdown
+    if evaluation_task_manager:
+        evaluation_task_manager.shutdown(wait=True)
 
 app = FastAPI(title="Zynthe API", version="1.0.0", lifespan=lifespan)
 
@@ -61,6 +67,11 @@ class PreflightRequest(BaseModel):
     teacher_model: str
     student_model: str
     dataset_size: Optional[int] = None
+
+class EvaluationRequest(BaseModel):
+    experiment_id: str
+    eval_type: str = "standard"  # 'standard', 'extended', 'dual', 'benchmark'
+    benchmark_tasks: Optional[List[str]] = None  # For benchmark eval: ['truthfulqa', 'mmlu', 'gsm8k']
 
 # ===== HELPER FUNCTIONS =====
 
@@ -776,6 +787,146 @@ async def preflight_check(request: PreflightRequest):
             "teacher_description": teacher["description"]
         }
     }
+
+# ===== ASYNC EVALUATION TASK ENDPOINTS =====
+
+@app.post("/api/evaluation/start")
+async def start_evaluation_task(request: EvaluationRequest):
+    """
+    Start async evaluation task (non-blocking).
+    Returns task_id for tracking progress.
+    """
+    try:
+        task_manager = get_task_manager()
+        
+        # Validate experiment exists
+        exp_dir = PROJECT_ROOT / "experiments" / request.experiment_id
+        if not exp_dir.exists():
+            raise HTTPException(status_code=404, detail="Experiment not found")
+        
+        # Create evaluation function based on type
+        eval_type = EvaluationType(request.eval_type)
+        
+        # For now, return a placeholder task
+        # TODO: Implement actual evaluation execution with model loading
+        def dummy_eval(progress_callback=None):
+            """Placeholder evaluation function"""
+            import time
+            for i in range(10):
+                time.sleep(0.5)
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'evaluation',
+                        'batch': i + 1,
+                        'total_batches': 10,
+                        'progress': (i + 1) / 10 * 100
+                    })
+            return {'accuracy': 0.85, 'f1': 0.82}
+        
+        task_id = task_manager.create_task(
+            experiment_id=request.experiment_id,
+            eval_type=eval_type,
+            eval_func=dummy_eval
+        )
+        
+        return {
+            'task_id': task_id,
+            'status': 'started',
+            'message': f'Evaluation task started for {request.experiment_id}'
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start evaluation: {str(e)}"
+        )
+
+
+@app.get("/api/evaluation/task/{task_id}")
+async def get_evaluation_task_status(task_id: str):
+    """Get status and progress of an evaluation task"""
+    try:
+        task_manager = get_task_manager()
+        task = task_manager.get_task(task_id)
+        
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        return task.to_dict()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get task status: {str(e)}"
+        )
+
+
+@app.get("/api/evaluation/tasks")
+async def get_all_evaluation_tasks():
+    """Get all evaluation tasks"""
+    try:
+        task_manager = get_task_manager()
+        tasks = task_manager.get_all_tasks()
+        
+        return {
+            'tasks': [task.to_dict() for task in tasks.values()],
+            'running_count': len(task_manager.get_running_tasks())
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get tasks: {str(e)}"
+        )
+
+
+@app.post("/api/evaluation/task/{task_id}/cancel")
+async def cancel_evaluation_task(task_id: str):
+    """Cancel a running evaluation task"""
+    try:
+        task_manager = get_task_manager()
+        
+        if task_manager.cancel_task(task_id):
+            return {
+                'task_id': task_id,
+                'status': 'cancelled',
+                'message': 'Task cancelled successfully'
+            }
+        else:
+            return {
+                'task_id': task_id,
+                'status': 'not_cancelled',
+                'message': 'Task not found or already completed'
+            }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cancel task: {str(e)}"
+        )
+
+
+@app.delete("/api/evaluation/tasks/cleanup")
+async def cleanup_old_evaluation_tasks(max_age_hours: int = 24, keep_last_n: int = 10):
+    """Clean up old completed/failed evaluation tasks"""
+    try:
+        task_manager = get_task_manager()
+        task_manager.cleanup_old_tasks(max_age_hours=max_age_hours, keep_last_n=keep_last_n)
+        
+        return {
+            'status': 'success',
+            'message': f'Cleaned up tasks older than {max_age_hours} hours'
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cleanup tasks: {str(e)}"
+        )
+
+# ===== END ASYNC EVALUATION ENDPOINTS =====
 
 @app.get("/api/evaluation/{exp_id}")
 async def get_evaluation_metrics(exp_id: str):
