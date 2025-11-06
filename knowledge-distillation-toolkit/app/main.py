@@ -142,7 +142,7 @@ def distill(
             config=cfg,
             train_loader=train_loader,
             val_loader=val_loader,
-            device=cm.device()
+            device=str(cm.device())
         )
         rprint(f"[green]✓ Distiller initialized[/green]")
         
@@ -376,6 +376,10 @@ def main():
         evaluate_enabled = cfg_manager.resolved_config.get("evaluate", True)
         metrics = {}
         extended_metrics = {}
+        cas_rating = None  # Initialize for later use in summary
+        teacher_metrics = {}  # Initialize for later use in summary
+        dei_results = {}  # Initialize for later use in summary
+        cas_results = {}  # Initialize for later use in summary
         
         if evaluate_enabled:
             try:
@@ -385,7 +389,9 @@ def main():
                 import json
                 
                 model_to_eval = quantized_model if quantized_model is not None else student
-                model_to_eval = model_to_eval.to(cfg_manager.device())
+                import torch
+                device_obj = torch.device(str(cfg_manager.device()))
+                model_to_eval = model_to_eval.to(device_obj)  # type: ignore[arg-type]
                 
                 rprint("[bold blue]Running dual evaluation (Teacher vs Student)...[/bold blue]")
                 
@@ -394,7 +400,7 @@ def main():
                     teacher=teacher,
                     student=model_to_eval,
                     dataloader=val_loader,
-                    device=cfg_manager.device()
+                    device=str(cfg_manager.device())
                 )
                 
                 eval_results = dual_evaluator.evaluate()
@@ -454,7 +460,7 @@ def main():
                     student_latency=0.5   # Placeholder - would measure in production
                 )
                 
-                # Add rating to CAS based on score
+                # Add rating to CAS based on score (store as separate key to avoid type issues)
                 cas_score = cas_results['cas']
                 if cas_score > 0.35:
                     cas_rating = 'Excellent'
@@ -466,7 +472,7 @@ def main():
                     cas_rating = 'Fair'
                 else:
                     cas_rating = 'Poor'
-                cas_results['rating'] = cas_rating
+                # Note: Not adding rating to cas_results dict due to type constraints
                 
                 # Display DEI & CAS
                 rprint(f"\n[bold magenta]Distillation Efficacy Index (DEI):[/bold magenta]")
@@ -477,7 +483,7 @@ def main():
                 
                 rprint(f"\n[bold magenta]Compression-Aware Score (CAS):[/bold magenta]")
                 rprint(f"  CAS Score: {cas_results['cas']:.4f}")
-                rprint(f"  Rating: {cas_results['rating']}")
+                rprint(f"  Rating: {cas_rating}")
                 
                 # Save extended evaluation results
                 extended_eval_path = Path(cfg_manager.experiment_dir) / "extended_evaluation.json"
@@ -502,6 +508,11 @@ def main():
         print("\n" + "="*70)
         print("PHASE 9: Visualization & Showcasing")
         print("="*70 + "\n")
+        
+        # Calculate model parameters (always available after training)
+        teacher_params = sum(p.numel() for p in teacher.parameters())
+        student_params = sum(p.numel() for p in student.parameters())
+        compression_ratio = teacher_params / student_params
         
         viz_enabled = cfg_manager.resolved_config.get("visualization", {}).get("enable", True)
         if viz_enabled:
@@ -607,8 +618,8 @@ def main():
                             f.write(f"- **DEI Score**: {dei_results['dei']:.4f} ({dei_results['efficiency_rating']})\n")
                             f.write(f"  - Accuracy Retention: {dei_results['accuracy_retention']:.2%}\n")
                             f.write(f"  - Compression Ratio: {dei_results['compression_ratio']:.2f}x\n")
-                        if 'cas_results' in locals():
-                            f.write(f"- **CAS Score**: {cas_results['cas']:.4f} ({cas_results['rating']})\n")
+                        if 'cas_results' in locals() and cas_rating:
+                            f.write(f"- **CAS Score**: {cas_results['cas']:.4f} ({cas_rating})\n")
                     
                     f.write(f"\n## Artifacts\n\n")
                     f.write(f"- Teacher model: `teacher_model/`\n")
