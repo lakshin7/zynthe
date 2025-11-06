@@ -84,12 +84,12 @@ class AttentionExtractor:
         """Hook for Transformer attention scores."""
         def hook(module, input, output):
             # Handle different output formats
-            if isinstance(output, tuple):
+            if isinstance(output, tuple) and len(output) > 0:
                 # Some transformers return (output, attention_weights)
                 if len(output) > 1 and output[1] is not None:
                     self.attention_scores[name] = output[1]
                 self.feature_maps[name] = output[0]
-            else:
+            elif isinstance(output, torch.Tensor):
                 self.feature_maps[name] = output
         return hook
     
@@ -328,7 +328,7 @@ class AttentionLossComposer:
     
     def compute(self, student_attn: torch.Tensor, teacher_attn: torch.Tensor) -> torch.Tensor:
         """Compute weighted combination of losses."""
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=student_attn.device, requires_grad=True)
         
         for loss_type, weight in zip(self.loss_types, self.weights):
             if loss_type == "l2":
@@ -342,7 +342,7 @@ class AttentionLossComposer:
             else:
                 raise ValueError(f"Unknown loss type: {loss_type}")
             
-            total_loss += weight * loss
+            total_loss = total_loss + weight * loss
         
         return total_loss
 
@@ -549,7 +549,9 @@ class AttentionTransferDistiller(BaseDistiller):
             matched_teacher = [teacher_attentions[int(i * teacher_step)] for i in range(len(student_attentions))]
             teacher_attentions = matched_teacher
         
-        flow_loss = 0.0
+        # Initialize flow_loss as tensor
+        device = student_attentions[0].device
+        flow_loss = torch.tensor(0.0, device=device, requires_grad=True)
         propagated_teacher = teacher_attentions[-1].mean(dim=1)  # Start from last layer
         
         # Backward flow through layers
@@ -561,14 +563,15 @@ class AttentionTransferDistiller(BaseDistiller):
                 propagated_teacher = self.matcher.resize(propagated_teacher, student_attn)
             
             # Compute alignment loss
-            flow_loss += F.mse_loss(student_attn, propagated_teacher)
+            flow_loss = flow_loss + F.mse_loss(student_attn, propagated_teacher)
             
             # Propagate to earlier layer (if not the first)
             if i > 0:
                 teacher_attn = teacher_attentions[i - 1].mean(dim=1)
                 propagated_teacher = torch.matmul(teacher_attn, propagated_teacher)
         
-        return flow_loss / len(student_attentions)
+        num_layers = len(student_attentions)
+        return flow_loss / num_layers if num_layers > 0 else flow_loss
 
     def dual_attention_matching(
         self,
@@ -627,7 +630,8 @@ class AttentionTransferDistiller(BaseDistiller):
             warnings.warn("No valid attention features found for dual matching")
             return torch.tensor(0.0, device=next(self.student.parameters()).device)
         
-        return sum(losses) / len(losses)
+        # Use torch.stack to maintain tensor type
+        return torch.stack(losses).mean()
 
     def temporal_attention_transfer(
         self,
@@ -679,14 +683,34 @@ class AttentionTransferDistiller(BaseDistiller):
 
     # ---------------------- Loss Computation ----------------------
 
-
-    def compute_loss(self, teacher_feats: Dict[str, torch.Tensor], student_feats: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def compute_loss(
+        self,
+        student_outputs: Any,
+        teacher_outputs: Any,
+        targets: Optional[torch.Tensor] = None,
+        student_features: Optional[Dict[str, torch.Tensor]] = None,
+        teacher_features: Optional[Dict[str, torch.Tensor]] = None,
+        **kwargs
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
         Compute unified AT loss with all enabled methods.
         
         Dynamically combines classical and advanced attention transfer methods
         based on configuration and available features.
+        
+        Returns:
+            Tuple of (total_loss, loss_dict) for compatibility with BaseDistiller
         """
+        # Convert outputs to dict format for internal processing
+        teacher_feats = self._output_to_dict(teacher_outputs) if not isinstance(teacher_outputs, dict) else teacher_outputs
+        student_feats = self._output_to_dict(student_outputs) if not isinstance(student_outputs, dict) else student_outputs
+        
+        # Merge with provided features if available
+        if teacher_features:
+            teacher_feats.update(teacher_features)
+        if student_features:
+            student_feats.update(student_features)
+        
         losses = []
         
         # Clear previous extractions
@@ -785,11 +809,14 @@ class AttentionTransferDistiller(BaseDistiller):
                 t_map = self.compute_spatial_attention(teacher_feats["last_hidden_state"])
                 s_map = self.compute_spatial_attention(student_feats["last_hidden_state"])
                 s_map = self.matcher.resize(s_map, t_map)
-                return self.alpha * F.mse_loss(s_map, t_map)
+                loss = self.alpha * F.mse_loss(s_map, t_map)
+                return loss, {'attention_transfer': loss.item()}
             else:
-                return torch.tensor(0.0, device=next(self.student.parameters()).device)
+                loss = torch.tensor(0.0, device=next(self.student.parameters()).device)
+                return loss, {'attention_transfer': 0.0}
 
-        return self.alpha * sum(losses) / len(losses)
+        total_loss = self.alpha * torch.stack(losses).mean()
+        return total_loss, {'attention_transfer': total_loss.item()}
 
 
     # ---------------------- Evaluation Metrics ----------------------
@@ -957,13 +984,16 @@ class AttentionTransferDistiller(BaseDistiller):
 
     # ---------------------- Forward Pass ----------------------
 
-    def forward(self, x: torch.Tensor, return_loss: bool = True, **kwargs) -> Union[torch.Tensor, Dict[str, Any]]:
+    def forward(self, x: torch.Tensor, return_loss: bool = True, **kwargs) -> Union[torch.Tensor, Dict[str, Any]]:  # type: ignore[override]
         """
         Forward pass with comprehensive attention-based distillation.
         
         Automatically extracts and aligns attention from both models,
         applies all enabled distillation methods, and optionally returns
         evaluation metrics.
+        
+        Note: This override has a different signature than BaseDistiller.forward()
+        for attention-specific functionality.
         """
         # Forward pass through student
         student_out = self.student(x, output_attentions=True, output_hidden_states=True, **kwargs)
@@ -977,10 +1007,15 @@ class AttentionTransferDistiller(BaseDistiller):
             teacher_feats = self._output_to_dict(teacher_out)
             student_feats = self._output_to_dict(student_out)
             
-            # Compute comprehensive attention loss
-            loss = self.compute_loss(teacher_feats, student_feats)
+            # Compute comprehensive attention loss (returns tuple)
+            loss_tensor, loss_dict = self.compute_loss(
+                student_outputs=student_out,
+                teacher_outputs=teacher_out,
+                student_features=student_feats,
+                teacher_features=teacher_feats
+            )
             
-            return loss
+            return loss_tensor
 
         return student_out
     
