@@ -61,7 +61,7 @@ class FeatureAdapter(nn.Module):
         self.adapter_type = adapter_type
         
         if adapter_type == '1x1conv':
-            layers = [nn.Conv2d(in_channels, out_channels, 1, bias=not use_bn)]
+            layers: List[nn.Module] = [nn.Conv2d(in_channels, out_channels, 1, bias=not use_bn)]
             if use_bn:
                 layers.append(nn.BatchNorm2d(out_channels))
             self.adapter = nn.Sequential(*layers)
@@ -345,7 +345,7 @@ class FeatureLossComposer(nn.Module):
             f_t = attention_t * f_t
             f_s = attention_s * f_s
         
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=f_t.device, requires_grad=True)
         loss_dict = {}
         
         for metric in self.metrics:
@@ -356,10 +356,10 @@ class FeatureLossComposer(nn.Module):
             metric_loss = self.metric_fns[metric](f_t, f_s)
             weight = self.weights.get(metric, 1.0)
             
-            total_loss += weight * metric_loss
+            total_loss = total_loss + weight * metric_loss
             loss_dict[f'feat_{metric}'] = metric_loss.item()
         
-        loss_dict['feat_total'] = total_loss.item()
+        loss_dict['feat_total'] = total_loss.item() if isinstance(total_loss, torch.Tensor) else float(total_loss)
         
         return total_loss, loss_dict
 
@@ -506,14 +506,14 @@ class FeatureDistiller(BaseDistiller):
         super().__init__(teacher, student, config, device, **kwargs)
         
         # Initialize remaining components
-        self.metrics = feat_config.get('metrics', ['l2'])
+        self.feat_metrics = feat_config.get('metrics', ['l2'])  # Renamed to avoid conflict with parent's self.metrics
         self.metric_weights = feat_config.get('metric_weights', {})
         self.use_attention = feat_config.get('use_attention', False)
         self.fsp_pairs = feat_config.get('fsp_pairs', [])
         
         # Loss composer
         self.feature_loss_composer = FeatureLossComposer(
-            metrics=self.metrics,
+            metrics=self.feat_metrics,
             weights=self.metric_weights,
             temperature=feat_config.get('contrastive_temperature', 0.07),
             use_attention=self.use_attention
@@ -569,7 +569,7 @@ class FeatureDistiller(BaseDistiller):
         - FSP matrix losses (if configured)
         - Attention-weighted losses (if enabled)
         """
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
         loss_dict = {}
         
         # Supervised loss - handle dict, object with logits attr, or tensor
@@ -582,12 +582,12 @@ class FeatureDistiller(BaseDistiller):
                 logits = student_outputs
             
             loss_ce = F.cross_entropy(logits, targets)
-            total_loss += loss_ce
+            total_loss = total_loss + loss_ce
             loss_dict['supervised'] = loss_ce.item()
         
         # Feature distillation losses
         if self.feat_enabled and teacher_features and student_features:
-            feat_loss_total = 0.0
+            feat_loss_total = torch.tensor(0.0, device=self.device, requires_grad=True)
             
             for layer_config in self.feat_layers:
                 t_layer = layer_config['teacher']
@@ -604,18 +604,18 @@ class FeatureDistiller(BaseDistiller):
                     # Compute loss using composer
                     layer_loss, layer_loss_dict = self.feature_loss_composer(f_t, f_s)
                     
-                    feat_loss_total += weight * layer_loss
+                    feat_loss_total = feat_loss_total + weight * layer_loss
                     
                     # Log individual layer losses
                     for key, value in layer_loss_dict.items():
                         loss_dict[f'{s_layer}_{key}'] = value
             
-            total_loss += feat_loss_total
-            loss_dict['feature_total'] = feat_loss_total.item()
+            total_loss = total_loss + feat_loss_total
+            loss_dict['feature_total'] = feat_loss_total.item() if isinstance(feat_loss_total, torch.Tensor) else float(feat_loss_total)
         
         # FSP matrix losses (Stage 4)
         if self.fsp_pairs and teacher_features and student_features:
-            fsp_loss_total = 0.0
+            fsp_loss_total = torch.tensor(0.0, device=self.device, requires_grad=True)
             
             for i, (idx1, idx2) in enumerate(self.fsp_pairs):
                 if idx1 < len(self.feat_layers) and idx2 < len(self.feat_layers):
@@ -630,13 +630,13 @@ class FeatureDistiller(BaseDistiller):
                             (teacher_features[t_layer1], teacher_features[t_layer2]),
                             (student_features[s_layer1], student_features[s_layer2])
                         )
-                        fsp_loss_total += fsp_loss
+                        fsp_loss_total = fsp_loss_total + fsp_loss
             
             if fsp_loss_total > 0:
-                total_loss += fsp_loss_total
-                loss_dict['fsp_loss'] = fsp_loss_total.item()
+                total_loss = total_loss + fsp_loss_total
+                loss_dict['fsp_loss'] = fsp_loss_total.item() if isinstance(fsp_loss_total, torch.Tensor) else float(fsp_loss_total)
         
-        loss_dict['total'] = total_loss.item()
+        loss_dict['total'] = total_loss.item() if isinstance(total_loss, torch.Tensor) else float(total_loss)
         
         return total_loss, loss_dict
     
@@ -723,20 +723,20 @@ class LegacyFeatureDistiller:
             self.student_features[name] = output
         return hook
 
-    def compute_loss(self):
-        total_loss = 0.0
+    def compute_loss(self) -> torch.Tensor:
+        total_loss = torch.tensor(0.0, requires_grad=True)
         for layer_name in self.feature_layers:
             teacher_feat = self.teacher_features.get(layer_name)
             student_feat = self.student_features.get(layer_name)
             if teacher_feat is not None and student_feat is not None:
-                total_loss += self.loss_fn(student_feat, teacher_feat.detach())
+                total_loss = total_loss + self.loss_fn(student_feat, teacher_feat.detach())
         return total_loss
 
     def step(
         self,
         student_inputs: dict,
         return_feats: bool = False
-    ) -> 'tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]] | torch.Tensor':
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]]:
         """
         Forward pass student and teacher with inputs and compute feature distillation loss.
 
