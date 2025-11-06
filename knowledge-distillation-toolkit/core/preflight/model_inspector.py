@@ -463,7 +463,7 @@ class ModelInspector:
         
         return strategy
     
-    def _auto_map_layers(self) -> Dict[str, List[Tuple[str, str]]]:
+    def _auto_map_layers(self) -> Dict[str, Any]:
         """
         Automatically map teacher layers to student layers.
         

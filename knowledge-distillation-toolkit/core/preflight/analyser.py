@@ -709,13 +709,13 @@ class PreflightAnalyzer:
         
         # Save if path provided
         if save_path:
-            save_path = Path(save_path)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
+            save_path_obj = Path(save_path)
+            save_path_obj.parent.mkdir(parents=True, exist_ok=True)
             
-            with open(save_path, 'w') as f:
+            with open(save_path_obj, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False)
             
-            print(f"Updated config saved to: {save_path}")
+            print(f"Updated config saved to: {save_path_obj}")
         
         return config
 

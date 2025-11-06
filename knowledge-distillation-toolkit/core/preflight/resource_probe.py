@@ -212,7 +212,7 @@ class ResourceProbe:
             
             # TF32 support (Ampere and newer)
             if hasattr(torch.backends.cuda, 'matmul'):
-                support['tf32'] = torch.backends.cuda.matmul.allow_tf32
+                support['tf32'] = bool(torch.backends.cuda.matmul.allow_tf32)
         
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             # MPS supports FP16

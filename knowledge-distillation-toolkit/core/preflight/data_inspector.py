@@ -104,14 +104,14 @@ class DataInspector:
             Dictionary with dataset info
         """
         info = {
-            'size': len(self.dataset) if hasattr(self.dataset, '__len__') else 'unknown',
+            'size': len(self.dataset) if self.dataset is not None and hasattr(self.dataset, '__len__') else 'unknown',  # type: ignore[arg-type]
             'type': type(self.dataset).__name__,
             'sample_structure': None
         }
         
         # Inspect first sample
         try:
-            if len(self.dataset) > 0:
+            if self.dataset is not None and hasattr(self.dataset, '__len__') and len(self.dataset) > 0:  # type: ignore[arg-type]
                 sample = self.dataset[0]
                 info['sample_structure'] = self._analyze_sample_structure(sample)
         except Exception as e:
@@ -265,7 +265,8 @@ class DataInspector:
         
         try:
             # Sample multiple items to infer task
-            samples = [self.dataset[i] for i in range(min(10, len(self.dataset)))]
+            dataset_len = len(self.dataset) if hasattr(self.dataset, '__len__') else 10  # type: ignore[arg-type]
+            samples = [self.dataset[i] for i in range(min(10, dataset_len))]
             
             # Check labels/targets
             if isinstance(samples[0], dict):
@@ -286,7 +287,7 @@ class DataInspector:
                             else:
                                 unique_labels.add(l)
                         
-                        if len(unique_labels) < len(self.dataset) * 0.5:  # Likely classification
+                        if len(unique_labels) < dataset_len * 0.5:  # Likely classification
                             return 'classification'
                         else:  # Too many unique values, likely regression or generation
                             return 'regression'
@@ -335,15 +336,16 @@ class DataInspector:
             return {}
         
         stats = {
-            'num_samples': len(self.dataset),
+            'num_samples': len(self.dataset) if hasattr(self.dataset, '__len__') else 0,  # type: ignore[arg-type]
             'class_distribution': None,
             'input_statistics': {}
         }
         
         try:
             # Sample subset for statistics
-            sample_size = min(1000, len(self.dataset))
-            indices = np.random.choice(len(self.dataset), sample_size, replace=False)
+            dataset_len = len(self.dataset) if hasattr(self.dataset, '__len__') else 0  # type: ignore[arg-type]
+            sample_size = min(1000, dataset_len)
+            indices = np.random.choice(dataset_len, sample_size, replace=False)
             
             # Collect labels if available
             labels = []
@@ -410,16 +412,18 @@ class DataInspector:
             # Check if dataset has length
             if not hasattr(self.dataset, '__len__'):
                 errors.append("Dataset does not implement __len__")
-            
-            # Try to get first sample
-            if len(self.dataset) == 0:
-                errors.append("Dataset is empty")
-                return False, errors
+            else:
+                dataset_len = len(self.dataset)  # type: ignore[arg-type]
+                
+                # Try to get first sample
+                if dataset_len == 0:
+                    errors.append("Dataset is empty")
+                    return False, errors
             
             sample = self.dataset[0]
             
             # Validate sample structure consistency
-            if len(self.dataset) > 1:
+            if hasattr(self.dataset, '__len__') and len(self.dataset) > 1:  # type: ignore[arg-type]
                 try:
                     sample2 = self.dataset[1]
                     
@@ -496,7 +500,7 @@ class DataInspector:
             return recommendations
         
         try:
-            dataset_size = len(self.dataset)
+            dataset_size = len(self.dataset) if hasattr(self.dataset, '__len__') else 0  # type: ignore[arg-type]
             
             # Adjust based on dataset size
             if dataset_size < 100:
