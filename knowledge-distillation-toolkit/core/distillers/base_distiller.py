@@ -262,11 +262,11 @@ class BaseDistiller(nn.Module):
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
         
         # Create scheduler
-        scheduler = None
+        scheduler: Optional[_LRScheduler] = None
         if scheduler_type.lower() == 'cosine':
-            scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
+            scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)  # type: ignore[assignment]
         elif scheduler_type.lower() == 'step':
-            scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
+            scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)  # type: ignore[assignment]
         
         return optimizer, scheduler
     
@@ -411,9 +411,12 @@ class BaseDistiller(nn.Module):
             targets = targets.to(self.device) if targets is not None else None
         
         # Forward pass with feature extraction
-        student_outputs, teacher_outputs, teacher_features, student_features = self.forward(
-            inputs, return_features=True
-        )
+        forward_result = self.forward(inputs, return_features=True)
+        if len(forward_result) == 4:
+            student_outputs, teacher_outputs, teacher_features, student_features = forward_result
+        else:
+            student_outputs, teacher_outputs = forward_result  # type: ignore[misc]
+            teacher_features, student_features = {}, {}
         
         # Compute loss
         total_loss, loss_dict = self.compute_loss(
@@ -488,9 +491,12 @@ class BaseDistiller(nn.Module):
             targets = targets.to(self.device) if targets is not None else None
         
         # Forward pass
-        student_outputs, teacher_outputs, teacher_features, student_features = self.forward(
-            inputs, return_features=True
-        )
+        forward_result = self.forward(inputs, return_features=True)
+        if len(forward_result) == 4:
+            student_outputs, teacher_outputs, teacher_features, student_features = forward_result
+        else:
+            student_outputs, teacher_outputs = forward_result  # type: ignore[misc]
+            teacher_features, student_features = {}, {}
         
         # Compute loss (no backward)
         total_loss, loss_dict = self.compute_loss(
