@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Any
 import time
 
 
@@ -237,7 +237,7 @@ class DistillationEfficacyIndex:
                     student_acc: float,
                     teacher_params: int,
                     student_params: int,
-                    retention_bonus: float = 0.0) -> Dict[str, float]:
+                    retention_bonus: float = 0.0) -> Dict[str, Any]:
         """
         Compute Distillation Efficacy Index.
         
@@ -260,14 +260,16 @@ class DistillationEfficacyIndex:
         
         dei = accuracy_retention * compression_ratio * (1.0 + retention_bonus)
         
+        efficiency_rating = 'Excellent' if dei > 1.5 else 'Good' if dei > 1.0 else 'Fair'
+        
         return {
-            'dei': dei,
-            'accuracy_retention': accuracy_retention,
-            'compression_ratio': compression_ratio,
-            'teacher_acc': teacher_acc,
-            'student_acc': student_acc,
-            'accuracy_drop': teacher_acc - student_acc,
-            'efficiency_rating': 'Excellent' if dei > 1.5 else 'Good' if dei > 1.0 else 'Fair'
+            'dei': float(dei),
+            'accuracy_retention': float(accuracy_retention),
+            'compression_ratio': float(compression_ratio),
+            'teacher_acc': float(teacher_acc),
+            'student_acc': float(student_acc),
+            'accuracy_drop': float(teacher_acc - student_acc),
+            'efficiency_rating': efficiency_rating
         }
 
 
@@ -384,8 +386,8 @@ class PerformanceProfiler:
             'std_latency_ms': float(np.std(latencies)),
             'p95_latency_ms': float(np.percentile(latencies, 95)),
             'p99_latency_ms': float(np.percentile(latencies, 99)),
-            'throughput_samples_per_sec': 1000.0 / np.mean(latencies),
-            'batch_size': input_ids.size(0)
+            'throughput_samples_per_sec': float(1000.0 / np.mean(latencies)),
+            'batch_size': int(input_ids.size(0))
         }
     
     @staticmethod

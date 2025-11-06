@@ -74,6 +74,16 @@ class ModelComparator:
         print(f"   Teacher: {self.teacher_params:,} parameters")
         print(f"   Student: {self.student_params:,} parameters")
         print(f"   Compression: {self.compression_ratio:.2f}x smaller")
+    
+    @staticmethod
+    def _convert_to_list(arr):
+        """Convert numpy array or scalar to list."""
+        if hasattr(arr, 'tolist'):
+            return arr.tolist()
+        elif isinstance(arr, (int, float, np.number)):
+            return [float(arr)]
+        else:
+            return list(np.atleast_1d(arr))
         
     def evaluate_model(
         self, 
@@ -155,9 +165,9 @@ class ModelComparator:
             'recall': float(recall),
             'f1': float(f1),
             'loss': float(avg_loss),
-            'precision_per_class': precision_per_class.tolist(),
-            'recall_per_class': recall_per_class.tolist(),
-            'f1_per_class': f1_per_class.tolist(),
+            'precision_per_class': self._convert_to_list(precision_per_class),
+            'recall_per_class': self._convert_to_list(recall_per_class),
+            'f1_per_class': self._convert_to_list(f1_per_class),
             'confusion_matrix': cm.tolist(),
             'classification_report': class_report,
             'predictions': predictions.tolist(),
@@ -225,27 +235,27 @@ class ModelComparator:
             save_dir: Directory to save plots
             show_plots: Whether to display plots
         """
-        save_dir = Path(save_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
+        save_dir_path = Path(save_dir)
+        save_dir_path.mkdir(parents=True, exist_ok=True)
         
         print(f"\n📊 Creating comparison visualizations...")
         
         # 1. Metrics Bar Chart
-        self._plot_metrics_comparison(teacher_results, student_results, save_dir)
+        self._plot_metrics_comparison(teacher_results, student_results, save_dir_path)
         
         # 2. Confusion Matrices Side-by-Side
-        self._plot_confusion_matrices(teacher_results, student_results, save_dir)
+        self._plot_confusion_matrices(teacher_results, student_results, save_dir_path)
         
         # 3. Per-Class Performance
-        self._plot_per_class_metrics(teacher_results, student_results, save_dir)
+        self._plot_per_class_metrics(teacher_results, student_results, save_dir_path)
         
         # 4. Model Size vs Performance
-        self._plot_efficiency_chart(teacher_results, student_results, save_dir)
+        self._plot_efficiency_chart(teacher_results, student_results, save_dir_path)
         
         # 5. Detailed Comparison Table
-        self._create_comparison_table(teacher_results, student_results, save_dir)
+        self._create_comparison_table(teacher_results, student_results, save_dir_path)
         
-        print(f"✅ Visualizations saved to: {save_dir}")
+        print(f"✅ Visualizations saved to: {save_dir_path}")
         
         if not show_plots:
             plt.close('all')
@@ -270,7 +280,7 @@ class ModelComparator:
         ax.set_xticklabels([m.capitalize() for m in metrics])
         ax.legend(fontsize=11)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
-        ax.set_ylim([0, 1.0])
+        ax.set_ylim(0, 1.0)
         
         # Add value labels on bars
         for bars in [bars1, bars2]:
@@ -366,7 +376,7 @@ class ModelComparator:
         ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
         ax.set_title('Model Efficiency: Size vs Performance', fontsize=14, fontweight='bold', pad=20)
         ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_ylim([min(accuracies) - 0.05, 1.0])
+        ax.set_ylim(min(accuracies) - 0.05, 1.0)
         
         # Add compression annotation
         compression = teacher_res['num_parameters'] / student_res['num_parameters']
@@ -437,8 +447,8 @@ class ModelComparator:
         save_dir: str
     ):
         """Save comparison results as JSON."""
-        save_dir = Path(save_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
+        save_dir_path = Path(save_dir)
+        save_dir_path.mkdir(parents=True, exist_ok=True)
         
         # Prepare summary
         summary = {
@@ -459,10 +469,10 @@ class ModelComparator:
         }
         
         # Save JSON
-        with open(save_dir / 'comparison_results.json', 'w') as f:
+        with open(save_dir_path / 'comparison_results.json', 'w') as f:
             json.dump(summary, f, indent=2)
         
-        print(f"\n💾 Results saved to: {save_dir / 'comparison_results.json'}")
+        print(f"\n💾 Results saved to: {save_dir_path / 'comparison_results.json'}")
         
     def generate_report(
         self,
@@ -471,11 +481,11 @@ class ModelComparator:
         save_dir: str
     ):
         """Generate a comprehensive markdown report."""
-        save_dir = Path(save_dir)
+        save_dir_path = Path(save_dir)
         
         report = []
         report.append("# 📊 Teacher vs Student Model Comparison Report\n")
-        report.append(f"Generated on: {Path(save_dir).name}\n")
+        report.append(f"Generated on: {save_dir_path.name}\n")
         report.append("---\n\n")
         
         # Executive Summary
@@ -532,7 +542,7 @@ class ModelComparator:
         report.append(f"candidate for deployment in resource-constrained environments.\n")
         
         # Save report
-        report_path = save_dir / 'COMPARISON_REPORT.md'
+        report_path = save_dir_path / 'COMPARISON_REPORT.md'
         with open(report_path, 'w') as f:
             f.writelines(report)
         

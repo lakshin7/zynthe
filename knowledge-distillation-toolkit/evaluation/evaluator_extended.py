@@ -5,7 +5,7 @@ Supports side-by-side teacher-student evaluation with extended metrics
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Any
 import numpy as np
 import time
 from evaluation.metrics import compute_all_metrics
@@ -186,10 +186,10 @@ class DualEvaluator:
             sample_mask = sample_batch['attention_mask'][:8].to(self.device) if 'attention_mask' in sample_batch else None
             
             teacher_profile = PerformanceProfiler.profile_inference(
-                self.teacher, sample_input, sample_mask, str(self.device)
+                self.teacher, sample_input, sample_mask, str(self.device)  # type: ignore[arg-type]
             )
             student_profile = PerformanceProfiler.profile_inference(
-                self.student, sample_input, sample_mask, str(self.device)
+                self.student, sample_input, sample_mask, str(self.device)  # type: ignore[arg-type]
             )
             perf_comparison = PerformanceProfiler.compare_models(teacher_profile, student_profile)
             
@@ -305,7 +305,7 @@ class CurriculumEvaluator:
         self.model.to(device)
         self.model.eval()
     
-    def evaluate_by_difficulty(self, dataloader_dict: Dict[str, any]) -> Dict:
+    def evaluate_by_difficulty(self, dataloader_dict: Dict[str, Any]) -> Dict:
         """
         Evaluate on different difficulty tiers.
         

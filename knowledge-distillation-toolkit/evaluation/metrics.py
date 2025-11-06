@@ -46,9 +46,15 @@ def compute_classwise_metrics(preds, labels):
     recall = recall_score(labels_np, preds_np, average=None, zero_division=0)
     f1 = f1_score(labels_np, preds_np, average=None)
     classes = np.unique(np.concatenate((labels_np, preds_np)))
-    precision_dict = {int(cls): p for cls, p in zip(classes, precision)}
-    recall_dict = {int(cls): r for cls, r in zip(classes, recall)}
-    f1_dict = {int(cls): f for cls, f in zip(classes, f1)}
+    
+    # Handle scalar results (single class case)
+    precision = np.atleast_1d(precision)
+    recall = np.atleast_1d(recall)
+    f1 = np.atleast_1d(f1)
+    
+    precision_dict = {int(cls): float(p) for cls, p in zip(classes, precision)}
+    recall_dict = {int(cls): float(r) for cls, r in zip(classes, recall)}
+    f1_dict = {int(cls): float(f) for cls, f in zip(classes, f1)}
     return {
         "precision_per_class": precision_dict,
         "recall_per_class": recall_dict,
