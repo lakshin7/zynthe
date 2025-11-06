@@ -1,6 +1,6 @@
 """
 FastAPI Backend for Zynthe Knowledge Distillation Toolkit
-Connects the Electron UI to the Python training pipeline
+Connects the Electron UI to the Python training pipeline with full transparency
 """
 from fastapi import FastAPI, WebSocket, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,13 +8,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from contextlib import asynccontextmanager
+import uvicorn
+import yaml
 import json
-import asyncio
 import csv
-import shutil
 from pathlib import Path
 from datetime import datetime
-import uvicorn
+
 from training_manager import TrainingManager
 
 # Training manager for subprocess handling
@@ -45,11 +45,10 @@ training_status = {"is_training": False, "experiment_id": None, "stage": None}
 websocket_connections = []
 active_training_ids = set()  # Track currently running experiments
 
-# Training manager for subprocess handling
-training_manager = None
-
 # Get project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+
+# ===== PYDANTIC MODELS =====
 
 class TrainingConfig(BaseModel):
     teacher_model: str
@@ -58,13 +57,88 @@ class TrainingConfig(BaseModel):
     epochs: int = 10
     batch_size: int = 32
 
+class PreflightRequest(BaseModel):
+    teacher_model: str
+    student_model: str
+    dataset_size: Optional[int] = None
+
+# ===== HELPER FUNCTIONS =====
+
+async def validate_dataset(file_path: Path) -> tuple[bool, str, int]:
+    """Validate dataset format and return (is_valid, error_message, num_samples)"""
+    
+    try:
+        if file_path.suffix == '.jsonl':
+            num_samples = 0
+            with open(file_path, 'r') as f:
+                for line_num, line in enumerate(f, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        
+                        # Check required fields
+                        if 'text' not in data:
+                            return False, f"Line {line_num}: Missing 'text' field", 0
+                        if 'label' not in data:
+                            return False, f"Line {line_num}: Missing 'label' field", 0
+                        
+                        num_samples += 1
+                        
+                        # Check first 100 lines to save time
+                        if line_num >= 100:
+                            # Estimate total lines
+                            file_size = file_path.stat().st_size
+                            avg_line_size = file_path.stat().st_size / line_num
+                            num_samples = int(file_size / avg_line_size)
+                            break
+                            
+                    except json.JSONDecodeError:
+                        return False, f"Line {line_num}: Invalid JSON", 0
+            
+            if num_samples == 0:
+                return False, "No valid samples found", 0
+            
+            return True, "", num_samples
+            
+        elif file_path.suffix == '.csv':
+            with open(file_path, 'r') as f:
+                reader = csv.DictReader(f)
+                
+                # Check headers
+                if 'text' not in reader.fieldnames or 'label' not in reader.fieldnames:
+                    return False, "CSV must have 'text' and 'label' columns", 0
+                
+                # Count rows
+                num_samples = sum(1 for _ in reader)
+                
+                if num_samples == 0:
+                    return False, "No samples found in CSV", 0
+            
+            return True, "", num_samples
+        
+        else:
+            return False, "Unsupported file format. Use .jsonl or .csv", 0
+            
+    except Exception as e:
+        return False, f"Error reading file: {str(e)}", 0
+
 async def broadcast_message(message: dict):
-    """Broadcast message to all connected WebSocket clients"""
-    for ws in websocket_connections:
+    """Broadcast message to all connected websockets"""
+    # Clean up active training set when training completes
+    if message.get("type") == "training_update":
+        exp_id = message.get("experiment_id")
+        status = message.get("status")
+        if exp_id and status in ["completed", "failed", "stopped"]:
+            active_training_ids.discard(exp_id)
+    
+    for connection in websocket_connections[:]:
         try:
-            await ws.send_json(message)
+            await connection.send_json(message)
         except:
-            pass
+            websocket_connections.remove(connection)
+
+# ===== API ENDPOINTS =====
 
 @app.get("/")
 async def root():
@@ -82,84 +156,50 @@ async def get_experiments():
         if not exp_dir.is_dir():
             continue
         
-        # Parse experiment metadata
-        exp_id = exp_dir.name
+        # Load config
+        config = {}
         config_file = exp_dir / "config.yaml"
-        
-        # Load experiment name from config if available
-        exp_name = exp_id
         if config_file.exists():
             try:
-                import yaml
                 with open(config_file) as f:
-                    config_data = yaml.safe_load(f)
-                    if config_data and "experiment_name" in config_data:
-                        exp_name = config_data["experiment_name"]
+                    config = yaml.safe_load(f)
             except:
                 pass
         
-        # Determine stages based on what files exist
-        stages = {
-            "preflight": "upcoming",
-            "distillation": "upcoming",
-            "quantization": "upcoming",
-            "evaluation": "upcoming",
-            "deployment": "upcoming"
-        }
+        # Determine status
+        status = "completed"
+        if exp_dir.name in active_training_ids:
+            status = "running"
+        elif not (exp_dir / "results.json").exists():
+            status = "failed"
         
-        # Check for preflight
-        if (exp_dir / "preflight_report.json").exists():
-            stages["preflight"] = "completed"
-            
-        # Check for distillation
-        if (exp_dir / "best_student").exists():
-            stages["distillation"] = "completed"
-        elif (exp_dir / "checkpoints").exists() or exp_id in active_training_ids:
-            stages["distillation"] = "running"
-            
-        # Check for quantization
-        if (exp_dir / "quantized_model").exists():
-            stages["quantization"] = "completed"
-            
-        # Check for evaluation
-        if (exp_dir / "results.json").exists():
-            stages["evaluation"] = "completed"
-        
-        # Override status if actively training
-        is_active = exp_id in active_training_ids
-        if is_active:
-            # Get current stage from training manager
-            if training_manager:
-                metrics = training_manager.get_metrics(exp_id)
-                if metrics and "stage" in metrics:
-                    current_stage = metrics["stage"].lower()
-                    if current_stage in stages:
-                        stages[current_stage] = "running"
-        
-        # Parse timestamp from folder name (format: YYYYMMDDTHHMMSSZ_hash)
-        try:
-            timestamp_str = exp_id.split("_")[0]
-            timestamp = datetime.strptime(timestamp_str, "%Y%m%dT%H%M%SZ")
-        except:
-            timestamp = datetime.now()
+        # Get basic metrics if available
+        metrics = {}
+        results_file = exp_dir / "results.json"
+        if results_file.exists():
+            try:
+                with open(results_file) as f:
+                    metrics = json.load(f)
+            except:
+                pass
         
         experiments.append({
-            "id": exp_id,
-            "name": exp_name,
-            "timestamp": timestamp.isoformat(),
-            "status": "running" if is_active else (
-                     "completed" if all(s == "completed" for s in stages.values()) else 
-                     "running" if any(s == "running" for s in stages.values()) else "queued"),
-            "stages": stages,
-            "model_count": 1,
-            "is_active": is_active
+            "id": exp_dir.name,
+            "name": config.get("experiment_name", exp_dir.name),
+            "status": status,
+            "teacher": config.get("model", {}).get("name", "Unknown"),
+            "student": config.get("model", {}).get("student_name", "Unknown"),
+            "dataset": config.get("data", {}).get("name", "Unknown"),
+            "accuracy": metrics.get("accuracy", 0),
+            "compression_ratio": metrics.get("compression_ratio", 1.0),
+            "created_at": exp_dir.name.split("_")[0] if "_" in exp_dir.name else "Unknown",
         })
     
     return experiments
 
 @app.get("/api/experiments/{exp_id}")
 async def get_experiment(exp_id: str):
-    """Get details for a specific experiment"""
+    """Get detailed information about a specific experiment"""
     exp_dir = PROJECT_ROOT / "experiments" / exp_id
     if not exp_dir.exists():
         raise HTTPException(status_code=404, detail="Experiment not found")
@@ -168,29 +208,20 @@ async def get_experiment(exp_id: str):
     config = {}
     config_file = exp_dir / "config.yaml"
     if config_file.exists():
-        import yaml
         with open(config_file) as f:
             config = yaml.safe_load(f)
     
-    # Load results if they exist
+    # Load results
     results = {}
     metrics = {}
     results_file = exp_dir / "results.json"
     if results_file.exists():
         with open(results_file) as f:
-            results = json.load(f)
-            # Extract metrics
-            if "evaluation" in results:
-                eval_data = results["evaluation"]
-                metrics = {
-                    "accuracy": eval_data.get("accuracy", 0),
-                    "precision": eval_data.get("precision", 0),
-                    "recall": eval_data.get("recall", 0),
-                    "f1_score": eval_data.get("f1", 0),
-                    "loss": eval_data.get("loss", 0),
-                }
+            data = json.load(f)
+            results = data
+            metrics = data.get("metrics", data)
     
-    # Determine pipeline stages status with more details
+    # Determine pipeline stages status
     stages = {
         "preflight": {"status": "upcoming", "progress": 0, "message": ""},
         "distillation": {"status": "upcoming", "progress": 0, "message": ""},
@@ -202,40 +233,31 @@ async def get_experiment(exp_id: str):
     # Check for preflight
     preflight_file = exp_dir / "preflight_report.json"
     if preflight_file.exists():
-        stages["preflight"]["status"] = "completed"
-        stages["preflight"]["progress"] = 100
-        stages["preflight"]["message"] = "All checks passed"
-        with open(preflight_file) as f:
-            preflight_data = json.load(f)
-            stages["preflight"]["details"] = preflight_data
+        stages["preflight"] = {"status": "completed", "progress": 100, "message": "Compatibility verified"}
     
     # Check for distillation
     best_student_dir = exp_dir / "best_student"
-    checkpoints_dir = exp_dir / "checkpoints"
     if best_student_dir.exists():
-        stages["distillation"]["status"] = "completed"
-        stages["distillation"]["progress"] = 100
-        stages["distillation"]["message"] = "Training completed"
-    elif checkpoints_dir.exists():
-        stages["distillation"]["status"] = "running"
-        # Try to estimate progress from checkpoints
-        checkpoints = list(checkpoints_dir.glob("*.pt"))
-        stages["distillation"]["progress"] = min(len(checkpoints) * 10, 90)
-        stages["distillation"]["message"] = f"Training in progress ({len(checkpoints)} checkpoints)"
+        stages["distillation"] = {"status": "completed", "progress": 100, "message": "Model trained"}
+    elif exp_id in active_training_ids:
+        # Get live progress if training
+        if training_manager:
+            live_metrics = training_manager.get_metrics(exp_id)
+            if live_metrics:
+                stages["distillation"] = {
+                    "status": "in_progress",
+                    "progress": live_metrics.get("progress", 0),
+                    "message": f"Epoch {live_metrics.get('epoch', 0)}/{live_metrics.get('totalEpochs', 10)}"
+                }
     
     # Check for quantization
     quant_dir = exp_dir / "quantized_model"
     if quant_dir.exists():
-        stages["quantization"]["status"] = "completed"
-        stages["quantization"]["progress"] = 100
-        stages["quantization"]["message"] = "Quantization completed"
+        stages["quantization"] = {"status": "completed", "progress": 100, "message": "Model quantized"}
     
     # Check for evaluation
     if results_file.exists():
-        stages["evaluation"]["status"] = "completed"
-        stages["evaluation"]["progress"] = 100
-        if metrics:
-            stages["evaluation"]["message"] = f"Accuracy: {metrics.get('accuracy', 0):.2%}"
+        stages["evaluation"] = {"status": "completed", "progress": 100, "message": "Metrics computed"}
     
     # Read training logs
     logs = []
@@ -248,41 +270,25 @@ async def get_experiment(exp_id: str):
     
     for log_file in log_files:
         if log_file.exists():
-            try:
-                with open(log_file) as f:
-                    lines = f.readlines()
-                    # Get last 100 lines
-                    for line in lines[-100:]:
-                        logs.append(line.strip())
-            except Exception as e:
-                print(f"Error reading {log_file}: {e}")
+            with open(log_file) as f:
+                logs.extend(f.readlines()[-50:])  # Last 50 lines
     
     # Get file sizes for export
     export_files = {}
     if best_student_dir.exists():
-        for model_file in best_student_dir.glob("*.pt"):
-            export_files[model_file.name] = {
-                "path": str(model_file.relative_to(PROJECT_ROOT)),
-                "size": model_file.stat().st_size
-            }
-    
-    if quant_dir.exists():
-        for model_file in quant_dir.glob("*.pt"):
-            export_files[model_file.name] = {
-                "path": str(model_file.relative_to(PROJECT_ROOT)),
-                "size": model_file.stat().st_size
-            }
+        for file in best_student_dir.rglob("*"):
+            if file.is_file():
+                export_files[file.name] = file.stat().st_size
     
     # Parse timestamp
     try:
-        timestamp_str = exp_id.split("_")[0]
-        timestamp = datetime.strptime(timestamp_str, "%Y%m%dT%H%M%SZ")
+        timestamp = datetime.strptime(exp_dir.name.split("_")[0], "%Y%m%dT%H%M%SZ")
     except:
         timestamp = datetime.now()
     
     return {
         "id": exp_id,
-        "name": exp_id,
+        "name": config.get("experiment_name", exp_id),
         "timestamp": timestamp.isoformat(),
         "config": config,
         "results": results,
@@ -291,44 +297,6 @@ async def get_experiment(exp_id: str):
         "logs": logs,
         "export_files": export_files
     }
-
-@app.get("/api/models")
-async def get_available_models():
-    """Get list of available models from completed experiments"""
-    experiments_dir = PROJECT_ROOT / "experiments"
-    if not experiments_dir.exists():
-        return []
-    
-    models = []
-    for exp_dir in sorted(experiments_dir.iterdir(), reverse=True):
-        if not exp_dir.is_dir():
-            continue
-        
-        # Check for best_student models
-        best_student_dir = exp_dir / "best_student"
-        if best_student_dir.exists():
-            for model_file in best_student_dir.glob("*.pt"):
-                models.append({
-                    "id": f"{exp_dir.name}_{model_file.name}",
-                    "name": f"{exp_dir.name} - {model_file.stem}",
-                    "source": f"Experiment: {exp_dir.name}",
-                    "path": str(model_file.relative_to(PROJECT_ROOT)),
-                    "size": model_file.stat().st_size
-                })
-        
-        # Check for quantized models
-        quant_dir = exp_dir / "quantized_model"
-        if quant_dir.exists():
-            for model_file in quant_dir.glob("*.pt"):
-                models.append({
-                    "id": f"{exp_dir.name}_quant_{model_file.name}",
-                    "name": f"{exp_dir.name} - {model_file.stem} (Quantized)",
-                    "source": f"Experiment: {exp_dir.name}",
-                    "path": str(model_file.relative_to(PROJECT_ROOT)),
-                    "size": model_file.stat().st_size
-                })
-    
-    return models
 
 @app.get("/api/datasets")
 async def get_datasets():
@@ -346,31 +314,21 @@ async def get_datasets():
     
     # User-uploaded datasets
     if data_dir.exists():
-        for dataset_file in data_dir.glob("*.jsonl"):
-            if dataset_file.stem not in ["imdb_train", "imdb_val", "sample_train", "sample_val"]:
-                # Count lines for size
-                with open(dataset_file, 'r') as f:
-                    num_lines = sum(1 for _ in f)
-                
+        for file in data_dir.glob("*.jsonl"):
+            if file.name not in ["imdb_train.jsonl", "imdb_val.jsonl", "imdb_sample.jsonl"]:
                 datasets.append({
-                    "id": dataset_file.stem,
-                    "name": dataset_file.stem.replace('_', ' ').title(),
+                    "id": file.stem,
+                    "name": file.stem.replace("_", " ").title(),
                     "type": "custom",
-                    "size": f"{num_lines} samples",
-                    "path": str(dataset_file.relative_to(PROJECT_ROOT))
+                    "size": f"{file.stat().st_size / 1024:.1f} KB"
                 })
         
-        for dataset_file in data_dir.glob("*.csv"):
-            # Count lines for size
-            with open(dataset_file, 'r') as f:
-                num_lines = sum(1 for _ in f) - 1  # Exclude header
-            
+        for file in data_dir.glob("*.csv"):
             datasets.append({
-                "id": dataset_file.stem,
-                "name": dataset_file.stem.replace('_', ' ').title(),
+                "id": file.stem,
+                "name": file.stem.replace("_", " ").title(),
                 "type": "custom",
-                "size": f"{num_lines} samples",
-                "path": str(dataset_file.relative_to(PROJECT_ROOT))
+                "size": f"{file.stat().st_size / 1024:.1f} KB"
             })
     
     return datasets
@@ -383,7 +341,7 @@ async def upload_dataset(file: UploadFile = File(...)):
     if not file.filename.endswith(('.jsonl', '.csv')):
         raise HTTPException(
             status_code=400,
-            detail="Invalid file format. Only .jsonl and .csv files are supported."
+            detail="Only .jsonl and .csv files are supported"
         )
     
     # Create data directory if it doesn't exist
@@ -398,15 +356,16 @@ async def upload_dataset(file: UploadFile = File(...)):
     if file_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=f"Dataset '{safe_filename}' already exists. Please rename your file."
+            detail=f"Dataset {safe_filename} already exists"
         )
     
     try:
-        # Save uploaded file
+        # Save file
+        content = await file.read()
         with open(file_path, 'wb') as f:
-            shutil.copyfileobj(file.file, f)
+            f.write(content)
         
-        # Validate file format
+        # Validate dataset
         is_valid, error_msg, num_samples = await validate_dataset(file_path)
         
         if not is_valid:
@@ -417,7 +376,6 @@ async def upload_dataset(file: UploadFile = File(...)):
         return {
             "status": "success",
             "filename": safe_filename,
-            "dataset_id": file_path.stem,
             "num_samples": num_samples,
             "message": f"Dataset uploaded successfully with {num_samples} samples"
         }
@@ -425,75 +383,7 @@ async def upload_dataset(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        # Cleanup on error
-        if file_path.exists():
-            file_path.unlink()
         raise HTTPException(status_code=500, detail=f"Failed to upload dataset: {str(e)}")
-
-async def validate_dataset(file_path: Path) -> tuple[bool, str, int]:
-    """Validate dataset format and return (is_valid, error_message, num_samples)"""
-    
-    try:
-        if file_path.suffix == '.jsonl':
-            # Validate JSONL format
-            num_samples = 0
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    try:
-                        data = json.loads(line)
-                        
-                        # Check for required fields (text and label)
-                        if not isinstance(data, dict):
-                            return False, f"Line {line_num}: Expected JSON object", 0
-                        
-                        if 'text' not in data:
-                            return False, f"Line {line_num}: Missing 'text' field", 0
-                        
-                        if 'label' not in data:
-                            return False, f"Line {line_num}: Missing 'label' field", 0
-                        
-                        num_samples += 1
-                        
-                    except json.JSONDecodeError as e:
-                        return False, f"Line {line_num}: Invalid JSON - {str(e)}", 0
-            
-            if num_samples == 0:
-                return False, "Dataset is empty", 0
-            
-            return True, "", num_samples
-            
-        elif file_path.suffix == '.csv':
-            # Validate CSV format
-            with open(file_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                
-                # Check for required columns
-                if not reader.fieldnames:
-                    return False, "CSV file has no headers", 0
-                
-                if 'text' not in reader.fieldnames:
-                    return False, "CSV missing 'text' column", 0
-                
-                if 'label' not in reader.fieldnames:
-                    return False, "CSV missing 'label' column", 0
-                
-                # Count rows
-                num_samples = sum(1 for row in reader if row.get('text'))
-            
-            if num_samples == 0:
-                return False, "Dataset is empty", 0
-            
-            return True, "", num_samples
-        
-        else:
-            return False, "Unsupported file format", 0
-            
-    except Exception as e:
-        return False, f"Validation error: {str(e)}", 0
 
 @app.delete("/api/dataset/{dataset_id}")
 async def delete_dataset(dataset_id: str):
@@ -503,9 +393,9 @@ async def delete_dataset(dataset_id: str):
     # Find the dataset file
     dataset_file = None
     for ext in ['.jsonl', '.csv']:
-        file_path = data_dir / f"{dataset_id}{ext}"
-        if file_path.exists():
-            dataset_file = file_path
+        potential_file = data_dir / f"{dataset_id}{ext}"
+        if potential_file.exists():
+            dataset_file = potential_file
             break
     
     if not dataset_file:
@@ -517,14 +407,14 @@ async def delete_dataset(dataset_id: str):
     
     try:
         dataset_file.unlink()
-        return {"status": "success", "message": f"Dataset '{dataset_id}' deleted successfully"}
+        return {"status": "success", "message": f"Dataset {dataset_id} deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete dataset: {str(e)}")
 
 @app.post("/api/training/create")
 async def create_training(config: dict):
     """Create and start a new training run"""
-    import yaml
+    global training_manager
     
     # Generate experiment ID with custom name if provided
     timestamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
@@ -639,290 +529,75 @@ async def save_checkpoint(exp_id: str):
     })
     return {"status": "checkpoint_saved", "experiment_id": exp_id}
 
-@app.get("/api/models/compare")
-async def compare_models(model_ids: str = ""):
-    """Compare multiple models by their metrics
-    
-    Args:
-        model_ids: Comma-separated list of experiment IDs or model IDs
-    
-    Returns:
-        List of model comparison data with metrics
-    """
-    experiments_dir = PROJECT_ROOT / "experiments"
-    models = []
-    
-    # If specific IDs provided, filter to those
-    exp_ids = [id.strip() for id in model_ids.split(",")] if model_ids else []
-    
-    for exp_dir in sorted(experiments_dir.iterdir(), reverse=True):
-        if not exp_dir.is_dir():
-            continue
-            
-        # If filtering by IDs and this isn't one of them, skip
-        if exp_ids and exp_dir.name not in exp_ids:
-            continue
-        
-        # Look for metrics.json
-        metrics_file = exp_dir / "metrics.json"
-        if not metrics_file.exists():
-            # Try looking in subdirectories
-            metrics_file = exp_dir / "evaluation" / "metrics.json"
-        
-        # Default metrics structure
-        model_data = {
-            "id": exp_dir.name,
-            "name": f"Experiment {exp_dir.name[:8]}",
-            "accuracy": 0.0,
-            "f1Score": 0.0,
-            "precision": 0.0,
-            "recall": 0.0,
-            "loss": 0.0,
-            "modelSize": 0,
-            "inferenceTime": 0,
-            "parameters": 0,
-        }
-        
-        # Load metrics if available
-        if metrics_file.exists():
-            try:
-                with open(metrics_file, 'r') as f:
-                    import json
-                    metrics = json.load(f)
-                    
-                    # Update with actual metrics
-                    model_data.update({
-                        "accuracy": metrics.get("accuracy", metrics.get("eval_accuracy", 0.0)),
-                        "f1Score": metrics.get("f1", metrics.get("eval_f1", 0.0)),
-                        "precision": metrics.get("precision", metrics.get("eval_precision", 0.0)),
-                        "recall": metrics.get("recall", metrics.get("eval_recall", 0.0)),
-                        "loss": metrics.get("loss", metrics.get("eval_loss", 0.0)),
-                    })
-            except Exception as e:
-                print(f"Error loading metrics from {metrics_file}: {e}")
-        
-        # Get model file info
-        best_student_dir = exp_dir / "best_student"
-        if best_student_dir.exists():
-            for model_file in best_student_dir.glob("*.pt"):
-                model_data["modelSize"] = round(model_file.stat().st_size / (1024 * 1024), 2)  # MB
-                
-                # Try to get parameter count from model file or config
-                config_file = exp_dir / "config.yaml"
-                if config_file.exists():
-                    try:
-                        with open(config_file, 'r') as f:
-                            import yaml
-                            config = yaml.safe_load(f)
-                            
-                            # Estimate parameters based on model architecture
-                            hidden_size = config.get('student_model', {}).get('hidden_size', 768)
-                            num_layers = config.get('student_model', {}).get('num_layers', 6)
-                            
-                            # Rough estimation for BERT-like models
-                            vocab_size = 30522
-                            estimated_params = (
-                                vocab_size * hidden_size +  # Embeddings
-                                num_layers * (hidden_size * hidden_size * 4 + hidden_size * 4) +  # Transformer layers
-                                hidden_size * 2  # Classification head (binary)
-                            )
-                            model_data["parameters"] = round(estimated_params / 1_000_000, 1)  # Millions
-                    except Exception as e:
-                        print(f"Error loading config from {config_file}: {e}")
-                break
-        
-        # Check for quantized model
-        quant_dir = exp_dir / "quantized_model"
-        if quant_dir.exists():
-            for model_file in quant_dir.glob("*.pt"):
-                # Create a separate entry for quantized version
-                quant_data = model_data.copy()
-                quant_data["id"] = f"{exp_dir.name}_quantized"
-                quant_data["name"] = f"{model_data['name']} (Quantized)"
-                quant_data["modelSize"] = round(model_file.stat().st_size / (1024 * 1024), 2)
-                
-                # Quantized models typically have slight accuracy drop but faster inference
-                quant_data["accuracy"] = max(0, quant_data["accuracy"] - 0.02)  # Typical 2% drop
-                quant_data["inferenceTime"] = round(model_data.get("inferenceTime", 100) * 0.6)  # ~40% faster
-                
-                models.append(quant_data)
-                break
-        
-        models.append(model_data)
-        
-        # Limit to 10 most recent experiments if no filter
-        if not exp_ids and len(models) >= 10:
-            break
-    
-    return models
-
-@app.post("/api/training/start")
-async def start_training(config: TrainingConfig):
-    """Start a new training run (legacy endpoint)"""
-    if training_status["is_training"]:
-        raise HTTPException(status_code=400, detail="Training already in progress")
-    
-    # This would trigger the actual training pipeline
-    # For now, just update status
-    training_status["is_training"] = True
-    training_status["experiment_id"] = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    training_status["stage"] = "preflight"
-    
-    # Broadcast to websockets
-    await broadcast_message({
-        "type": "training_started",
-        "experiment_id": training_status["experiment_id"]
-    })
-    
-    return {"status": "started", "experiment_id": training_status["experiment_id"]}
-
-@app.post("/api/training/stop")
-async def stop_training():
-    """Stop the current training run (legacy endpoint)"""
-    if not training_status["is_training"]:
-        raise HTTPException(status_code=400, detail="No training in progress")
-    
-    training_status["is_training"] = False
-    training_status["stage"] = None
-    
-    await broadcast_message({"type": "training_stopped"})
-    
-    return {"status": "stopped"}
-
-@app.post("/api/training/stop")
-async def stop_training():
-    """Stop the current training run"""
-    if not training_status["is_training"]:
-        raise HTTPException(status_code=400, detail="No training in progress")
-    
-    training_status["is_training"] = False
-    training_status["stage"] = None
-    
-    await broadcast_message({"type": "training_stopped"})
-    
-    return {"status": "stopped"}
-
 @app.get("/api/training/status")
 async def get_training_status():
-    """Get current training status"""
-    return training_status
+    """Get overall training status"""
+    running_processes = training_manager.get_all_running() if training_manager else {}
+    
+    return {
+        "is_training": len(running_processes) > 0,
+        "active_experiments": len(running_processes),
+        "experiments": [
+            {
+                "experiment_id": exp_id,
+                "stage": process.current_stage,
+                "progress": (process.current_epoch / process.total_epochs * 100) if process.total_epochs > 0 else 0,
+                "is_paused": process.is_paused
+            }
+            for exp_id, process in running_processes.items()
+        ]
+    }
 
 @app.get("/api/training/active")
 async def get_active_training():
-    """Get all currently active training experiments"""
-    active = []
-    for exp_id in active_training_ids:
-        if training_manager and training_manager.is_running(exp_id):
-            metrics = training_manager.get_metrics(exp_id)
-            active.append({
-                "experiment_id": exp_id,
-                "metrics": metrics,
-                "is_running": True
-            })
-    return active
+    """Get all active training runs"""
+    if not training_manager:
+        return []
+    
+    running = training_manager.get_all_running()
+    return [
+        {
+            "experiment_id": exp_id,
+            "stage": process.current_stage,
+            "epoch": process.current_epoch,
+            "total_epochs": process.total_epochs,
+            "progress": (process.current_epoch / process.total_epochs * 100) if process.total_epochs > 0 else 0,
+            "is_paused": process.is_paused,
+            "is_running": process.is_running
+        }
+        for exp_id, process in running.items()
+    ]
 
 @app.get("/api/training/{exp_id}/metrics")
 async def get_live_metrics(exp_id: str):
-    """Get live metrics for a specific training experiment"""
+    """Get live metrics for a specific training run"""
     if not training_manager:
-        raise HTTPException(status_code=500, detail="Training manager not initialized")
+        raise HTTPException(status_code=503, detail="Training manager not initialized")
     
-    # Get metrics from training manager
     metrics = training_manager.get_metrics(exp_id)
-    
     if not metrics:
-        raise HTTPException(status_code=404, detail="Experiment not found or not running")
+        # Try to load from experiment directory if not running
+        exp_dir = PROJECT_ROOT / "experiments" / exp_id
+        results_file = exp_dir / "results.json"
+        if results_file.exists():
+            with open(results_file) as f:
+                results = json.load(f)
+            return {
+                "experiment_id": exp_id,
+                "status": "completed",
+                "final_metrics": results
+            }
+        raise HTTPException(status_code=404, detail=f"No metrics found for experiment {exp_id}")
     
     return {
         "experiment_id": exp_id,
-        "metrics": metrics,
-        "is_running": training_manager.is_running(exp_id)
+        "status": "running" if training_manager.is_running(exp_id) else "paused",
+        "live_metrics": metrics
     }
-
-@app.get("/api/metrics")
-async def get_metrics():
-    """Get dashboard metrics"""
-    experiments_dir = PROJECT_ROOT / "experiments"
-    
-    total_experiments = 0
-    successful = 0
-    if experiments_dir.exists():
-        total_experiments = len([d for d in experiments_dir.iterdir() if d.is_dir()])
-        # Count experiments with results
-        successful = len([d for d in experiments_dir.iterdir() 
-                         if d.is_dir() and (d / "results.json").exists()])
-    
-    return {
-        "total_experiments": total_experiments,
-        "successful_compressions": successful,
-        "average_compression": 3.2,
-        "average_accuracy_retained": 96.5,
-        "average_speedup": 2.8
-    }
-
-@app.get("/api/download/{exp_id}/{filename}")
-async def download_file(exp_id: str, filename: str):
-    """Download a file from an experiment"""
-    exp_dir = PROJECT_ROOT / "experiments" / exp_id
-    
-    # Security: Prevent path traversal
-    if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    
-    # Check in common locations
-    possible_paths = [
-        exp_dir / "best_student" / filename,
-        exp_dir / "quantized_model" / filename,
-        exp_dir / filename,
-    ]
-    
-    file_path = None
-    for path in possible_paths:
-        if path.exists() and path.is_file():
-            file_path = path
-            break
-    
-    if not file_path:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type="application/octet-stream"
-    )
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket for real-time updates"""
-    await websocket.accept()
-    websocket_connections.append(websocket)
-    
-    try:
-        while True:
-            # Keep connection alive
-            await websocket.receive_text()
-    except:
-        websocket_connections.remove(websocket)
-
-async def broadcast_message(message: dict):
-    """Broadcast message to all connected websockets"""
-    # Clean up active training set when training completes
-    if message.get("type") == "training_update":
-        exp_id = message.get("experiment_id")
-        status = message.get("status")
-        if exp_id and status in ["completed", "failed", "stopped"]:
-            active_training_ids.discard(exp_id)
-    for connection in websocket_connections[:]:
-        try:
-            await connection.send_json(message)
-        except:
-            websocket_connections.remove(connection)
-
-# ===== NEW ENDPOINTS FOR UI =====
 
 @app.get("/api/models/pairs")
 async def get_model_pairs():
-    """Get compatible teacher-student model pairs for Mac M2"""
+    """Get compatible teacher-student model pairs optimized for Mac M2"""
     pairs = {
         "teachers": [
             {
@@ -1013,11 +688,6 @@ async def get_model_pairs():
     }
     return pairs
 
-class PreflightRequest(BaseModel):
-    teacher_model: str
-    student_model: str
-    dataset_size: Optional[int] = None
-
 @app.post("/api/preflight/check")
 async def preflight_check(request: PreflightRequest):
     """
@@ -1055,7 +725,7 @@ async def preflight_check(request: PreflightRequest):
         student_params = float(student["params"].replace("M", ""))
         compression_ratio = round(teacher_params / student_params, 1)
     
-    # Estimate training time (rough estimate based on dataset size)
+    # Estimate training time
     estimated_time = "N/A"
     if is_compatible and request.dataset_size:
         # Rough estimate: 1 minute per 1000 samples per epoch (3 epochs default)
@@ -1109,10 +779,7 @@ async def preflight_check(request: PreflightRequest):
 
 @app.get("/api/evaluation/{exp_id}")
 async def get_evaluation_metrics(exp_id: str):
-    """
-    Get live evaluation metrics for a training experiment
-    Returns current evaluation results including confusion matrix, F1, precision, recall
-    """
+    """Get evaluation metrics for an experiment"""
     exp_dir = PROJECT_ROOT / "experiments" / exp_id
     
     if not exp_dir.exists():
@@ -1124,7 +791,6 @@ async def get_evaluation_metrics(exp_id: str):
         eval_file = exp_dir / "results.json"
     
     if not eval_file.exists():
-        # Return placeholder if no evaluation yet
         return {
             "status": "pending",
             "message": "Evaluation not yet available",
@@ -1166,7 +832,29 @@ async def get_evaluation_metrics(exp_id: str):
             detail=f"Failed to load evaluation metrics: {str(e)}"
         )
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket for real-time training updates"""
+    await websocket.accept()
+    websocket_connections.append(websocket)
+    
+    print(f"✅ WebSocket client connected. Total connections: {len(websocket_connections)}")
+    
+    try:
+        while True:
+            # Keep connection alive and receive any client messages
+            data = await websocket.receive_text()
+            # Echo back or handle client requests if needed
+            await websocket.send_json({"type": "pong", "message": "Connection alive"})
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        if websocket in websocket_connections:
+            websocket_connections.remove(websocket)
+        print(f"❌ WebSocket client disconnected. Remaining connections: {len(websocket_connections)}")
+
 if __name__ == "__main__":
     print("🚀 Starting Zynthe API on http://localhost:8765")
+    print("📡 WebSocket available at ws://localhost:8765/ws")
+    print("📖 API docs at http://localhost:8765/docs")
     uvicorn.run(app, host="0.0.0.0", port=8765)
-
