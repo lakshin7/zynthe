@@ -314,7 +314,7 @@ class SimilarityTransfer(BaseDistiller):
         
         return sas.item()
     
-    def forward(
+    def forward(  # type: ignore[override]
         self,
         x: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
@@ -322,6 +322,10 @@ class SimilarityTransfer(BaseDistiller):
     ) -> Dict[str, Any]:
         """
         Forward pass with similarity transfer.
+        
+        Note: This method has a different signature than BaseDistiller.forward()
+        because it uses registered hooks for feature extraction and returns
+        a comprehensive metrics dictionary instead of tuple outputs.
         
         Args:
             x: Input tensor
@@ -428,21 +432,112 @@ class SimilarityTransfer(BaseDistiller):
     
     def compute_loss(
         self,
-        inputs: torch.Tensor,
-        labels: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+        student_outputs: Any,
+        teacher_outputs: Any,
+        targets: Optional[torch.Tensor] = None,
+        student_features: Optional[Dict[str, torch.Tensor]] = None,
+        teacher_features: Optional[Dict[str, torch.Tensor]] = None,
+        **kwargs
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Compute similarity transfer loss (compatible with MultiStageDistiller).
+        Compute similarity transfer loss (compatible with BaseDistiller).
         
         Args:
-            inputs: Input tensor
-            labels: Ground truth labels
+            student_outputs: Student model outputs
+            teacher_outputs: Teacher model outputs
+            targets: Ground truth labels
+            student_features: Student intermediate features (unused, uses hooks)
+            teacher_features: Teacher intermediate features (unused, uses hooks)
+            **kwargs: Additional arguments
             
         Returns:
-            Loss tensor
+            Tuple of (loss tensor, metrics dict)
         """
-        _, loss = self.forward(inputs, labels, return_loss=True, training=True)
-        return loss
+        # Extract logits
+        if isinstance(student_outputs, dict):
+            student_logits = student_outputs['logits']
+        else:
+            student_logits = student_outputs
+            
+        if isinstance(teacher_outputs, dict):
+            teacher_logits = teacher_outputs['logits']
+        else:
+            teacher_logits = teacher_outputs
+        
+        # Compute similarity loss across registered layers
+        sim_loss_total = 0.0
+        loss_components = {}
+        sas_scores = []
+        
+        # Get active layers (progressive or all)
+        active_layers = self.get_progressive_layers(self.current_epoch)
+        
+        # Multi-layer similarity loss
+        for layer_name in active_layers:
+            if layer_name in self.teacher_features and layer_name in self.student_features:
+                t_feats = self.teacher_features[layer_name]
+                s_feats = self.student_features[layer_name]
+                
+                # Ensure matching dimensions
+                if t_feats.shape != s_feats.shape:
+                    warnings.warn(f"Feature shape mismatch at layer {layer_name}")
+                    continue
+                
+                # Compute similarity loss for this layer
+                sim_loss = self.compute_similarity_loss(t_feats, s_feats)
+                sim_loss_total += sim_loss
+                
+                loss_components[f'sim_loss_{layer_name}'] = sim_loss.item()
+                
+                # Compute and track structural alignment score
+                with torch.no_grad():
+                    t_sim = self.compute_similarity_matrix(t_feats, self.similarity_metric)
+                    s_sim = self.compute_similarity_matrix(s_feats, self.similarity_metric)
+                    sas = self.compute_structural_alignment_score(t_sim, s_sim)
+                    sas_scores.append(sas)
+                    loss_components[f'sas_{layer_name}'] = sas
+        
+        # Average across layers
+        if len(active_layers) > 0:
+            sim_loss_avg = sim_loss_total / len(active_layers)
+            avg_sas = sum(sas_scores) / len(sas_scores) if sas_scores else 0.0
+        else:
+            device = student_logits.device if hasattr(student_logits, 'device') else 'cpu'
+            sim_loss_avg = torch.tensor(0.0, device=device)
+            avg_sas = 0.0
+        
+        # Combine with KD loss if specified
+        device = student_logits.device if hasattr(student_logits, 'device') else 'cpu'
+        kd_loss = torch.tensor(0.0, device=device)
+        ce_loss = torch.tensor(0.0, device=device)
+        
+        if targets is not None:
+            # Cross-entropy with labels
+            ce_loss = F.cross_entropy(student_logits, targets)
+            
+            # KL divergence with teacher
+            T = self.temperature
+            kd_loss = F.kl_div(
+                F.log_softmax(student_logits / T, dim=1),
+                F.softmax(teacher_logits / T, dim=1),
+                reduction='batchmean'
+            ) * (T * T)
+        
+        # Combined loss
+        total_loss = self.weight * sim_loss_avg + self.kd_weight * kd_loss
+        if targets is not None:
+            total_loss += (1.0 - self.weight - self.kd_weight) * ce_loss
+        
+        # Metrics
+        metrics = {
+            'similarity_loss': sim_loss_avg.item() if isinstance(sim_loss_avg, torch.Tensor) else sim_loss_avg,
+            'kd_loss': kd_loss.item() if isinstance(kd_loss, torch.Tensor) else kd_loss,
+            'ce_loss': ce_loss.item() if isinstance(ce_loss, torch.Tensor) else ce_loss,
+            'sas_score': avg_sas,
+            **loss_components
+        }
+        
+        return total_loss, metrics
     
     def train_step(
         self,
@@ -584,6 +679,5 @@ def create_similarity_config(
         config['layer'] = layer
     else:
         config['layer'] = -1  # Default to last layer
-        3
     
     return config

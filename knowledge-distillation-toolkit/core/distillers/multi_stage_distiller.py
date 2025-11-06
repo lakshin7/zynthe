@@ -41,6 +41,7 @@ try:
     HAS_ATTENTION = True
 except ImportError:
     HAS_ATTENTION = False
+    AttentionTransferDistiller = None  # type: ignore
     warnings.warn("AttentionTransfer not available")
 
 try:
@@ -48,6 +49,7 @@ try:
     HAS_QAT = True
 except ImportError:
     HAS_QAT = False
+    QATDistiller = None  # type: ignore
     warnings.warn("QAT not available. Stage 'qat' will be skipped.")
 
 
@@ -153,10 +155,10 @@ class DistillerRegistry:
         }
         
         # Add optional distillers
-        if HAS_ATTENTION:
+        if HAS_ATTENTION and AttentionTransferDistiller is not None:
             self._registry['attention'] = AttentionTransferDistiller
         
-        if HAS_QAT:
+        if HAS_QAT and QATDistiller is not None:
             self._registry['qat'] = QATDistiller
     
     def register(self, name: str, distiller_cls: type):
@@ -456,6 +458,10 @@ class MultiStageDistiller:
         # Get distiller class
         distiller_cls = self.registry.get(stage_cfg['type'])
         
+        if distiller_cls is None:
+            warnings.warn(f"Distiller type '{stage_cfg['type']}' not found in registry. Skipping stage.")
+            return {'train_loss': 0.0, 'val_loss': 0.0, 'val_accuracy': 0.0}
+        
         # Get loss weights (update scheduler first if needed)
         if hasattr(self.loss_scheduler, 'update'):
             self.loss_scheduler.update(stage_idx, len(self.stages), {})
@@ -490,19 +496,21 @@ class MultiStageDistiller:
         }
         
         # Simple training loop (can be expanded)
-        if self.train_loader:
+        if self.train_loader is not None:
             for epoch in range(epochs):
                 epoch_loss = self._train_epoch(distiller, epoch + 1, epochs)
                 stage_metrics['train_loss'] = epoch_loss
                 
                 # Evaluate
-                if self.val_loader and (epoch + 1) % 1 == 0:
+                if self.val_loader is not None and (epoch + 1) % 1 == 0:
                     val_metrics = self._evaluate(distiller)
                     stage_metrics.update(val_metrics)
                     
                     print(f"  Epoch {epoch + 1}/{epochs}: "
                           f"Loss={epoch_loss:.4f}, "
                           f"Val Acc={val_metrics.get('val_accuracy', 0):.2f}%")
+        else:
+            warnings.warn("No train_loader provided, skipping training")
         
         # Unfreeze layers
         if stage_cfg.get('freeze_layers'):
@@ -531,6 +539,10 @@ class MultiStageDistiller:
         Returns:
             Average loss
         """
+        if self.train_loader is None:
+            warnings.warn("train_loader is None, returning 0.0 loss")
+            return 0.0
+        
         self.student.train()
         self.teacher.eval()
         
@@ -595,6 +607,10 @@ class MultiStageDistiller:
         Returns:
             Evaluation metrics
         """
+        if self.val_loader is None:
+            warnings.warn("val_loader is None, returning empty metrics")
+            return {'val_loss': 0.0, 'val_accuracy': 0.0}
+        
         self.student.eval()
         
         total_loss = 0.0
@@ -678,6 +694,10 @@ class MultiStageDistiller:
         Args:
             distiller: Distiller instance
         """
+        if self.train_loader is None:
+            warnings.warn("train_loader is None, skipping knowledge storage")
+            return
+        
         print("  💾 Storing knowledge for replay...")
         
         # Store teacher outputs for a subset of data
