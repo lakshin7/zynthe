@@ -131,8 +131,12 @@ class SchedulerFactory:
     
     def _create_cosine_scheduler(self, num_training_steps: Optional[int]):
         """Create cosine annealing scheduler."""
-        if num_training_steps is None:
+        # Ensure num_training_steps is valid (not None)
+        if num_training_steps is None or num_training_steps <= 0:
             num_training_steps = self.config.get('num_epochs', 10) * 100  # Estimate
+        
+        # Type assertion: after this check, num_training_steps is guaranteed to be int
+        assert isinstance(num_training_steps, int) and num_training_steps > 0
         
         eta_min = self.config.get('eta_min', 0.0)
         
@@ -145,8 +149,12 @@ class SchedulerFactory:
     
     def _create_linear_scheduler(self, num_training_steps: Optional[int]):
         """Create linear decay scheduler."""
-        if num_training_steps is None:
+        # Ensure num_training_steps is valid (not None)
+        if num_training_steps is None or num_training_steps <= 0:
             num_training_steps = self.config.get('num_epochs', 10) * 100
+        
+        # Type assertion: after this check, num_training_steps is guaranteed to be int
+        assert isinstance(num_training_steps, int) and num_training_steps > 0
         
         start_factor = self.config.get('start_factor', 1.0)
         end_factor = self.config.get('end_factor', 0.0)
@@ -161,8 +169,12 @@ class SchedulerFactory:
     
     def _create_polynomial_scheduler(self, num_training_steps: Optional[int]):
         """Create polynomial decay scheduler."""
-        if num_training_steps is None:
+        # Ensure num_training_steps is valid (not None)
+        if num_training_steps is None or num_training_steps <= 0:
             num_training_steps = self.config.get('num_epochs', 10) * 100
+        
+        # Type assertion: after this check, num_training_steps is guaranteed to be int
+        assert isinstance(num_training_steps, int) and num_training_steps > 0
         
         power = self.config.get('power', 1.0)
         

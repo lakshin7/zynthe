@@ -18,9 +18,10 @@ License: MIT
 import torch
 import torch.optim as optim
 from torch.optim import Optimizer
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, DefaultDict
 import logging
 import math
+from collections import defaultdict
 
 LOG = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ class OptimizerFactory:
         elif optimizer_name == 'lion':
             # Lion optimizer - memory efficient alternative to AdamW
             try:
-                from lion_pytorch import Lion
+                from lion_pytorch import Lion  # type: ignore[import]
                 optimizer = Lion(
                     param_groups,
                     lr=lr * 0.3,  # Lion uses ~3x smaller LR
@@ -130,7 +131,7 @@ class OptimizerFactory:
         elif optimizer_name == 'adamw8bit':
             # 8-bit AdamW for large models
             try:
-                import bitsandbytes as bnb
+                import bitsandbytes as bnb  # type: ignore[import]
                 optimizer = bnb.optim.AdamW8bit(
                     param_groups,
                     lr=lr,
@@ -199,8 +200,12 @@ class OptimizerFactory:
         if hasattr(model, 'encoder') or hasattr(model, 'bert') or hasattr(model, 'roberta'):
             # Transformer model - use layer-wise decay
             num_layers = 12  # Default for BERT-base
-            if hasattr(model, 'config') and hasattr(model.config, 'num_hidden_layers'):
-                num_layers = model.config.num_hidden_layers
+            # Type guard: Check if model has config and num_hidden_layers
+            model_config = getattr(model, 'config', None)
+            if (model_config is not None and 
+                hasattr(model_config, 'num_hidden_layers') and
+                isinstance(model_config.num_hidden_layers, int)):
+                num_layers = model_config.num_hidden_layers
             
             decay_rate = 0.95  # Each layer gets 95% of the next layer's LR
             
@@ -498,7 +503,7 @@ class OptimizerCheckpoint:
         optimizer: Optimizer,
         path: str,
         epoch: int,
-        best_metric: float = None,
+        best_metric: Optional[float] = None,
         **kwargs
     ) -> None:
         """
@@ -621,19 +626,19 @@ class LookaheadOptimizer(Optimizer):
         self.k = k
         self.alpha = alpha
         self.param_groups = self.optimizer.param_groups
-        self.state = {}
+        # Use defaultdict to match base class type
+        self.state: DefaultDict[Any, Any] = defaultdict(dict)
         
         # Cache slow weights
         for group in self.param_groups:
             for p in group['params']:
-                param_state = self.state.get(p, {})
+                param_state = self.state[p]
                 param_state['slow_buffer'] = torch.empty_like(p.data)
                 param_state['slow_buffer'].copy_(p.data)
-                self.state[p] = param_state
         
         self.step_count = 0
     
-    def step(self, closure=None):
+    def step(self, closure=None) -> None:  # type: ignore[override]
         """Perform optimization step."""
         loss = self.optimizer.step(closure)
         self.step_count += 1
@@ -647,11 +652,12 @@ class LookaheadOptimizer(Optimizer):
                     slow.add_(p.data - slow, alpha=self.alpha)
                     p.data.copy_(slow)
         
-        return loss
+        # Note: Base optimizer returns None, but we need the loss value for monitoring
+        return loss  # type: ignore[return-value]
     
-    def zero_grad(self):
+    def zero_grad(self, set_to_none: bool = True) -> None:
         """Zero gradients."""
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=set_to_none)
     
     def state_dict(self):
         """Return state dict."""
@@ -664,7 +670,10 @@ class LookaheadOptimizer(Optimizer):
     def load_state_dict(self, state_dict):
         """Load state dict."""
         self.optimizer.load_state_dict(state_dict['optimizer'])
-        self.state = state_dict.get('lookahead', {})
+        # Load lookahead state separately to avoid type conflicts
+        lookahead_state = state_dict.get('lookahead', {})
+        for param, param_state in lookahead_state.items():
+            self.state[param] = param_state
         self.step_count = state_dict.get('step_count', 0)
 
 

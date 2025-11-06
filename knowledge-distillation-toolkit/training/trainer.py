@@ -13,19 +13,56 @@ from training.optimizer import OptimizerFactory, GradientManager, AdaptiveOptimi
 from training.scheduler import SchedulerFactory
 import torch
 from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler  # Mixed Precision Training
 import os
 import inspect
 import json
 import time
+from typing import Optional, Callable, Dict, Any
 
 class Trainer:
-    def __init__(self, teacher, student, tokenizer, config, device, experiment_dir):
+    def __init__(self, teacher, student, tokenizer, config, device, experiment_dir, websocket_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
         self.teacher = teacher
         self.student = student
         self.tokenizer = tokenizer
         self.config = config
         self.device = device
         self.experiment_dir = experiment_dir
+        
+        # ========== PERFORMANCE OPTIMIZATIONS ==========
+        
+        # 1. Mixed Precision Training (AMP) - 2-3x speedup
+        self.use_amp = self.config['train'].get('use_amp', True)
+        self.scaler = GradScaler() if self.use_amp else None
+        if self.use_amp:
+            print("[OPTIMIZATION] Mixed Precision Training (AMP) enabled - expect 2-3x speedup")
+        
+        # 2. Gradient Accumulation - simulate larger batch sizes
+        self.gradient_accumulation_steps = self.config['train'].get('gradient_accumulation_steps', 1)
+        if self.gradient_accumulation_steps > 1:
+            print(f"[OPTIMIZATION] Gradient Accumulation enabled ({self.gradient_accumulation_steps} steps) - effective batch size x{self.gradient_accumulation_steps}")
+        
+        # 3. Model Compilation - DISABLED for type safety
+        # torch.compile() is powerful but causes type inference issues
+        # Users can manually compile models before passing to Trainer if needed
+        # Example: model = torch.compile(model, mode='reduce-overhead')
+        
+        # 4. Live Metrics Streaming via WebSocket - real-time UI updates
+        self.websocket_callback = websocket_callback
+        self.update_frequency = self.config['train'].get('update_frequency', 10)  # Update every N batches
+        if self.websocket_callback:
+            print(f"[OPTIMIZATION] Live metrics streaming enabled (update every {self.update_frequency} batches)")
+        
+        # 5. Mac M2 specific optimizations
+        if device.type == 'mps':
+            print("[OPTIMIZATION] Mac M2 MPS backend detected - applying optimizations")
+            # Set MPS memory fraction to avoid OOM
+            if hasattr(torch.mps, 'set_per_process_memory_fraction'):
+                torch.mps.set_per_process_memory_fraction(0.8)
+            # Enable fallback to CPU for unsupported ops
+            os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+        
+        # ========== END PERFORMANCE OPTIMIZATIONS ==========
         
         # Create optimizer using OptimizerFactory (phase-aware, gradient management)
         self.optimizer = OptimizerFactory.get_optimizer(
@@ -59,6 +96,11 @@ class Trainer:
         
         # Get distiller class and instantiate with proper parameters
         distiller_class = registry.get(distiller_type)
+        
+        # Check if distiller_class is valid before instantiating
+        if distiller_class is None:
+            raise ValueError(f"Unknown distiller type: {distiller_type}")
+        
         distiller_config = distil_cfg.get('config', {})
         
         self.distiller = distiller_class(
@@ -120,6 +162,9 @@ class Trainer:
         self.teacher.eval()
         total_loss = 0.0
         num_batches = 0
+        accumulation_counter = 0  # For gradient accumulation
+        grad_norm = 0.0  # Initialize for metrics streaming
+        
         for batch_idx, batch in enumerate(dataloader):
             if not batch or not isinstance(batch, dict):
                 print(f"[WARNING] Skipping empty or malformed batch at index {batch_idx}")
@@ -134,65 +179,154 @@ class Trainer:
             teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
             student_batch = self._filter_batch_for_model(batch, self._student_forward_params)
             
+            # ========== MIXED PRECISION TRAINING (AMP) ==========
+            # Wrap forward pass in autocast for automatic mixed precision
+            # Note: MPS doesn't support autocast, use CPU dtype
+            amp_dtype = torch.bfloat16 if self.use_amp and self.device.type == 'cpu' else torch.float16
             with torch.no_grad():
+                if self.use_amp and self.device.type != 'mps':
+                    with autocast(dtype=amp_dtype):
+                        try:
+                            teacher_outputs = self.teacher(**teacher_batch)
+                        except Exception as e:
+                            print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
+                            continue
+                else:
+                    try:
+                        teacher_outputs = self.teacher(**teacher_batch)
+                    except Exception as e:
+                        print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
+                        continue
+            
+            if self.use_amp and self.device.type != 'mps':
+                with autocast(dtype=amp_dtype):
+                    try:
+                        student_outputs = self.student(**student_batch)
+                    except Exception as e:
+                        print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
+                        continue
+                        
+                    labels = batch.get('labels', None)
+                    try:
+                        result = self.distiller.compute_loss(
+                            student_outputs=student_outputs,
+                            teacher_outputs=teacher_outputs,
+                            targets=labels
+                        )
+                        
+                        # Handle tuple return (loss, metrics_dict)
+                        if isinstance(result, tuple):
+                            loss, metrics_dict = result
+                        else:
+                            # Fallback if distiller returns only loss
+                            loss = result
+                            metrics_dict = {}
+                        
+                        # Scale loss for gradient accumulation
+                        loss = loss / self.gradient_accumulation_steps
+                            
+                    except Exception as e:
+                        print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
+                        loss = torch.tensor(0.0, device=self.device)
+            else:
                 try:
-                    teacher_outputs = self.teacher(**teacher_batch)
+                    student_outputs = self.student(**student_batch)
                 except Exception as e:
-                    print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
+                    print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
                     continue
-            try:
-                student_outputs = self.student(**student_batch)
-            except Exception as e:
-                print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
-                continue
-            labels = batch.get('labels', None)
-            try:
-                result = self.distiller.compute_loss(
-                    student_outputs=student_outputs,
-                    teacher_outputs=teacher_outputs,
-                    targets=labels
+                    
+                labels = batch.get('labels', None)
+                try:
+                    result = self.distiller.compute_loss(
+                        student_outputs=student_outputs,
+                        teacher_outputs=teacher_outputs,
+                        targets=labels
+                    )
+                    
+                    # Handle tuple return (loss, metrics_dict)
+                    if isinstance(result, tuple):
+                        loss, metrics_dict = result
+                    else:
+                        # Fallback if distiller returns only loss
+                        loss = result
+                        metrics_dict = {}
+                    
+                    # Scale loss for gradient accumulation
+                    loss = loss / self.gradient_accumulation_steps
+                        
+                except Exception as e:
+                    print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
+                    loss = torch.tensor(0.0, device=self.device)
+            
+            # ========== GRADIENT ACCUMULATION ==========
+            # Accumulate gradients over multiple batches
+            if self.use_amp and self.scaler:
+                self.scaler.scale(loss).backward()
+            else:
+                loss.backward()
+            
+            accumulation_counter += 1
+            
+            # Only step optimizer every N accumulation steps
+            if accumulation_counter >= self.gradient_accumulation_steps:
+                # Gradient management (clipping, centralization, monitoring)
+                max_grad_norm = self.config['train'].get('max_grad_norm', 1.0)
+                
+                if self.use_amp and self.scaler:
+                    # Unscale gradients before clipping
+                    self.scaler.unscale_(self.optimizer)
+                
+                grad_norm = GradientManager.clip_gradients(
+                    self.student,
+                    max_norm=max_grad_norm,
+                    norm_type=2.0
                 )
                 
-                # Handle tuple return (loss, metrics_dict)
-                if isinstance(result, tuple):
-                    loss, metrics_dict = result
+                # Centralize gradients for distillation stability (optional)
+                if self.config['train'].get('centralize_grads', False):
+                    GradientManager.centralize_gradients(self.student)
+                
+                # Log gradient statistics if needed (every 100 batches)
+                if batch_idx % 100 == 0 and grad_norm > 0:
+                    grad_stats = GradientManager.get_gradient_stats(self.student)
+                    if grad_stats['grad_norm'] > 10.0:  # Warn about potential gradient explosion
+                        print(f"[WARN] Large gradient detected: norm={grad_stats['grad_norm']:.2f}, mean={grad_stats['grad_mean']:.4f}")
+                
+                # Step optimizer with AMP scaler
+                if self.use_amp and self.scaler:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
                 else:
-                    # Fallback if distiller returns only loss
-                    loss = result
-                    metrics_dict = {}
-                    
-            except Exception as e:
-                print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
-                loss = torch.tensor(0.0, device=self.device)
+                    self.optimizer.step()
+                
+                self.optimizer.zero_grad()
+                accumulation_counter = 0
             
-            self.optimizer.zero_grad()
-            loss.backward()
-            
-            # Gradient management (clipping, centralization, monitoring)
-            max_grad_norm = self.config['train'].get('max_grad_norm', 1.0)
-            grad_norm = GradientManager.clip_gradients(
-                self.student,
-                max_norm=max_grad_norm,
-                norm_type=2.0
-            )
-            
-            # Centralize gradients for distillation stability (optional)
-            if self.config['train'].get('centralize_grads', False):
-                GradientManager.centralize_gradients(self.student)
-            
-            # Log gradient statistics if needed (every 100 batches)
-            if batch_idx % 100 == 0 and grad_norm > 0:
-                grad_stats = GradientManager.get_gradient_stats(self.student)
-                if grad_stats['grad_norm'] > 10.0:  # Warn about potential gradient explosion
-                    print(f"[WARN] Large gradient detected: norm={grad_stats['grad_norm']:.2f}, mean={grad_stats['grad_mean']:.4f}")
-            
-            self.optimizer.step()
+            # ========== LIVE METRICS STREAMING ==========
+            # Broadcast real-time updates to UI via WebSocket
+            if self.websocket_callback and batch_idx % self.update_frequency == 0:
+                metrics_payload = {
+                    'type': 'training_update',
+                    'batch_idx': batch_idx,
+                    'loss': loss.item() * self.gradient_accumulation_steps,  # Unscale for display
+                    'grad_norm': grad_norm if accumulation_counter == 0 else None,
+                    'lr': self.optimizer.param_groups[0]['lr']
+                }
+                try:
+                    self.websocket_callback(metrics_payload)
+                except Exception as e:
+                    print(f"[WARNING] WebSocket callback failed: {e}")
             
             # Step scheduler if it's per-step (OneCycle, Cyclic, etc.)
             if self.scheduler is not None and hasattr(self.scheduler, 'step'):
                 scheduler_name = type(self.scheduler).__name__
                 if 'OneCycle' in scheduler_name or 'Cyclic' in scheduler_name:
-                    self.scheduler.step()
+                    # Type safety: Check if step method requires metrics parameter
+                    step_signature = inspect.signature(self.scheduler.step)
+                    if 'metrics' in step_signature.parameters:
+                        self.scheduler.step(metrics=None)  # type: ignore[call-arg]
+                    else:
+                        self.scheduler.step()  # type: ignore[call-arg]
             
             total_loss += loss.item()
             num_batches += 1
@@ -370,7 +504,12 @@ class Trainer:
                         metric_value = val_metrics_dict.get('accuracy', val_loss)
                         self.scheduler.step(metric_value)
                     else:
-                        self.scheduler.step()
+                        # Type safety: Check if step method requires metrics parameter
+                        step_signature = inspect.signature(self.scheduler.step)
+                        if 'metrics' in step_signature.parameters:
+                            self.scheduler.step(metrics=None)  # type: ignore[call-arg]
+                        else:
+                            self.scheduler.step()  # type: ignore[call-arg]
             
             # Adaptive LR tuning based on extended metrics (DEI/CAS)
             if hasattr(self, 'adaptive_opt') and extended:
