@@ -23,10 +23,10 @@ class ModelWrapper:
 	def save(self, path: str):
 		try:
 			if hasattr(self.model, "save_pretrained"):
-				self.model.save_pretrained(path)
+				self.model.save_pretrained(path)  # type: ignore[attr-defined]
 				self.logger.info(f"Model saved to {path}")
 				if self.tokenizer is not None and hasattr(self.tokenizer, "save_pretrained"):
-					self.tokenizer.save_pretrained(path)
+					self.tokenizer.save_pretrained(path)  # type: ignore[attr-defined]
 					self.logger.info(f"Tokenizer saved to {path}")
 			else:
 				torch.save(self.model.state_dict(), path)
