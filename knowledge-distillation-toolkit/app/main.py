@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import sys
 import typer
+import numpy as np
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -33,6 +34,30 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+def convert_to_serializable(obj):
+    """
+    Convert numpy arrays and other non-JSON-serializable objects to JSON-serializable types.
+    
+    Args:
+        obj: Object to convert (can be dict, list, numpy array, etc.)
+    
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, dict):
+        return {key: convert_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_to_serializable(item) for item in obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.generic):
+        # Handle all numpy scalar types
+        return obj.item()
+    else:
+        return obj
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Knowledge Distillation Toolkit")
@@ -121,20 +146,35 @@ def distill(
         raise typer.Exit()
 
     try:
-        # Load models
-        rprint("[bold blue]Loading models...[/bold blue]")
+        # Enable HuggingFace download progress tracking
+        import os
+        os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'  # Ensure standard download for progress tracking
+        
+        # Install download progress hooks
+        from core.utils.download_monitor import install_progress_hooks
+        install_progress_hooks()
+        
+        # Load models with progress tracking
+        rprint("[bold blue]📥 Downloading/Loading Models...[/bold blue]")
+        print("[PROGRESS] stage=downloading_teacher progress=0.0 message=Starting model downloads")
+        
         teacher, student, tokenizer = load_models(cm, cm.device())
+        
+        print("[PROGRESS] stage=downloading_student progress=1.0 message=All models loaded successfully")
         rprint(f"[green]✓ Teacher loaded: {model_summary(teacher)['name']}[/green]")
         rprint(f"[green]✓ Student loaded: {model_summary(student)['name']}[/green]")
         
         # Load dataloaders
-        rprint("[bold blue]Loading dataloaders...[/bold blue]")
+        rprint("[bold blue]📚 Loading dataloaders...[/bold blue]")
+        print("[PROGRESS] stage=loading_data progress=0.0 message=Preparing training data")
         from data.dataloaders import create_dataloaders
         train_loader, val_loader = create_dataloaders(cfg, tokenizer)
+        print("[PROGRESS] stage=loading_data progress=1.0 message=Dataloaders created successfully")
         rprint(f"[green]✓ Dataloaders created[/green]")
         
         # Create multi-stage distiller
-        rprint("[bold blue]Initializing MultiStageDistiller...[/bold blue]")
+        rprint("[bold blue]⚙️  Initializing MultiStageDistiller...[/bold blue]")
+        print("[PROGRESS] stage=initializing progress=0.5 message=Setting up distillation pipeline")
         from core.distillers.multi_stage_distiller import MultiStageDistiller
         distiller = MultiStageDistiller(
             teacher=teacher,
@@ -144,11 +184,14 @@ def distill(
             val_loader=val_loader,
             device=str(cm.device())
         )
+        print("[PROGRESS] stage=initializing progress=1.0 message=Distiller initialized successfully")
         rprint(f"[green]✓ Distiller initialized[/green]")
         
         # Run distillation
-        rprint("[bold blue]Starting distillation...[/bold blue]")
+        rprint("[bold blue]🚀 Starting distillation...[/bold blue]")
+        print("[PROGRESS] stage=training progress=0.0 message=Beginning knowledge distillation")
         report = distiller.run()
+        print("[PROGRESS] stage=complete progress=1.0 message=Training completed successfully")
         
         rprint("\n[bold green]🎉 Distillation completed successfully![/bold green]")
         if 'summary' in report:
@@ -157,6 +200,7 @@ def distill(
         
     except Exception as exc:
         LOG.exception("Failed to run distillation: %s", exc)
+        print("[PROGRESS] stage=failed progress=0.0 message=Training failed")
         rprint("[red]Distillation failed — check logs for details.[/red]")
         raise typer.Exit(code=1)
 
@@ -488,13 +532,15 @@ def main():
                 # Save extended evaluation results
                 extended_eval_path = Path(cfg_manager.experiment_dir) / "extended_evaluation.json"
                 with open(extended_eval_path, 'w') as f:
-                    json.dump({
+                    # Convert all metrics to JSON-serializable format
+                    serializable_data = convert_to_serializable({
                         'teacher': teacher_metrics,
                         'student': metrics,
                         'extended_metrics': extended_metrics,
                         'dei': dei_results,
                         'cas': cas_results
-                    }, f, indent=2)
+                    })
+                    json.dump(serializable_data, f, indent=2)
                 
                 print(f"✅ Extended evaluation saved to: {extended_eval_path}")
                 

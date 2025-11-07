@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, TrendingUp, TrendingDown, Activity, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Download, TrendingUp, TrendingDown, Activity, BarChart3, CheckCircle2, Loader2, Clock } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, Button, StatusBadge, ProgressBar } from '../components/base';
 import { EvaluationMonitor } from '../components/EvaluationMonitor';
+import useNotifications from '../hooks/useNotifications';
+import NotificationSettings from '../components/NotificationSettings';
 
 interface TrainingMetrics {
   step: number;
@@ -21,15 +23,38 @@ interface EvaluationMetrics {
   confusion_matrix?: number[][];
 }
 
+interface PipelineStage {
+  name: string;
+  displayName: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  startTime?: string;
+  endTime?: string;
+  message?: string;
+}
+
 export function TrainingMonitor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { showNotification } = useNotifications();
   const [activeTab, setActiveTab] = useState<'training' | 'evaluation'>('training');
   const [experiment, setExperiment] = useState<any>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [evaluation, setEvaluation] = useState<EvaluationMetrics | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [currentStage, setCurrentStage] = useState<string>('Initializing');
+  const [wsConnected, setWsConnected] = useState(false);
+  const [previousStatus, setPreviousStatus] = useState<string>('');
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([
+    { name: 'downloading_teacher', displayName: 'Downloading Teacher Model', status: 'pending', progress: 0 },
+    { name: 'downloading_student', displayName: 'Downloading Student Model', status: 'pending', progress: 0 },
+    { name: 'loading_data', displayName: 'Loading Dataset', status: 'pending', progress: 0 },
+    { name: 'initializing', displayName: 'Initializing', status: 'pending', progress: 0 },
+    { name: 'preflight', displayName: 'Preflight Check', status: 'pending', progress: 0 },
+    { name: 'training', displayName: 'Training', status: 'pending', progress: 0 },
+    { name: 'evaluation', displayName: 'Evaluation', status: 'pending', progress: 0 },
+  ]);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -39,8 +64,16 @@ export function TrainingMonitor() {
 
     const fetchExperiment = async () => {
       try {
+        console.log(`Fetching experiment: ${id}`);
         const response = await fetch(`http://localhost:8765/api/experiments/${id}`);
+        
+        if (!response.ok) {
+          console.error(`Failed to fetch experiment: ${response.status} ${response.statusText}`);
+          return;
+        }
+        
         const data = await response.json();
+        console.log('Experiment data:', data);
         setExperiment(data);
         
         // Set initial logs
@@ -60,41 +93,109 @@ export function TrainingMonitor() {
 
     ws.onopen = () => {
       console.log('WebSocket connected for training monitor');
+      setWsConnected(true);
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log('WebSocket message received:', data);
       
-      if (data.experiment_id !== id) return;
+      // Check if message is for this experiment (handle both experiment_id and experimentId)
+      const msgExpId = data.experiment_id || data.experimentId;
+      if (msgExpId && msgExpId !== id) {
+        console.log(`Ignoring message for experiment ${msgExpId}, current is ${id}`);
+        return;
+      }
 
       if (data.type === 'training_metrics') {
-        // Add new metric point
+        console.log('Updating metrics:', data.metrics);
+        
+        // Handle the metrics object structure from backend
+        const metricsData = data.metrics || data;
         setMetrics(prev => [...prev, {
-          step: data.step,
-          loss: data.loss,
-          accuracy: data.accuracy,
-          learning_rate: data.learning_rate,
+          step: metricsData.epoch || data.step || prev.length,
+          loss: metricsData.loss || 0,
+          accuracy: metricsData.accuracy || 0,
+          learning_rate: metricsData.learningRate || 0.001,
           timestamp: new Date().toISOString()
         }]);
+
+        // Update current stage
+        if (metricsData.stage) {
+          setCurrentStage(metricsData.stage);
+        }
 
         // Update evaluation metrics if provided
         if (data.evaluation) {
           setEvaluation(data.evaluation);
         }
       } else if (data.type === 'training_log') {
+        console.log('Adding log:', data.message);
         setLogs(prev => [...prev, data.message]);
       } else if (data.type === 'training_update') {
+        console.log('Training update:', data);
+        
+        // Check if training completed
+        if (data.status === 'completed' && previousStatus !== 'completed') {
+          setPreviousStatus('completed');
+          showNotification({
+            title: '🎉 Training Complete!',
+            body: `Experiment "${experiment?.name || id}" has finished training successfully.`,
+            playSound: true,
+          });
+        } else if (data.status === 'failed' && previousStatus !== 'failed') {
+          setPreviousStatus('failed');
+          showNotification({
+            title: '❌ Training Failed',
+            body: `Experiment "${experiment?.name || id}" encountered an error.`,
+            playSound: true,
+          });
+        }
+        
+        // Update current stage
+        if (data.stage) {
+          setCurrentStage(data.stage);
+          
+          // Update pipeline stages
+          setPipelineStages(prev => prev.map(stage => {
+            if (stage.name === data.stage.toLowerCase()) {
+              return { ...stage, status: 'running', progress: data.progress || 0, message: data.message };
+            } else if (data.completed_stages?.includes(stage.name)) {
+              return { ...stage, status: 'completed', progress: 100 };
+            }
+            return stage;
+          }));
+        }
+        
         // Refresh experiment data
         fetchExperiment();
+      } else if (data.type === 'stage_complete') {
+        console.log('Stage complete:', data.stage);
+        // Mark stage as complete
+        setPipelineStages(prev => prev.map(stage => 
+          stage.name === data.stage?.toLowerCase()
+            ? { ...stage, status: 'completed', progress: 100, endTime: new Date().toISOString() }
+            : stage
+        ));
+      } else if (data.type === 'stage_started') {
+        console.log('Stage started:', data.stage);
+        // Mark stage as running
+        setPipelineStages(prev => prev.map(stage => 
+          stage.name === data.stage?.toLowerCase()
+            ? { ...stage, status: 'running', progress: 0, startTime: new Date().toISOString() }
+            : stage
+        ));
       }
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
+      setWsConnected(false);
     };
 
     return () => {
       ws.close();
+      setWsConnected(false);
     };
   }, [id]);
 
@@ -105,12 +206,33 @@ export function TrainingMonitor() {
     }
   }, [logs, autoScroll]);
 
+  // Set a basic experiment object if not loaded yet but we have an ID
+  useEffect(() => {
+    if (id && !experiment) {
+      // Set a minimal experiment object to prevent "Loading..." state blocking the UI
+      const timer = setTimeout(() => {
+        if (!experiment) {
+          console.log('Setting fallback experiment object');
+          setExperiment({
+            experiment_id: id,
+            experiment_name: `Experiment ${id}`,
+            status: 'running',
+            created_at: new Date().toISOString()
+          });
+        }
+      }, 2000); // Wait 2 seconds before showing fallback
+      
+      return () => clearTimeout(timer);
+    }
+  }, [id, experiment]);
+
   if (!experiment) {
     return (
       <div className="h-full flex items-center justify-center bg-bg-primary">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-text-secondary">Loading experiment...</p>
+          <p className="text-text-muted text-sm mt-2">ID: {id}</p>
         </div>
       </div>
     );
@@ -142,14 +264,45 @@ export function TrainingMonitor() {
                 <StatusBadge status={experiment.is_active ? 'running' : 'completed'} pulse={experiment.is_active}>
                   {experiment.is_active ? 'Training' : 'Completed'}
                 </StatusBadge>
+                {currentStage && experiment.is_active && (
+                  <span className="px-3 py-1 bg-primary/10 text-primary text-sm font-semibold rounded-full">
+                    {currentStage}
+                  </span>
+                )}
               </div>
               <p className="text-text-secondary text-sm mt-1">
-                Step {currentStep} / {totalSteps} • {Math.round(progress)}%
+                Step {currentStep} / {totalSteps} • {Math.round(progress)}% • {
+                  progress > 0 && experiment.is_active
+                    ? `ETA: ${Math.round((100 - progress) * 0.5)} min`
+                    : 'Calculating...'
+                }
               </p>
             </div>
           </div>
           
           <div className="flex items-center gap-2">
+            {/* WebSocket Status Indicator */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${
+              wsConnected 
+                ? 'bg-accent/10 text-accent' 
+                : 'bg-gray-100 text-gray-500'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${
+                wsConnected ? 'bg-accent animate-pulse' : 'bg-gray-400'
+              }`} />
+              {wsConnected ? 'Live' : 'Connecting...'}
+            </div>
+            
+            {/* Notification Settings (in a dropdown or modal) */}
+            <div className="relative group">
+              <button className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors text-text-secondary hover:text-text-primary">
+                🔔
+              </button>
+              <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-border-light p-4 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                <NotificationSettings />
+              </div>
+            </div>
+            
             <Button variant="secondary" size="sm" icon={<Download className="w-4 h-4" />}>
               Export Model
             </Button>
@@ -159,6 +312,69 @@ export function TrainingMonitor() {
         {/* Progress Bar */}
         <div className="mt-4">
           <ProgressBar progress={progress} status="running" animated />
+        </div>
+
+        {/* Pipeline Stages */}
+        <div className="mt-6 flex items-center justify-between gap-4">
+          {pipelineStages.map((stage, index) => (
+            <div key={stage.name} className="flex items-center flex-1">
+              <div className="flex flex-col items-center flex-1">
+                {/* Stage Icon */}
+                <div
+                  className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all ${
+                    stage.status === 'completed'
+                      ? 'bg-accent border-accent text-white'
+                      : stage.status === 'running'
+                      ? 'bg-primary border-primary text-white animate-pulse'
+                      : stage.status === 'failed'
+                      ? 'bg-error border-error text-white'
+                      : 'bg-bg-tertiary border-border-medium text-text-muted'
+                  }`}
+                >
+                  {stage.status === 'completed' ? (
+                    <CheckCircle2 className="w-6 h-6" />
+                  ) : stage.status === 'running' ? (
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  ) : (
+                    <Clock className="w-6 h-6" />
+                  )}
+                </div>
+                {/* Stage Name */}
+                <p
+                  className={`text-xs font-medium mt-2 text-center ${
+                    stage.status === 'running'
+                      ? 'text-primary font-semibold'
+                      : stage.status === 'completed'
+                      ? 'text-accent'
+                      : 'text-text-muted'
+                  }`}
+                >
+                  {stage.displayName}
+                </p>
+                {/* Progress Percentage */}
+                {stage.status === 'running' && (
+                  <p className="text-xs text-primary font-bold mt-1">
+                    {Math.round(stage.progress)}%
+                  </p>
+                )}
+                {stage.message && stage.status === 'running' && (
+                  <p className="text-xs text-text-secondary mt-1">{stage.message}</p>
+                )}
+              </div>
+              {/* Connector Line */}
+              {index < pipelineStages.length - 1 && (
+                <div
+                  className={`h-1 flex-1 mx-2 rounded transition-all ${
+                    stage.status === 'completed'
+                      ? 'bg-accent'
+                      : stage.status === 'running'
+                      ? 'bg-gradient-to-r from-primary to-bg-tertiary'
+                      : 'bg-bg-tertiary'
+                  }`}
+                />
+              )}
+            </div>
+          ))}
         </div>
 
         {/* Tabs */}
