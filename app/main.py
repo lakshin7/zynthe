@@ -5,9 +5,14 @@ import importlib
 import logging
 from pathlib import Path
 import sys
+import os
 import typer
 import numpy as np
 from typing import Any, Dict, List, Optional, Sequence
+
+# Set default opt-outs for optional heavy vision deps when running text pipelines.
+os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
+os.environ.setdefault("TRANSFORMERS_NO_PIL", "1")
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
