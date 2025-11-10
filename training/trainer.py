@@ -22,6 +22,7 @@ from training.optimizer import OptimizerFactory, GradientManager, AdaptiveOptimi
 from training.scheduler import SchedulerFactory
 from core.utils.data_validator import DataValidator, DataLeakageDetector, OverfitUnderfitDetector
 import torch
+import torch.nn as nn
 from torch.optim import AdamW
 from torch.cuda.amp import autocast, GradScaler  # Mixed Precision Training
 import os
@@ -166,6 +167,85 @@ class Trainer:
         self.last_preds = []
         self.last_labels = []
 
+        # Overfitting guard configuration ensures we automatically react if
+        # validation loss starts diverging sharply from training loss.
+        raw_guard_cfg = self.config['train'].get('overfit_guard', True)
+        if isinstance(raw_guard_cfg, dict):
+            guard_enabled = raw_guard_cfg.get('enabled', True)
+            guard_min_epochs = int(raw_guard_cfg.get('min_epochs', 3) or 3)
+            guard_mode = raw_guard_cfg.get('mode', raw_guard_cfg.get('action', 'early_stop'))
+            guard_conf_threshold = float(raw_guard_cfg.get('confidence_threshold', 0.5))
+        else:
+            guard_enabled = bool(raw_guard_cfg)
+            guard_min_epochs = 3
+            guard_mode = 'early_stop'
+            guard_conf_threshold = 0.5
+
+        self.overfit_guard_config = {
+            'enabled': guard_enabled,
+            'min_epochs': max(2, guard_min_epochs),
+            'mode': guard_mode,
+            'confidence_threshold': max(0.0, min(1.0, guard_conf_threshold))
+        }
+        self.overfit_guard_state = {
+            'triggered': False,
+            'epoch': None,
+            'status': None,
+            'confidence': 0.0,
+            'loss_gap_pct': 0.0,
+            'analysis': None,
+            'action': None,
+            'events': []
+        }
+
+        raw_mitigation_cfg = self.config['train'].get('overfit_mitigation', True)
+        mitigation_defaults = {
+            'enabled': True,
+            'max_interventions': 4,
+            'cooldown_epochs': 1,
+            'lr_factor': 0.7,
+            'lr_min': 1e-6,
+            'weight_decay_floor': 0.02,
+            'enable_augmentation': True,
+            'enable_dropout': True,
+            'enable_weight_decay': True,
+            'enable_lr_decay': True,
+            'augment_apply_prob': 0.45,
+            'augment_dropout': 0.15,
+            'augment_noise': 0.05,
+            'dropout_increment': 0.1,
+            'dropout_max': 0.5
+        }
+
+        if isinstance(raw_mitigation_cfg, dict):
+            mitigation_enabled = raw_mitigation_cfg.get('enabled', True)
+            mitigation_config = mitigation_defaults.copy()
+            for key in mitigation_defaults.keys():
+                if key in raw_mitigation_cfg and key != 'enabled':
+                    mitigation_config[key] = raw_mitigation_cfg[key]
+            mitigation_config['enabled'] = mitigation_enabled
+        elif raw_mitigation_cfg in (False, None):
+            mitigation_config = mitigation_defaults.copy()
+            mitigation_config['enabled'] = False
+        else:
+            mitigation_config = mitigation_defaults.copy()
+
+        self.overfit_mitigation_config = mitigation_config
+        self.overfit_mitigation_state = {
+            'intervention_count': 0,
+            'history': [],
+            'last_epoch': None,
+            'counts': {
+                'augmentation': 0,
+                'dropout': 0,
+                'weight_decay': 0,
+                'lr': 0
+            }
+        }
+        self._baseline_optimizer_lrs: List[float] = []
+        self._baseline_weight_decays: List[float] = []
+        self._train_loader_ref = None
+
         # Teacher tracking buffers are always initialised so downstream summaries
         # can safely inspect them even when teacher fine-tuning is disabled.
         self.teacher_epoch_losses: List[float] = []
@@ -279,6 +359,219 @@ class Trainer:
                 })
             except Exception as e:
                 LOG.warning(f"Failed to write CSV batch log: {e}")
+
+    def _init_mitigation_context(self, train_loader) -> None:
+        self._train_loader_ref = train_loader
+        self._baseline_optimizer_lrs = [group.get('lr', 0.0) for group in self.optimizer.param_groups]
+        self._baseline_weight_decays = [group.get('weight_decay', 0.0) for group in self.optimizer.param_groups]
+        dataset = getattr(train_loader, 'dataset', None)
+        if dataset is not None and hasattr(dataset, 'augmenter'):
+            self.overfit_mitigation_state['baseline_augmentation'] = bool(getattr(dataset, 'augmenter', None))
+        else:
+            self.overfit_mitigation_state['baseline_augmentation'] = False
+
+    def _apply_overfit_mitigation(self, epoch_idx: int, analysis: Dict[str, Any], train_loader) -> List[str]:
+        cfg = self.overfit_mitigation_config
+        if not cfg.get('enabled', True):
+            return []
+        state = self.overfit_mitigation_state
+        max_interventions = int(cfg.get('max_interventions', 0))
+        if max_interventions and state.get('intervention_count', 0) >= max_interventions:
+            return []
+        cooldown = int(cfg.get('cooldown_epochs', 0))
+        last_epoch = state.get('last_epoch')
+        if last_epoch is not None and cooldown > 0 and (epoch_idx - last_epoch) <= cooldown:
+            return []
+
+        actions = []
+        if cfg.get('enable_augmentation', True):
+            actions.append(lambda: self._mitigation_enable_augmentation(train_loader))
+        if cfg.get('enable_dropout', True):
+            actions.append(self._mitigation_increase_dropout)
+        if cfg.get('enable_weight_decay', True):
+            actions.append(self._mitigation_raise_weight_decay)
+        if cfg.get('enable_lr_decay', True):
+            actions.append(self._mitigation_reduce_lr)
+
+        for action_fn in actions:
+            result = action_fn()
+            if result:
+                state['intervention_count'] = state.get('intervention_count', 0) + 1
+                state['last_epoch'] = epoch_idx
+                state.setdefault('history', []).append({
+                    'epoch': epoch_idx,
+                    'action': result,
+                    'status': analysis.get('status'),
+                    'confidence': analysis.get('confidence'),
+                    'loss_gap_pct': analysis.get('loss_gap_pct'),
+                })
+                if isinstance(result, str):
+                    return [result]
+                return list(result)
+        return []
+
+    def _mitigation_enable_augmentation(self, train_loader) -> Optional[str]:
+        if train_loader is None:
+            return None
+        dataset = getattr(train_loader, 'dataset', None)
+        if dataset is None or not hasattr(dataset, 'augmenter'):
+            return None
+        try:
+            from data.augmentations import AugmentationConfig, TextAugmenter  # type: ignore
+        except Exception:
+            return None
+
+        counts = self.overfit_mitigation_state.setdefault('counts', {})
+        applied = counts.get('augmentation', 0)
+        max_boosts = 3
+        if applied >= max_boosts:
+            return None
+
+        cfg = self.overfit_mitigation_config
+        base_prob = float(cfg.get('augment_apply_prob', 0.45))
+        base_dropout = float(cfg.get('augment_dropout', 0.15))
+        base_noise = float(cfg.get('augment_noise', 0.05))
+        augmenter = getattr(dataset, 'augmenter', None)
+
+        if augmenter is None or not getattr(augmenter, 'config', None) or not augmenter.config.enable:
+            aug_config = AugmentationConfig(
+                enable=True,
+                apply_prob=min(0.95, base_prob),
+                dropout_prob=min(0.9, base_dropout),
+                swap_prob=0.05,
+                synonym_prob=0.1,
+                noise_prob=min(0.5, base_noise),
+                max_ops_per_sample=3,
+                reserved_tokens=(),
+                min_tokens=3,
+                apply_to_fields=("text",),
+                random_seed=None,
+            )
+            dataset.augmenter = TextAugmenter(aug_config)
+            counts['augmentation'] = applied + 1
+            return f"augmentation_enabled(p={aug_config.apply_prob:.2f})"
+
+        config = augmenter.config
+        boost_prob = min(0.95, config.apply_prob + 0.1)
+        boost_dropout = min(0.9, max(config.dropout_prob, base_dropout) + 0.05)
+        boost_noise = min(0.5, max(config.noise_prob, base_noise) + 0.02)
+
+        if (
+            abs(boost_prob - config.apply_prob) < 1e-6
+            and abs(boost_dropout - config.dropout_prob) < 1e-6
+            and abs(boost_noise - config.noise_prob) < 1e-6
+        ):
+            return None
+
+        aug_config = AugmentationConfig(
+            enable=True,
+            apply_prob=boost_prob,
+            dropout_prob=boost_dropout,
+            swap_prob=config.swap_prob,
+            synonym_prob=config.synonym_prob,
+            noise_prob=boost_noise,
+            max_ops_per_sample=config.max_ops_per_sample,
+            reserved_tokens=config.reserved_tokens,
+            min_tokens=config.min_tokens,
+            apply_to_fields=config.apply_to_fields,
+            random_seed=config.random_seed,
+        )
+        dataset.augmenter = TextAugmenter(aug_config)
+        counts['augmentation'] = applied + 1
+        return f"augmentation_boost(p={boost_prob:.2f})"
+
+    def _mitigation_increase_dropout(self) -> Optional[str]:
+        student_config = getattr(self.student, 'config', None)
+        if student_config is None:
+            return None
+        cfg = self.overfit_mitigation_config
+        inc = float(cfg.get('dropout_increment', 0.1))
+        max_p = float(cfg.get('dropout_max', 0.5))
+        counts = self.overfit_mitigation_state.setdefault('counts', {})
+
+        changed = False
+        for attr in (
+            'hidden_dropout_prob',
+            'attention_probs_dropout_prob',
+            'classifier_dropout',
+            'embedding_dropout_prob',
+        ):
+            if hasattr(student_config, attr):
+                current = float(getattr(student_config, attr))
+                target = min(max_p, current + inc)
+                if target > current + 1e-6:
+                    setattr(student_config, attr, target)
+                    changed = True
+
+        for module in self.student.modules():
+            if isinstance(module, nn.Dropout):
+                current_p = float(module.p)
+                target_p = min(max_p, current_p + inc)
+                if target_p > current_p + 1e-6:
+                    module.p = target_p
+                    changed = True
+
+        if not changed:
+            return None
+
+        counts['dropout'] = counts.get('dropout', 0) + 1
+        return f"dropout_step(+{inc:.2f})"
+
+    def _mitigation_raise_weight_decay(self) -> Optional[str]:
+        if not self.optimizer or not self.optimizer.param_groups:
+            return None
+        cfg = self.overfit_mitigation_config
+        floor = float(cfg.get('weight_decay_floor', 0.02))
+        updated = False
+        for group in self.optimizer.param_groups:
+            if 'weight_decay' not in group:
+                continue
+            current = float(group.get('weight_decay', 0.0))
+            if current == 0.0:
+                continue
+            if current < floor:
+                group['weight_decay'] = floor
+                updated = True
+
+        if not updated:
+            return None
+
+        counts = self.overfit_mitigation_state.setdefault('counts', {})
+        counts['weight_decay'] = counts.get('weight_decay', 0) + 1
+        return f"weight_decay_floor({floor:.4f})"
+
+    def _mitigation_reduce_lr(self) -> Optional[str]:
+        if not self.optimizer or not self.optimizer.param_groups:
+            return None
+        cfg = self.overfit_mitigation_config
+        factor = float(cfg.get('lr_factor', 0.7))
+        if factor >= 0.999:
+            return None
+        min_lr = float(cfg.get('lr_min', 1e-6))
+        updated = False
+        for group in self.optimizer.param_groups:
+            if 'lr' not in group:
+                continue
+            current = float(group.get('lr', 0.0))
+            if current <= min_lr + 1e-12:
+                continue
+            new_lr = max(min_lr, current * factor)
+            if new_lr < current - 1e-12:
+                group['lr'] = new_lr
+                updated = True
+
+        if not updated:
+            return None
+
+        if self.scheduler is not None and hasattr(self.scheduler, 'base_lrs'):
+            try:
+                setattr(self.scheduler, 'base_lrs', [group.get('lr', 0.0) for group in self.optimizer.param_groups])
+            except Exception:
+                pass
+
+        counts = self.overfit_mitigation_state.setdefault('counts', {})
+        counts['lr'] = counts.get('lr', 0) + 1
+        return f"lr_decay(factor={factor:.2f})"
 
     def _get_forward_params(self, model):
         """Get the parameter names accepted by the model's forward method."""
@@ -1001,6 +1294,8 @@ class Trainer:
             initial_lr = self.optimizer.param_groups[0]['lr']
             LOG.info(f"  Initial learning rate: {initial_lr:.2e}")
         
+        self._init_mitigation_context(train_loader)
+
         # Optional: Train teacher first if configured
         if self.should_train_teacher:
             print(f"\n{'='*70}")
@@ -1075,6 +1370,7 @@ class Trainer:
             current_lr = self.optimizer.param_groups[0]['lr']
             print(f"[INFO] Current learning rate: {current_lr:.6e}")
 
+            early_stop_triggered = False
             # Early stopping
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
@@ -1086,7 +1382,14 @@ class Trainer:
                 print(f"[INFO] No improvement in validation loss for {self.no_improve_epochs} epoch(s).")
                 if self.no_improve_epochs >= self.early_stop_patience:
                     print(f"[INFO] Early stopping triggered after {self.no_improve_epochs} epochs without improvement.")
-                    break
+                    early_stop_triggered = True
+
+            guard_triggered = self._maybe_trigger_overfit_guard(epoch + 1, train_loader=train_loader)
+
+            if early_stop_triggered:
+                break
+            if guard_triggered:
+                break
 
         # Final summary
         self._summarize_training(metrics_history)
@@ -1110,6 +1413,34 @@ class Trainer:
                     self.metrics_history.get('accuracy', []),  # Will be split by train/val in future
                     metric_name='accuracy'
                 )
+                events: List[Dict[str, Any]] = []
+                for event in self.overfit_guard_state.get('events', []):
+                    sanitized = {k: v for k, v in event.items() if k != 'analysis'}
+                    if isinstance(event.get('analysis'), dict):
+                        analysis_summary = {
+                            'status': event['analysis'].get('status'),
+                            'confidence': event['analysis'].get('confidence'),
+                            'loss_gap_pct': event['analysis'].get('loss_gap_pct')
+                        }
+                        sanitized['analysis'] = analysis_summary
+                    events.append(sanitized)
+
+                health_analysis['overfit_guard'] = {
+                    'enabled': self.overfit_guard_config['enabled'],
+                    'mode': self.overfit_guard_config['mode'],
+                    'triggered': self.overfit_guard_state.get('triggered', False),
+                    'epoch': self.overfit_guard_state.get('epoch'),
+                    'status': self.overfit_guard_state.get('status'),
+                    'confidence': self.overfit_guard_state.get('confidence'),
+                    'loss_gap_pct': self.overfit_guard_state.get('loss_gap_pct'),
+                    'action': self.overfit_guard_state.get('action'),
+                    'events': events,
+                    'mitigation': {
+                        'enabled': self.overfit_mitigation_config.get('enabled', True),
+                        'history': self.overfit_mitigation_state.get('history', []),
+                        'counts': self.overfit_mitigation_state.get('counts', {})
+                    }
+                }
                 with open(health_path, 'w') as f:
                     json.dump(health_analysis, f, indent=2)
                 LOG.info(f"Training health analysis saved to {health_path}")
@@ -1476,3 +1807,89 @@ class Trainer:
                 self._csv_file_handle.flush()
             except Exception:
                 pass
+
+    def _maybe_trigger_overfit_guard(self, epoch_idx: int, train_loader=None) -> bool:
+        """React to emerging overfitting either by mitigation or halt."""
+        cfg = self.overfit_guard_config
+        if not cfg['enabled']:
+            return False
+
+        min_epochs = cfg['min_epochs']
+        if len(self.train_losses) < min_epochs or len(self.val_losses) < min_epochs:
+            return False
+
+        analysis = OverfitUnderfitDetector.analyze_training_curves(
+            self.train_losses,
+            self.val_losses,
+            None,
+            self.metrics_history.get('accuracy', []),
+            metric_name='accuracy'
+        )
+
+        status = analysis.get('status', 'healthy')
+        confidence = float(analysis.get('confidence', 0.0))
+        loss_gap = analysis.get('loss_gap_pct', 0.0)
+        status_label = status.replace('_', ' ').title()
+        should_react = status in ('overfitting', 'mild_overfitting') and confidence >= cfg['confidence_threshold']
+
+        if status in ('overfitting', 'mild_overfitting'):
+            print(f"[OVERFIT-GUARD] {status_label} detected at epoch {epoch_idx} (confidence {confidence:.2f}).")
+
+        event_record = {
+            'epoch': epoch_idx,
+            'status': status,
+            'confidence': confidence,
+            'loss_gap_pct': loss_gap,
+            'analysis': analysis
+        }
+
+        if should_react:
+            mitigation_actions = self._apply_overfit_mitigation(epoch_idx, analysis, train_loader)
+            if mitigation_actions:
+                event_record['action'] = 'mitigation'
+                event_record['interventions'] = mitigation_actions
+                self.overfit_guard_state['events'].append(event_record)
+                self.overfit_guard_state.update({
+                    'triggered': False,
+                    'epoch': epoch_idx,
+                    'status': status,
+                    'confidence': confidence,
+                    'loss_gap_pct': loss_gap,
+                    'analysis': analysis,
+                    'action': 'mitigation'
+                })
+                print(f"[OVERFIT-MITIGATION] Applied interventions: {', '.join(mitigation_actions)}.")
+                print("[OVERFIT-MITIGATION] Continuing training to measure impact before considering a halt.")
+                return False
+
+            self.overfit_guard_state.update({
+                'triggered': True,
+                'epoch': epoch_idx,
+                'status': status,
+                'confidence': confidence,
+                'loss_gap_pct': loss_gap,
+                'analysis': analysis,
+                'action': 'halt'
+            })
+            event_record['action'] = 'halt'
+            self.overfit_guard_state['events'].append(event_record)
+            if cfg['mode'] in ('early_stop', 'stop', 'halt'):
+                print("[OVERFIT-GUARD] Halting student training to prevent further overfitting.")
+                return True
+            print("[OVERFIT-GUARD] Guard mode set to 'warn'; training will continue.")
+            return False
+
+        if status in ('overfitting', 'mild_overfitting'):
+            event_record['action'] = 'observe'
+            self.overfit_guard_state['events'].append(event_record)
+            self.overfit_guard_state.update({
+                'triggered': False,
+                'epoch': epoch_idx,
+                'status': status,
+                'confidence': confidence,
+                'loss_gap_pct': loss_gap,
+                'analysis': analysis,
+                'action': 'observe'
+            })
+
+        return False

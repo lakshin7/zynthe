@@ -13,6 +13,7 @@ Preflight validation checks **BEFORE** starting training to ensure:
 - Saves time (no failed training after hours of waiting)
 - Saves bandwidth (no downloading incompatible models)
 - Provides clear guidance when something is wrong
+- Flags missing safety rails (e.g., overfit guard or teacher warmup) before you hit "Start"
 
 ---
 
@@ -70,6 +71,8 @@ Click the **"Run Preflight"** button.
 3. Validates models on HuggingFace (Phase 2)
 4. Shows results in 2-4 seconds
 
+When the new overfit guard or teacher warmup settings are disabled, the results banner includes an explicit warning so you can fix the config before training.
+
 ---
 
 ## 🎨 Understanding the Results
@@ -85,6 +88,13 @@ Device: MPS (Compatible)
 
 [Next Step →]
 ```
+
+## 🛡️ Guard Rails Against Overfitting
+
+- **Overfit Guard** — Enabled by default through `train.overfit_guard`. It watches the training/validation gap and, when confidence is high, automatically pauses (mode `early_stop`) to keep the best checkpoint clean. Preflight warns if you disable it.
+- **Adaptive Mitigation** — `train.overfit_mitigation` stages proactive regularization (stronger augmentation, higher dropout, LR/weight decay tweaks) before the guard halts. Watch the console for `OVERFIT-MITIGATION` messages. Preflight flags when this safety net is off.
+- **Teacher Warmup** — Set `train.train_teacher: true` to fine-tune the teacher for a few epochs before distillation. Preflight highlights when this is off so you can avoid distilling from an unfocused teacher.
+- After a run, open `training_health.json` to see overfit guard events, mitigation steps that fired, and recommendations.
 
 **Action**: Click "Next Step" to continue to training!
 

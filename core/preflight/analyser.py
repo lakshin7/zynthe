@@ -186,6 +186,44 @@ class PreflightAnalyzer:
         if train_cfg.get('batch_size', 0) < 1:
             validation['is_valid'] = False
             validation['errors'].append("Invalid batch size (must be >= 1)")
+
+        # Overfit guard visibility so users know the new safeguard is active
+        guard_cfg = train_cfg.get('overfit_guard', True)
+        if isinstance(guard_cfg, dict):
+            guard_enabled = guard_cfg.get('enabled', True)
+            guard_mode = guard_cfg.get('mode', guard_cfg.get('action', 'early_stop'))
+        else:
+            guard_enabled = bool(guard_cfg)
+            guard_mode = 'early_stop'
+
+        if guard_enabled:
+            validation['info'].append(f"Overfit guard enabled (mode: {guard_mode})")
+        else:
+            validation['warnings'].append(
+                "train.overfit_guard is disabled - training will not auto-halt when validation loss diverges"
+            )
+
+        mitigation_cfg = train_cfg.get('overfit_mitigation', True)
+        if isinstance(mitigation_cfg, dict):
+            mitigation_enabled = mitigation_cfg.get('enabled', True)
+        elif mitigation_cfg in (False, None):
+            mitigation_enabled = False
+        else:
+            mitigation_enabled = True
+
+        if mitigation_enabled:
+            validation['info'].append("Adaptive overfit mitigation enabled - staged regularization will run before hard stops")
+        else:
+            validation['warnings'].append(
+                "train.overfit_mitigation is disabled - guard will only stop runs without attempting regularization"
+            )
+
+        if not train_cfg.get('train_teacher', False):
+            validation['warnings'].append(
+                "Teacher fine-tuning (train.train_teacher) is disabled. Distillation quality may drop without a tuned teacher."
+            )
+        else:
+            validation['info'].append("Teacher fine-tuning enabled before distillation")
         
         return validation
     
@@ -475,6 +513,22 @@ class PreflightAnalyzer:
         # Check for blockers
         model_report = self.results['model']
         data_report = self.results['data']
+        train_cfg = self.config.get('train', {})
+        guard_cfg = train_cfg.get('overfit_guard', True)
+        if isinstance(guard_cfg, dict):
+            guard_enabled = guard_cfg.get('enabled', True)
+            guard_mode = guard_cfg.get('mode', guard_cfg.get('action', 'early_stop'))
+        else:
+            guard_enabled = bool(guard_cfg)
+            guard_mode = 'early_stop'
+        teacher_training_enabled = bool(train_cfg.get('train_teacher', False))
+        mitigation_cfg = train_cfg.get('overfit_mitigation', True)
+        if isinstance(mitigation_cfg, dict):
+            mitigation_enabled = mitigation_cfg.get('enabled', True)
+        elif mitigation_cfg in (False, None):
+            mitigation_enabled = False
+        else:
+            mitigation_enabled = True
         
         # Model blockers
         model_compat = model_report.get('compatibility', {})
@@ -490,6 +544,46 @@ class PreflightAnalyzer:
         # Collect warnings
         decision['warnings'].extend(model_compat.get('warnings', []))
         decision['warnings'].extend(data_report.get('warnings', []))
+
+        if not guard_enabled:
+            warning = (
+                "Overfit guard disabled - enable train.overfit_guard.enabled to automatically pause when validation loss spikes"
+            )
+            if warning not in decision['warnings']:
+                decision['warnings'].append(warning)
+            decision['recommendations'].append(
+                "Enable the overfit guard or add regularization (dropout, data augmentation) to control overfitting."
+            )
+        else:
+            decision['recommendations'].append(
+                f"Overfit guard active (mode={guard_mode}); review training_health.json after runs for guard events."
+            )
+
+        if mitigation_enabled:
+            decision['recommendations'].append(
+                "Adaptive overfit mitigation enabled; watch for OVERFIT-MITIGATION logs to confirm interventions."
+            )
+        else:
+            mitigation_warning = (
+                "Adaptive overfit mitigation disabled - the system will halt without attempting staged regularization"
+            )
+            decision['warnings'].append(mitigation_warning)
+            decision['recommendations'].append(
+                "Enable train.overfit_mitigation to let the trainer apply augmentation/dropout before halting."
+            )
+
+        if not teacher_training_enabled:
+            teacher_warning = (
+                "Teacher fine-tuning disabled - teacher weights will remain generic during distillation"
+            )
+            decision['warnings'].append(teacher_warning)
+            decision['recommendations'].append(
+                "Set train.train_teacher=true to warm up the teacher model before distillation."
+            )
+        else:
+            decision['recommendations'].append(
+                "Teacher fine-tuning enabled; keep checkpoints for reuse across experiments."
+            )
         
         # Collect recommendations
         decision['recommendations'].extend(model_compat.get('recommendations', []))
@@ -700,6 +794,20 @@ class PreflightAnalyzer:
         warnings = self.results.get('decision', {}).get('warnings', [])
         data_stats = self.results.get('data', {}).get('statistics', {}) or {}
         compression = self.results.get('model', {}).get('compression_ratio')
+        train_cfg = self.config.get('train', {}) if hasattr(self, 'config') else {}
+        guard_cfg = train_cfg.get('overfit_guard', True)
+        if isinstance(guard_cfg, dict):
+            guard_enabled = guard_cfg.get('enabled', True)
+        else:
+            guard_enabled = bool(guard_cfg)
+        teacher_training_enabled = bool(train_cfg.get('train_teacher', False))
+        mitigation_cfg = train_cfg.get('overfit_mitigation', True)
+        if isinstance(mitigation_cfg, dict):
+            mitigation_enabled = mitigation_cfg.get('enabled', True)
+        elif mitigation_cfg in (False, None):
+            mitigation_enabled = False
+        else:
+            mitigation_enabled = True
 
         risk_score = 100
         rationale: List[str] = []
@@ -726,6 +834,21 @@ class PreflightAnalyzer:
             if num_samples < 500:
                 risk_score -= 10
                 rationale.append("Dataset contains fewer than 500 samples; overfitting risk increases.")
+
+        metrics['overfit_guard_enabled'] = guard_enabled
+        if not guard_enabled:
+            risk_score -= 8
+            rationale.append("Overfit guard disabled; enable automatic halt to contain overfitting.")
+
+        metrics['adaptive_mitigation_enabled'] = mitigation_enabled
+        if not mitigation_enabled:
+            risk_score -= 5
+            rationale.append("Adaptive overfit mitigation disabled; guard cannot attempt regularization before stopping.")
+
+        metrics['teacher_warmup_enabled'] = teacher_training_enabled
+        if not teacher_training_enabled:
+            risk_score -= 6
+            rationale.append("Teacher fine-tuning disabled; teacher quality may bottleneck distillation.")
 
         imbalance = data_stats.get('imbalance_ratio')
         if isinstance(imbalance, (float, int)):
