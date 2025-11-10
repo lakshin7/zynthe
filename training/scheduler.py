@@ -138,11 +138,23 @@ class SchedulerFactory:
         # Type assertion: after this check, num_training_steps is guaranteed to be int
         assert isinstance(num_training_steps, int) and num_training_steps > 0
         
-        eta_min = self.config.get('eta_min', 0.0)
+        # FIX: Get warmup steps and adjust T_max to prevent LR from hitting zero
+        warmup_steps = self.config.get('warmup_steps', 0)
+        
+        # Critical: The cosine scheduler should use effective steps (after warmup)
+        # Otherwise, warmup consumes most of the LR budget
+        effective_steps = max(num_training_steps - warmup_steps, 1)
+        
+        # FIX: Set eta_min to a small non-zero value to prevent complete LR collapse
+        eta_min = self.config.get('eta_min', 1e-7)  # Changed from 0.0
+        
+        LOG.info(f"Cosine scheduler: total_steps={num_training_steps}, "
+                 f"warmup_steps={warmup_steps}, effective_steps={effective_steps}, "
+                 f"eta_min={eta_min}")
         
         scheduler = CosineAnnealingLR(
             self.optimizer,
-            T_max=num_training_steps,
+            T_max=effective_steps,  # Use effective steps, not total
             eta_min=eta_min
         )
         return scheduler

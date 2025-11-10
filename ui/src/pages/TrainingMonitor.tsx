@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, TrendingUp, TrendingDown, Activity, BarChart3, CheckCircle2, Loader2, Clock } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, Button, StatusBadge, ProgressBar } from '../components/base';
+import { ConfusionMatrixCard } from '../components/ConfusionMatrixCard';
+import { fetchArtifacts, fetchConfusion } from '../api/zynthe-api';
 import { EvaluationMonitor } from '../components/EvaluationMonitor';
 import useNotifications from '../hooks/useNotifications';
 import NotificationSettings from '../components/NotificationSettings';
@@ -41,6 +43,10 @@ export function TrainingMonitor() {
   const [experiment, setExperiment] = useState<any>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [evaluation, setEvaluation] = useState<EvaluationMetrics | null>(null);
+  const [teacherCM, setTeacherCM] = useState<{ image_path?: string; metrics?: Record<string, number> } | null>(null);
+  const [studentCM, setStudentCM] = useState<{ image_path?: string; metrics?: Record<string, number> } | null>(null);
+  const [artifactImages, setArtifactImages] = useState<string[]>([]);
+  // const [batchRows, setBatchRows] = useState<Record<string, string>[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [autoScroll, setAutoScroll] = useState(true);
   const [currentStage, setCurrentStage] = useState<string>('Initializing');
@@ -86,6 +92,15 @@ export function TrainingMonitor() {
     };
 
     fetchExperiment();
+
+    // Try to prefetch artifacts periodically during run
+    const poll = setInterval(async () => {
+      try {
+        if (!id) return;
+        const art = await fetchArtifacts(id);
+        setArtifactImages(art.images || []);
+      } catch {}
+    }, 5000);
 
     // Setup WebSocket for real-time updates
     const ws = new WebSocket('ws://localhost:8765/ws');
@@ -196,6 +211,7 @@ export function TrainingMonitor() {
     return () => {
       ws.close();
       setWsConnected(false);
+      clearInterval(poll);
     };
   }, [id]);
 
@@ -245,6 +261,7 @@ export function TrainingMonitor() {
   const currentMetrics = metrics.length > 0 ? metrics[metrics.length - 1] : null;
   const bestLoss = metrics.length > 0 ? Math.min(...metrics.map(m => m.loss)) : 0;
   const bestAccuracy = metrics.length > 0 ? Math.max(...metrics.map(m => m.accuracy)) : 0;
+  // Extract micro-series from batch log (optional future)
 
   return (
     <div className="h-full flex flex-col bg-bg-primary">
@@ -540,6 +557,35 @@ export function TrainingMonitor() {
             </Card>
           </div>
 
+          {/* Confusion matrices (fetch when available) */}
+          {id && (
+            <div className="grid grid-cols-2 gap-6">
+              <Card padding="lg">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-text-primary">Confusion Matrices</h3>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const t = await fetchConfusion(id, 'teacher');
+                        const s = await fetchConfusion(id, 'student');
+                        setTeacherCM({ image_path: t.image_path, metrics: t.metrics });
+                        setStudentCM({ image_path: s.image_path, metrics: s.metrics });
+                      } catch (e) {
+                        console.warn('Confusion not ready yet');
+                      }
+                    }}
+                  >Refresh</Button>
+                </div>
+                <div className="grid grid-cols-2 gap-6">
+                  <ConfusionMatrixCard role="teacher" imagePath={teacherCM?.image_path} metrics={teacherCM?.metrics} />
+                  <ConfusionMatrixCard role="student" imagePath={studentCM?.image_path} metrics={studentCM?.metrics} />
+                </div>
+              </Card>
+            </div>
+          )}
+
           {/* Evaluation Metrics */}
           {evaluation && (
             <Card padding="lg">
@@ -627,6 +673,31 @@ export function TrainingMonitor() {
               <div ref={logsEndRef} />
             </div>
           </Card>
+
+          {/* Artifacts Gallery (thumbnails) */}
+          {artifactImages.length > 0 && (
+            <Card padding="lg">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold text-text-primary">Artifacts</h3>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    if (!id) return;
+                    try {
+                      const art = await fetchArtifacts(id);
+                      setArtifactImages(art.images || []);
+                    } catch {}
+                  }}
+                >Refresh</Button>
+              </div>
+              <div className="grid grid-cols-4 gap-4">
+                {artifactImages.slice(0, 12).map((img) => (
+                  <img key={img} src={`/experiments/${img}`} className="w-full rounded border border-border-light" />
+                ))}
+              </div>
+            </Card>
+          )}
           </div>
         ) : (
           /* Evaluation Tab */

@@ -344,10 +344,10 @@ class FeatureLossComposer(nn.Module):
         if self.use_attention and attention_t is not None and attention_s is not None:
             f_t = attention_t * f_t
             f_s = attention_s * f_s
-        
-        total_loss = torch.tensor(0.0, device=f_t.device, requires_grad=True)
+
+        total_loss = torch.zeros((), device=f_t.device)
         loss_dict = {}
-        
+
         for metric in self.metrics:
             if metric not in self.metric_fns:
                 warnings.warn(f"Unknown metric: {metric}, skipping")
@@ -358,9 +358,9 @@ class FeatureLossComposer(nn.Module):
             
             total_loss = total_loss + weight * metric_loss
             loss_dict[f'feat_{metric}'] = metric_loss.item()
-        
-        loss_dict['feat_total'] = total_loss.item() if isinstance(total_loss, torch.Tensor) else float(total_loss)
-        
+
+        loss_dict['feat_total'] = total_loss.item()
+
         return total_loss, loss_dict
 
 
@@ -426,13 +426,30 @@ class LayerAligner:
         """
         # Handle spatial size mismatch
         if f_t.shape[2:] != f_s.shape[2:]:
-            # Resize student to match teacher
-            f_s = F.interpolate(
-                f_s,
-                size=f_t.shape[2:],
-                mode='bilinear' if len(f_t.shape) == 4 else 'linear',
-                align_corners=False
-            )
+            target_shape = f_t.shape[2:]
+            if f_t.dim() == 4:
+                f_s = F.interpolate(
+                    f_s,
+                    size=target_shape,
+                    mode='bilinear',
+                    align_corners=False
+                )
+            elif f_t.dim() == 3:
+                # Treat sequence length as spatial width for interpolation
+                seq = f_s.unsqueeze(-2)  # [B, C, 1, L]
+                seq = F.interpolate(
+                    seq,
+                    size=(1, target_shape[0]),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                f_s = seq.squeeze(-2)
+            else:
+                f_s = F.interpolate(
+                    f_s.unsqueeze(1),
+                    size=target_shape,
+                    mode='nearest'
+                ).squeeze(1)
         
         # Handle channel mismatch
         if f_t.shape[1] != f_s.shape[1]:
@@ -569,9 +586,9 @@ class FeatureDistiller(BaseDistiller):
         - FSP matrix losses (if configured)
         - Attention-weighted losses (if enabled)
         """
-        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
-        loss_dict = {}
-        
+        total_loss = torch.zeros((), device=self.device)
+        loss_dict: Dict[str, float] = {}
+
         # Supervised loss - handle dict, object with logits attr, or tensor
         if targets is not None:
             if isinstance(student_outputs, dict):
@@ -580,50 +597,50 @@ class FeatureDistiller(BaseDistiller):
                 logits = student_outputs.logits
             else:
                 logits = student_outputs
-            
+
             loss_ce = F.cross_entropy(logits, targets)
             total_loss = total_loss + loss_ce
             loss_dict['supervised'] = loss_ce.item()
-        
+
         # Feature distillation losses
         if self.feat_enabled and teacher_features and student_features:
-            feat_loss_total = torch.tensor(0.0, device=self.device, requires_grad=True)
-            
+            feat_loss_total = torch.zeros((), device=self.device)
+
             for layer_config in self.feat_layers:
                 t_layer = layer_config['teacher']
                 s_layer = layer_config['student']
                 weight = layer_config.get('weight', 1.0)
-                
+
                 if t_layer in teacher_features and s_layer in student_features:
                     f_t = teacher_features[t_layer]
                     f_s = student_features[s_layer]
-                    
+
                     # Align dimensions
                     f_t, f_s = self.layer_aligner.align_features(f_t, f_s, s_layer)
-                    
+
                     # Compute loss using composer
                     layer_loss, layer_loss_dict = self.feature_loss_composer(f_t, f_s)
-                    
+
                     feat_loss_total = feat_loss_total + weight * layer_loss
-                    
+
                     # Log individual layer losses
                     for key, value in layer_loss_dict.items():
                         loss_dict[f'{s_layer}_{key}'] = value
-            
+
             total_loss = total_loss + feat_loss_total
-            loss_dict['feature_total'] = feat_loss_total.item() if isinstance(feat_loss_total, torch.Tensor) else float(feat_loss_total)
-        
+            loss_dict['feature_total'] = feat_loss_total.item()
+
         # FSP matrix losses (Stage 4)
         if self.fsp_pairs and teacher_features and student_features:
-            fsp_loss_total = torch.tensor(0.0, device=self.device, requires_grad=True)
-            
-            for i, (idx1, idx2) in enumerate(self.fsp_pairs):
+            fsp_loss_total = torch.zeros((), device=self.device)
+
+            for idx1, idx2 in self.fsp_pairs:
                 if idx1 < len(self.feat_layers) and idx2 < len(self.feat_layers):
                     t_layer1 = self.feat_layers[idx1]['teacher']
                     t_layer2 = self.feat_layers[idx2]['teacher']
                     s_layer1 = self.feat_layers[idx1]['student']
                     s_layer2 = self.feat_layers[idx2]['student']
-                    
+
                     if all(l in teacher_features for l in [t_layer1, t_layer2]) and \
                        all(l in student_features for l in [s_layer1, s_layer2]):
                         fsp_loss = FeatureMetrics.fsp_loss(
@@ -631,13 +648,13 @@ class FeatureDistiller(BaseDistiller):
                             (student_features[s_layer1], student_features[s_layer2])
                         )
                         fsp_loss_total = fsp_loss_total + fsp_loss
-            
+
             if fsp_loss_total > 0:
                 total_loss = total_loss + fsp_loss_total
-                loss_dict['fsp_loss'] = fsp_loss_total.item() if isinstance(fsp_loss_total, torch.Tensor) else float(fsp_loss_total)
-        
-        loss_dict['total'] = total_loss.item() if isinstance(total_loss, torch.Tensor) else float(total_loss)
-        
+                loss_dict['fsp_loss'] = fsp_loss_total.item()
+
+        loss_dict['total'] = total_loss.item()
+
         return total_loss, loss_dict
     
     @torch.no_grad()
@@ -724,12 +741,15 @@ class LegacyFeatureDistiller:
         return hook
 
     def compute_loss(self) -> torch.Tensor:
-        total_loss = torch.tensor(0.0, requires_grad=True)
+        total_loss: Optional[torch.Tensor] = None
         for layer_name in self.feature_layers:
             teacher_feat = self.teacher_features.get(layer_name)
             student_feat = self.student_features.get(layer_name)
             if teacher_feat is not None and student_feat is not None:
-                total_loss = total_loss + self.loss_fn(student_feat, teacher_feat.detach())
+                loss = self.loss_fn(student_feat, teacher_feat.detach())
+                total_loss = loss if total_loss is None else total_loss + loss
+        if total_loss is None:
+            return torch.zeros(())
         return total_loss
 
     def step(

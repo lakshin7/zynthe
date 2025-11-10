@@ -1,0 +1,11 @@
+{
+  "num_layers": 8,
+  "hidden_size": 576,
+  "num_attention_heads": 9,
+  "intermediate_size": 2304,
+  "vocab_size": 50265,
+  "total_params": 60821568,
+  "teacher_name": "roberta-base",
+  "compression_ratio": 0.5,
+  "strategy": "balanced"
+}

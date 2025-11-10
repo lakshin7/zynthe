@@ -387,7 +387,7 @@ class AttentionTransferDistiller(BaseDistiller):
         self,
         teacher: nn.Module,
         student: nn.Module,
-        alpha: float = 1.0,
+        alpha: Union[float, Dict[str, Any]] = 1.0,
         mode: str = "hybrid",
         temperature: float = 1.0,
         use_attention_rollout: bool = False,
@@ -401,15 +401,56 @@ class AttentionTransferDistiller(BaseDistiller):
         normalization: str = "softmax",
         loss_types: Optional[List[str]] = None,
         loss_weights: Optional[List[float]] = None,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs
     ):
-        super().__init__(teacher, student)
-        self.alpha = alpha
+        parsed_config: Dict[str, Any] = {}
+
+        if isinstance(alpha, dict):
+            parsed_config.update(alpha)
+            alpha = parsed_config.get('weight', parsed_config.get('alpha', 1.0))
+            mode = parsed_config.get('mode', parsed_config.get('type', mode))
+            temperature = parsed_config.get('temperature', temperature)
+            use_attention_rollout = parsed_config.get('use_attention_rollout', use_attention_rollout)
+            use_dual_matching = parsed_config.get('use_dual_matching', use_dual_matching)
+            use_cross_layer_flow = parsed_config.get('use_cross_layer_flow', use_cross_layer_flow)
+            use_temporal_attention = parsed_config.get('use_temporal_attention', use_temporal_attention)
+            teacher_layers = parsed_config.get('teacher_layers', teacher_layers)
+            student_layers = parsed_config.get('student_layers', student_layers)
+            layer_mapping = parsed_config.get('layer_mapping', layer_mapping)
+            normalization = parsed_config.get('normalization', normalization)
+            loss_types = parsed_config.get('loss_types', loss_types)
+            loss_weights = parsed_config.get('loss_weights', loss_weights)
+
+        if config:
+            cfg_block = config.get('attention_transfer', config)
+            parsed_config.update(cfg_block)
+            alpha = parsed_config.get('weight', alpha)
+            mode = parsed_config.get('mode', parsed_config.get('type', mode))
+            temperature = parsed_config.get('temperature', temperature)
+            use_attention_rollout = parsed_config.get('use_attention_rollout', use_attention_rollout)
+            use_dual_matching = parsed_config.get('use_dual_matching', use_dual_matching)
+            use_cross_layer_flow = parsed_config.get('use_cross_layer_flow', use_cross_layer_flow)
+            use_temporal_attention = parsed_config.get('use_temporal_attention', use_temporal_attention)
+            teacher_layers = parsed_config.get('teacher_layers', teacher_layers)
+            student_layers = parsed_config.get('student_layers', student_layers)
+            layer_mapping = parsed_config.get('layer_mapping', layer_mapping)
+            normalization = parsed_config.get('normalization', normalization)
+            loss_types = parsed_config.get('loss_types', loss_types)
+            loss_weights = parsed_config.get('loss_weights', loss_weights)
+
+        self.config = parsed_config
+
+        super().__init__(teacher, student, parsed_config or None)
+
+        self.alpha = alpha if isinstance(alpha, (float, int)) else 1.0
         self.mode = mode
         self.temperature = temperature
         self.use_attention_rollout = use_attention_rollout
         self.use_dual_matching = use_dual_matching
         self.use_cross_layer_flow = use_cross_layer_flow
         self.use_temporal_attention = use_temporal_attention
+        self.entropy_regularizer = parsed_config.get('entropy_regularizer', 0.0)
         
         # Initialize extractors
         self.teacher_layers = teacher_layers or []
@@ -426,8 +467,10 @@ class AttentionTransferDistiller(BaseDistiller):
             self.student_extractor = None
         
         # Initialize matcher
+        interp_mode = parsed_config.get('interpolation_mode', 'bilinear')
         self.matcher = AttentionMatcher(
             normalization=normalization,
+            interpolation_mode=interp_mode,
             layer_mapping=layer_mapping
         )
         
@@ -438,6 +481,19 @@ class AttentionTransferDistiller(BaseDistiller):
             weights=loss_weights,
             temperature=temperature
         )
+
+    def _move_to_device(self, data: Any) -> Any:
+        """Recursively move tensors (or collections of tensors) to the distiller device."""
+        if data is None:
+            return None
+        if isinstance(data, torch.Tensor):
+            return data.to(self.device)
+        if isinstance(data, dict):
+            return {k: self._move_to_device(v) for k, v in data.items()}
+        if isinstance(data, (list, tuple)):
+            moved = [self._move_to_device(v) for v in data]
+            return type(data)(moved) if isinstance(data, tuple) else moved
+        return data
 
 
     # ---------------------- Classical Attention Computation ----------------------
@@ -653,26 +709,33 @@ class AttentionTransferDistiller(BaseDistiller):
         """
         # Handle temporal dimension mismatch
         if teacher_temporal_attns.size(1) != student_temporal_attns.size(1):
-            # Interpolate along time axis
-            student_temporal_attns = F.interpolate(
-                student_temporal_attns.permute(0, 2, 3, 1),  # [B, H, W, T]
-                size=teacher_temporal_attns.size(1),  # Target T
-                mode='linear'
-            ).permute(0, 3, 1, 2)  # Back to [B, T, H, W]
+            # Interpolate along time axis by flattening spatial dims first
+            b, t_s, *spatial = student_temporal_attns.shape
+            student_flat = student_temporal_attns.reshape(b, t_s, -1).transpose(1, 2)  # [B, S, T]
+            student_flat = student_flat.reshape(-1, 1, 1, t_s)  # [B*S, 1, 1, T]
+            student_resampled = F.interpolate(
+                student_flat,
+                size=(1, teacher_temporal_attns.size(1)),
+                mode="bilinear",
+                align_corners=False
+            ).reshape(b, -1, teacher_temporal_attns.size(1)).transpose(1, 2)
+            student_temporal_attns = student_resampled.reshape(b, teacher_temporal_attns.size(1), *spatial)
         
         # Handle spatial dimension mismatch
         if teacher_temporal_attns.shape[2:] != student_temporal_attns.shape[2:]:
             # Reshape for interpolation: [B*T, C, H, W]
             B, T = teacher_temporal_attns.size(0), teacher_temporal_attns.size(1)
-            student_reshaped = student_temporal_attns.view(B * T, 1, *student_temporal_attns.shape[2:])
+            student_reshaped = student_temporal_attns.reshape(B * T, 1, *student_temporal_attns.shape[2:])
             target_shape = teacher_temporal_attns.shape[2:]
             
+            interp_mode = 'bilinear' if len(target_shape) == 2 else 'linear'
             student_resized = F.interpolate(
                 student_reshaped,
                 size=target_shape,
-                mode='bilinear' if len(target_shape) == 2 else 'linear'
+                mode=interp_mode,
+                align_corners=False
             )
-            student_temporal_attns = student_resized.view(B, T, *target_shape)
+            student_temporal_attns = student_resized.reshape(B, T, *target_shape)
         
         # Normalize temporal attention
         teacher_norm = self.matcher.normalize(teacher_temporal_attns)
@@ -712,6 +775,7 @@ class AttentionTransferDistiller(BaseDistiller):
             student_feats.update(student_features)
         
         losses = []
+        loss_details: Dict[str, float] = {}
         
         # Clear previous extractions
         if self.teacher_extractor:
@@ -789,6 +853,18 @@ class AttentionTransferDistiller(BaseDistiller):
                     student_feats["temporal_attn"]
                 )
                 losses.append(temporal_loss)
+
+        if self.entropy_regularizer > 0 and isinstance(student_feats.get('attentions'), (list, tuple)):
+            entropy_penalty = torch.zeros((), device=self.device)
+            attentions_seq = student_feats['attentions']
+            for attn in attentions_seq:
+                prob = F.softmax(attn, dim=-1)
+                entropy_penalty = entropy_penalty + (
+                    -(prob * prob.clamp_min(1e-8).log()).sum(dim=-1).mean()
+                )
+            entropy_penalty = entropy_penalty / max(len(attentions_seq), 1)
+            losses.append(self.entropy_regularizer * entropy_penalty)
+            loss_details['attention_entropy'] = entropy_penalty.detach().item()
         
         # Extract attention maps from hooks (if extractors are configured)
         if self.teacher_extractor and self.student_extractor:
@@ -810,13 +886,14 @@ class AttentionTransferDistiller(BaseDistiller):
                 s_map = self.compute_spatial_attention(student_feats["last_hidden_state"])
                 s_map = self.matcher.resize(s_map, t_map)
                 loss = self.alpha * F.mse_loss(s_map, t_map)
-                return loss, {'attention_transfer': loss.item()}
+                return loss, {'attention_transfer': loss.item(), **loss_details}
             else:
                 loss = torch.tensor(0.0, device=next(self.student.parameters()).device)
-                return loss, {'attention_transfer': 0.0}
+                return loss, {'attention_transfer': 0.0, **loss_details}
 
         total_loss = self.alpha * torch.stack(losses).mean()
-        return total_loss, {'attention_transfer': total_loss.item()}
+        loss_details['attention_transfer'] = total_loss.item()
+        return total_loss, loss_details
 
 
     # ---------------------- Evaluation Metrics ----------------------
@@ -995,12 +1072,33 @@ class AttentionTransferDistiller(BaseDistiller):
         Note: This override has a different signature than BaseDistiller.forward()
         for attention-specific functionality.
         """
+        inputs = self._move_to_device(x)
+        device_kwargs = self._move_to_device(kwargs)
+        if isinstance(device_kwargs, dict):
+            device_kwargs.pop("output_attentions", None)
+            device_kwargs.pop("output_hidden_states", None)
+
+        def _run(model, model_inputs):
+            if isinstance(model_inputs, dict):
+                return model(
+                    output_attentions=True,
+                    output_hidden_states=True,
+                    **model_inputs,
+                    **(device_kwargs or {})
+                )
+            return model(
+                model_inputs,
+                output_attentions=True,
+                output_hidden_states=True,
+                **(device_kwargs or {})
+            )
+
         # Forward pass through student
-        student_out = self.student(x, output_attentions=True, output_hidden_states=True, **kwargs)
+        student_out = _run(self.student, inputs)
         
         # Forward pass through teacher (no gradients)
         with torch.no_grad():
-            teacher_out = self.teacher(x, output_attentions=True, output_hidden_states=True, **kwargs)
+            teacher_out = _run(self.teacher, inputs)
 
         if return_loss and self.training:
             # Convert outputs to dict format for compatibility

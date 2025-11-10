@@ -61,3 +61,67 @@ export function connectWebSocket(onMessage: (data: any) => void) {
   };
   return ws;
 }
+
+// ==================== NEW ARTIFACT/LIVE TRAINING HELPERS ====================
+
+export async function fetchArtifacts(expId: string) {
+  const r = await fetch(`${API_BASE}/api/experiments/${expId}/artifacts`);
+  if (!r.ok) throw new Error('Failed to fetch artifacts');
+  return r.json();
+}
+
+export async function fetchConfusion(expId: string, role: 'teacher' | 'student') {
+  const r = await fetch(`${API_BASE}/api/experiments/${expId}/confusion/${role}`);
+  if (!r.ok) throw new Error('Confusion matrix not available');
+  return r.json();
+}
+
+export async function fetchBatchLog(expId: string) {
+  const r = await fetch(`${API_BASE}/api/experiments/${expId}/batch-log`);
+  if (!r.ok) throw new Error('Batch log not found');
+  return r.json();
+}
+
+export async function fetchMicroSeries(expId: string, role: 'teacher' | 'student', epoch: number) {
+  const r = await fetch(`${API_BASE}/api/experiments/${expId}/micro/${role}/${epoch}`);
+  if (!r.ok) throw new Error('Micro-series not found');
+  return r.json();
+}
+
+export function parseCsv(text: string) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length === 0) return [];
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const cols = line.split(',');
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = (cols[i] || '').trim(); });
+    return row;
+  });
+}
+
+export interface LiveBatchEvent {
+  type: string;
+  experiment_id?: string;
+  role?: 'teacher' | 'student';
+  phase?: 'train' | 'eval' | string;
+  batch_idx?: number;
+  loss?: number;
+  grad_norm?: number;
+  lr?: number;
+  accuracy?: number;
+  epoch?: number;
+}
+
+export function connectLiveTraining(onEvent: (ev: LiveBatchEvent) => void) {
+  const ws = new WebSocket(`ws://localhost:8765/ws`);
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onEvent(data);
+    } catch (e) {
+      console.warn('Live WS parse error', e);
+    }
+  };
+  return ws;
+}

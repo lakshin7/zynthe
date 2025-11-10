@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import typer
 import numpy as np
+from typing import Any, Dict, List, Optional, Sequence
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -24,8 +25,6 @@ try:
     from rich import print as rprint
 except Exception:
     rprint = print
-
-from core.config.config_manager import ConfigManager
 
 app = typer.Typer(name="zyn", help="Zynthe / Knowledge-distillation Toolkit CLI")
 
@@ -125,6 +124,345 @@ def load_config(path: str | Path, overrides: dict | None = None):
     """
     cm = ConfigManager(config_path=str(path), overrides=overrides)
     return cm, cm.resolved_config
+
+
+def resolve_label_names(config: Dict[str, Any], dataset: Any | None = None) -> List[str]:
+    """Best-effort resolution of label names for visualization artifacts."""
+
+    def _coerce_sequence(source: Any) -> List[str]:
+        if isinstance(source, dict):
+            try:
+                ordered = sorted(source.items(), key=lambda item: int(item[0]))
+            except (TypeError, ValueError):
+                ordered = list(source.items())
+            return [str(value) for _, value in ordered]
+        if isinstance(source, (list, tuple)):
+            return [str(value) for value in source]
+        if source is not None:
+            return [str(source)]
+        return []
+
+    candidates: List[Any] = [
+        config.get('data', {}).get('label_names'),
+        config.get('model', {}).get('label_names'),
+        config.get('evaluation', {}).get('label_names'),
+    ]
+
+    for candidate in candidates:
+        names = _coerce_sequence(candidate)
+        if names:
+            return names
+
+    if dataset is not None and hasattr(dataset, 'label_counts'):
+        try:
+            counts = dataset.label_counts()  # type: ignore[attr-defined]
+        except Exception:
+            counts = {}
+        if counts:
+            ordered_indices = sorted(counts.keys())
+            return [f"Class {idx}" for idx in ordered_indices]
+
+    return []
+
+
+def _select_explainability_indices(
+    predictions: Sequence[Any], labels: Sequence[Any], max_samples: int
+) -> List[int]:
+    """Prefer misclassified examples but ensure deterministic coverage."""
+    limit = max(max_samples, 0)
+    if limit == 0:
+        return []
+
+    misclassified = [
+        idx
+        for idx, (pred, label) in enumerate(zip(predictions, labels))
+        if pred != label
+    ]
+    selected: List[int] = misclassified[:limit]
+
+    if len(selected) < limit:
+        for idx in range(min(len(predictions), len(labels))):
+            if idx not in selected:
+                selected.append(idx)
+            if len(selected) >= limit:
+                break
+
+    return selected[:limit]
+
+
+def generate_explainability_reports(
+    student_model,
+    tokenizer,
+    cfg_manager: ConfigManager,
+    val_dataset: Any,
+    eval_results: Dict[str, Any],
+    output_dir: Path,
+    class_labels: Sequence[str],
+) -> Dict[str, str]:
+    """Generate optional LIME/SHAP artifacts with safe device fallbacks."""
+
+    explain_cfg = cfg_manager.resolved_config.get('explainability', {}) or {}
+    enable_lime = bool(explain_cfg.get('enable_lime', False))
+    enable_shap = bool(explain_cfg.get('enable_shap', False))
+    if not (enable_lime or enable_shap):
+        return {}
+
+    if val_dataset is None or not hasattr(val_dataset, 'samples'):
+        print("[EXPLAIN] Validation dataset samples unavailable; skipping explainability.")
+        return {}
+
+    predictions = eval_results.get('student', {}).get('predictions') or []
+    labels = (
+        eval_results.get('labels')
+        or eval_results.get('true_labels')
+        or []
+    )
+    if not predictions or not labels:
+        print("[EXPLAIN] Missing predictions or labels; skipping explainability.")
+        return {}
+
+    max_samples = int(explain_cfg.get('num_samples', 4))
+    sample_indexes = _select_explainability_indices(predictions, labels, max_samples)
+    if not sample_indexes:
+        print("[EXPLAIN] No samples selected for explainability.")
+        return {}
+
+    samples = getattr(val_dataset, 'samples', [])
+    if not samples:
+        print("[EXPLAIN] Validation dataset missing 'samples' attribute; skipping.")
+        return {}
+
+    def _label_name(index: Optional[int]) -> Optional[str]:
+        if index is None:
+            return None
+        if 0 <= index < len(class_labels):
+            return str(class_labels[index])
+        return f"Class {index}"
+
+    sample_records: List[Dict[str, Any]] = []
+    for idx in sample_indexes:
+        if idx >= len(samples):
+            continue
+        raw_sample = samples[idx]
+        text_value = raw_sample.get('text') if isinstance(raw_sample, dict) else None
+        text_value = text_value or ''
+
+        try:
+            label_idx = int(labels[idx])
+        except Exception:
+            label_idx = None
+        try:
+            pred_idx = int(predictions[idx])
+        except Exception:
+            pred_idx = None
+
+        sample_records.append(
+            {
+                'index': idx,
+                'text': text_value,
+                'label': label_idx,
+                'label_name': _label_name(label_idx),
+                'prediction': pred_idx,
+                'prediction_name': _label_name(pred_idx),
+            }
+        )
+
+    if not sample_records:
+        return {}
+
+    try:
+        import torch
+    except ImportError as exc:  # pragma: no cover - torch required for explainability
+        print(f"[EXPLAIN] PyTorch unavailable ({exc}); skipping explainability.")
+        return {}
+
+    def _batch_predict(texts: Sequence[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, getattr(student_model.config, 'num_labels', 1)))
+        device = next(student_model.parameters()).device
+        encoded = tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = student_model(**encoded)
+            logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
+            probs = torch.softmax(logits, dim=-1)
+        return probs.detach().cpu().numpy()
+
+    sample_texts = [record['text'] for record in sample_records]
+    probabilities = _batch_predict(sample_texts)
+    for record, prob in zip(sample_records, probabilities):
+        record['probabilities'] = [float(p) for p in prob]
+        record['confidence'] = float(max(prob)) if prob.size else None
+
+    explain_dir = output_dir / "explainability"
+    explain_dir.mkdir(exist_ok=True)
+
+    artifacts: Dict[str, str] = {}
+
+    num_labels = getattr(student_model.config, 'num_labels', None)
+    if num_labels is None:
+        num_labels = probabilities.shape[1] if probabilities.size else len(class_labels) or 2
+    class_names = list(class_labels) if class_labels else [f"Class {i}" for i in range(num_labels)]
+
+    try:
+        requested_device = explain_cfg.get('device') or str(cfg_manager.device())
+        explain_device = torch.device(requested_device)
+    except Exception:
+        explain_device = next(student_model.parameters()).device
+
+    cpu_device = torch.device('cpu')
+    original_device = next(student_model.parameters()).device
+
+    def _move_student(target: torch.device) -> None:
+        current_device = next(student_model.parameters()).device
+        if current_device == target:
+            return
+        student_model.to(target)
+        student_model.eval()
+
+    def _should_retry_on_cpu(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return ('mps' in message or 'metal' in message) and ('out of memory' in message or 'oom' in message)
+
+    try:
+        # LIME explanations -------------------------------------------------
+        if enable_lime:
+            from core.explainability.lime_explainer import LimeTextExplainerWrapper
+            import json
+
+            lime_num_features = int(explain_cfg.get('lime_num_features', 8))
+            devices_to_try = [explain_device]
+            if explain_device.type != 'cpu':
+                devices_to_try.append(cpu_device)
+
+            lime_explanations: Optional[List[List[Any]]] = None
+            lime_active: Optional[LimeTextExplainerWrapper] = None
+
+            for device_option in devices_to_try:
+                lime_candidate: Optional[LimeTextExplainerWrapper] = None
+                try:
+                    _move_student(device_option)
+                    lime_candidate = LimeTextExplainerWrapper(
+                        student_model,
+                        tokenizer,
+                        class_names=list(class_names),
+                        device=device_option,
+                    )
+                    lime_explanations = []
+                    for record in sample_records:
+                        explanation = lime_candidate.explain(record['text'], num_features=lime_num_features)
+                        label_idx = record['prediction'] if record['prediction'] is not None else None
+                        weights = lime_candidate.visualize(
+                            explanation,
+                            num_features=lime_num_features,
+                            label=label_idx,
+                        )
+                        lime_explanations.append(weights)
+                    lime_active = lime_candidate
+                    break
+                except RuntimeError as exc:
+                    if device_option != cpu_device and _should_retry_on_cpu(exc):
+                        print(f"[EXPLAIN] LIME encountered MPS issue: {exc}. Falling back to CPU.")
+                        lime_explanations = None
+                        if lime_candidate is not None:
+                            lime_candidate.restore()
+                        continue
+                    print(f"[EXPLAIN] LIME generation failed on {device_option}: {exc}")
+                    lime_explanations = None
+                except Exception as exc:
+                    print(f"[EXPLAIN] LIME generation error on {device_option}: {exc}")
+                    lime_explanations = None
+                finally:
+                    if lime_candidate is not None and lime_candidate is not lime_active:
+                        lime_candidate.restore()
+
+            if lime_explanations and lime_active is not None:
+                lime_records: List[Dict[str, Any]] = []
+                for record, weights in zip(sample_records, lime_explanations):
+                    enriched = dict(record)
+                    enriched['lime_weights'] = weights
+                    lime_records.append(enriched)
+
+                lime_path = explain_dir / "lime_explanations.json"
+                with lime_path.open('w', encoding='utf-8') as handle:
+                    json.dump(lime_records, handle, indent=2, ensure_ascii=False)
+                artifacts['lime'] = str(lime_path)
+
+                lime_active.restore()
+
+        # SHAP explanations -------------------------------------------------
+        if enable_shap:
+            from core.explainability.shap_explainer import SHAPExplainer
+            import json
+
+            shap_top_k = int(explain_cfg.get('shap_top_k', 10))
+            background_size = int(explain_cfg.get('shap_background_size', 10))
+            shap_payload: List[Dict[str, Any]] = []
+            devices_to_try = [explain_device]
+            if explain_device.type != 'cpu':
+                devices_to_try.append(cpu_device)
+
+            shap_values = None
+            shap_active: Optional[SHAPExplainer] = None
+
+            for device_option in devices_to_try:
+                shap_candidate: Optional[SHAPExplainer] = None
+                try:
+                    _move_student(device_option)
+                    shap_candidate = SHAPExplainer(
+                        model=student_model,
+                        tokenizer=tokenizer,
+                        device=device_option,
+                        background_size=background_size,
+                    )
+                    limited_texts = sample_texts[:max_samples]
+                    shap_values = shap_candidate.explain(limited_texts)
+                    if shap_values is not None:
+                        shap_active = shap_candidate
+                        break
+                except RuntimeError as exc:
+                    if device_option != cpu_device and _should_retry_on_cpu(exc):
+                        print(f"[EXPLAIN] SHAP encountered MPS issue: {exc}. Falling back to CPU.")
+                        shap_values = None
+                        if shap_candidate is not None:
+                            shap_candidate.restore()
+                        continue
+                    print(f"[EXPLAIN] SHAP generation failed on {device_option}: {exc}")
+                    shap_values = None
+                except Exception as exc:
+                    print(f"[EXPLAIN] SHAP generation error on {device_option}: {exc}")
+                    shap_values = None
+                finally:
+                    if shap_candidate is not None and shap_candidate is not shap_active:
+                        shap_candidate.restore()
+
+            if shap_values is not None and shap_active is not None:
+                try:
+                    shap_plot_path = explain_dir / "shap_summary.png"
+                    shap_active.visualize(shap_values, show=False, save_path=str(shap_plot_path))
+                    artifacts['shap_plot'] = str(shap_plot_path)
+                except Exception as exc:
+                    print(f"[EXPLAIN] Failed to render SHAP plot: {exc}")
+
+                shap_summary = shap_active.summarize(shap_values, top_k=shap_top_k)
+                if shap_summary:
+                    for record, contribs in zip(sample_records, shap_summary):
+                        enriched = dict(record)
+                        enriched['top_features'] = contribs
+                        shap_payload.append(enriched)
+                    if shap_payload:
+                        shap_json_path = explain_dir / "shap_contributions.json"
+                        with shap_json_path.open('w', encoding='utf-8') as handle:
+                            json.dump(shap_payload, handle, indent=2, ensure_ascii=False)
+                        artifacts['shap'] = str(shap_json_path)
+
+                shap_active.restore()
+    finally:
+        try:
+            _move_student(original_device)
+        except Exception as exc:
+            print(f"[EXPLAIN] Failed to restore model device: {exc}")
+
+    return artifacts
 
 
 @app.command()
@@ -418,12 +756,14 @@ def main():
         
         # Final evaluation with DualEvaluator
         evaluate_enabled = cfg_manager.resolved_config.get("evaluate", True)
-        metrics = {}
-        extended_metrics = {}
-        cas_rating = None  # Initialize for later use in summary
-        teacher_metrics = {}  # Initialize for later use in summary
-        dei_results = {}  # Initialize for later use in summary
-        cas_results = {}  # Initialize for later use in summary
+        metrics: Dict[str, Any] = {}
+        extended_metrics: Dict[str, Any] = {}
+        cas_rating: Optional[str] = None  # Initialize for later use in summary
+        teacher_metrics: Dict[str, Any] = {}  # Initialize for later use in summary
+        dei_results: Dict[str, Any] = {}  # Initialize for later use in summary
+        cas_results: Dict[str, Any] = {}  # Initialize for later use in summary
+        eval_results: Dict[str, Any] = {}
+        class_labels: List[str] = []
         
         if evaluate_enabled:
             try:
@@ -448,6 +788,10 @@ def main():
                 )
                 
                 eval_results = dual_evaluator.evaluate()
+                class_labels = resolve_label_names(
+                    cfg_manager.resolved_config,
+                    getattr(val_loader, 'dataset', None),
+                )
                 
                 # Extract metrics
                 metrics = eval_results.get('student', {})
@@ -578,6 +922,32 @@ def main():
                     print(f"✅ Training curves: {curves_path}")
                 else:
                     print("⚠️  Training curves not found (may not have been generated)")
+
+                explain_artifacts: Dict[str, str] = {}
+                student_metrics_dir: Optional[Path] = None
+                teacher_metrics_dir: Optional[Path] = None
+
+                if evaluate_enabled and metrics:
+                    student_metrics_dir = viz_dir / "student_metrics"
+                    student_metrics_dir.mkdir(exist_ok=True)
+                    student_metric_payload = metrics.get('metrics', metrics)
+                    plot_metrics(student_metric_payload, str(student_metrics_dir), labels=class_labels or None)
+
+                    if teacher_metrics:
+                        teacher_metrics_dir = viz_dir / "teacher_metrics"
+                        teacher_metrics_dir.mkdir(exist_ok=True)
+                        teacher_metric_payload = teacher_metrics.get('metrics', teacher_metrics)
+                        plot_metrics(teacher_metric_payload, str(teacher_metrics_dir), labels=class_labels or None)
+
+                    explain_artifacts = generate_explainability_reports(
+                        student_model=student,
+                        tokenizer=tokenizer,
+                        cfg_manager=cfg_manager,
+                        val_dataset=getattr(val_loader, 'dataset', None),
+                        eval_results=eval_results,
+                        output_dir=viz_dir,
+                        class_labels=class_labels,
+                    )
                 
                 # Create comparison visualization if we have teacher and student
                 try:
@@ -673,6 +1043,31 @@ def main():
                     f.write(f"- Training curves: `training_curves.png`\n")
                     f.write(f"- Extended metrics: `extended_metrics.json`\n")
                     f.write(f"- Extended evaluation: `extended_evaluation.json`\n")
+                    if evaluate_enabled and student_metrics_dir is not None:
+                        student_cm = student_metrics_dir / "confusion_matrix.png"
+                        if student_cm.exists():
+                            f.write(
+                                f"- Student confusion matrix: `{student_cm.relative_to(cfg_manager.experiment_dir)}`\n"
+                            )
+                    if evaluate_enabled and teacher_metrics_dir is not None:
+                        teacher_cm = teacher_metrics_dir / "confusion_matrix.png"
+                        if teacher_cm.exists():
+                            f.write(
+                                f"- Teacher confusion matrix: `{teacher_cm.relative_to(cfg_manager.experiment_dir)}`\n"
+                            )
+                    if explain_artifacts:
+                        for label, key in (
+                            ("LIME explanations", "lime"),
+                            ("SHAP contributions", "shap"),
+                            ("SHAP summary plot", "shap_plot"),
+                        ):
+                            artifact_path = explain_artifacts.get(key)
+                            if artifact_path:
+                                artifact_obj = Path(artifact_path)
+                                if artifact_obj.exists():
+                                    f.write(
+                                        f"- {label}: `{artifact_obj.relative_to(cfg_manager.experiment_dir)}`\n"
+                                    )
                     f.write(f"- Model comparison: `visualizations/model_comparison.png`\n")
                     f.write(f"- Config: `resolved_config.yaml`\n")
                 

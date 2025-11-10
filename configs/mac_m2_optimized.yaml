@@ -1,0 +1,107 @@
+# Mac M2-Optimized Configuration for Knowledge Distillation
+# Tested models that work well on Mac M2 (8GB-16GB RAM)
+
+train:
+  epochs: 3                    # Moderate epochs for Mac M2
+  batch_size: 4                # Safe batch size for 8GB RAM
+  lr: 2e-5                     # Conservative learning rate
+  grad_accum_steps: 2          # Effective batch size = 8
+  mixed_precision: false       # MPS prefers float32
+  early_stop_patience: 2
+  
+  # Optimizer Configuration
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  centralize_grads: false      # Disable for smaller models
+  dynamic_lr: true
+  
+  # Scheduler Configuration
+  scheduler: cosine
+  warmup_steps: 50
+  warmup_type: linear
+  
+  # Teacher training (optional)
+  train_teacher: false
+  teacher_epochs: 2
+  teacher_lr: 2e-5
+
+model:
+  # OPTION 1: DeepSeek-Coder (NOT RECOMMENDED for Mac M2)
+  # DeepSeek models are typically 1B-7B+ parameters - too large for Mac M2
+  # They require 16GB+ RAM and are designed for servers/workstations
+  
+  # OPTION 2: Phi-2 (Microsoft) - RECOMMENDED ✅
+  # Small but powerful, works great on Mac M2
+  # name: "microsoft/phi-2"                    # Teacher: Phi-2 (2.7B params)
+  # student_name: "microsoft/phi-1_5"          # Student: Phi-1.5 (1.3B params)
+  
+  # OPTION 3: TinyLlama - RECOMMENDED for Mac M2 ✅
+  # Specifically optimized for edge devices
+  # name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"  # Teacher: TinyLlama (1.1B)
+  # student_name: "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"  # Student (earlier checkpoint)
+  
+  # OPTION 4: BERT Family - SAFEST for Mac M2 ✅ (Current default)
+  # Well-tested, proven to work
+  name: "bert-base-uncased"                    # Teacher: BERT-base (110M params)
+  student_name: "distilbert-base-uncased"      # Student: DistilBERT (66M params)
+  
+  # OPTION 5: RoBERTa Family - GOOD for Mac M2 ✅
+  # Slightly larger but still manageable
+  # name: "roberta-base"                       # Teacher: RoBERTa (125M params)
+  # student_name: "distilroberta-base"         # Student: DistilRoBERTa (82M params)
+  
+  # OPTION 6: ALBERT - VERY EFFICIENT for Mac M2 ✅
+  # Parameter sharing makes it very memory efficient
+  # name: "albert-base-v2"                     # Teacher: ALBERT-base (12M params!)
+  # student_name: "albert-base-v2"             # Can distill to same or smaller
+  
+  type: "transformer"
+  tokenizer_name: "bert-base-uncased"          # Match with teacher model
+  max_length: 128                              # Shorter for Mac M2
+
+distillation:
+  method: "kd_hinton"          # Simple KD for Mac M2
+  temperature: 2.0             # Standard temperature
+  alpha: 0.5                   # Balanced distillation
+
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+  
+  # Limit data for faster training on Mac M2
+  preprocessing:
+    max_examples: 5000         # Reduced for Mac M2 (default was 10000)
+
+device:
+  prefer_mps: true             # Use Apple Silicon GPU
+  prefer_cuda: false
+  fallback_cpu: true
+  
+  # Memory management for Mac M2
+  memory_management:
+    enable: true
+    max_memory_gb: 6           # Conservative for 8GB Mac M2
+    gradient_checkpointing: false  # Disable for speed
+
+output_root: "experiments"
+seed: 42
+
+quantization:
+  enable: true
+  mode: "float16"              # Best for MPS
+
+evaluate:
+  enable: true
+  metrics: ["accuracy", "f1", "precision", "recall"]
+  save_predictions: true
+  confusion_matrix: true
+
+experiment:
+  save_checkpoints: true
+  checkpoint_every: 1
+  keep_last_n: 2               # Save space on Mac M2
+  log_level: "INFO"
+
+visualization:
+  enable: true

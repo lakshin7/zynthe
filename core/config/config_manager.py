@@ -76,7 +76,7 @@ def _get_env_info() -> Dict[str, Any]:
 
 def _get_git_info() -> Dict[str, Optional[str]]:
     """Best-effort minimal git info: commit sha and branch."""
-    out = {"commit_sha": None, "branch": None}
+    out: Dict[str, Optional[str]] = {"commit_sha": None, "branch": None}
     try:
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
         out["commit_sha"] = sha
@@ -138,13 +138,16 @@ class ConfigManager:
                  overrides: Optional[Dict[str, Any]] = None,
                  experiments_root: str = "experiments"):
         self.config_path = config_path
+        env_root = os.environ.get("ZYNTHE_EXPERIMENTS_ROOT")
+        if env_root:
+            experiments_root = env_root
         # Look for default.yaml in configs/ directory (2 levels up from core/config/)
         if defaults_path is None:
             config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "configs"))
             defaults_path = os.path.join(config_dir, _DEFAULTS_FILENAME)
         self.defaults_path = defaults_path
-        self.overrides = overrides or {}
-        self.experiments_root = experiments_root
+        self.overrides = overrides.copy() if overrides else {}
+        self.experiments_root = os.path.abspath(os.path.expanduser(experiments_root))
 
         self.raw_config: Dict[str, Any] = {}
         self.resolved_config: Dict[str, Any] = {}
@@ -281,7 +284,9 @@ class ConfigManager:
     # Experiment directories
     # -------------------------
     def _create_experiment_dirs(self):
+        self.paths = {}
         base = self.raw_config.get("output_root", self.experiments_root)
+        base = os.path.abspath(os.path.expanduser(base))
         _ensure_dir(base)
 
         # experiment id uses timestamp + short uuid
@@ -314,17 +319,18 @@ class ConfigManager:
 
     def _save_resolved_config(self):
         payload = dict(self.resolved_config)
-        payload["_meta"] = {
+        meta: Dict[str, Any] = {
             "experiment_id": self.experiment_id,
             "created_at_utc": datetime.utcnow().isoformat() + "Z",
-            "config_version": "v1.0"  # <-- added version tagging
+            "config_version": "v1.0"
         }
-        payload["_meta"]["git"] = self.git_info
+        meta["git"] = self.git_info
+        payload["_meta"] = meta
         try:
             with open(self.paths["resolved_config"], "w") as f:
                 yaml.safe_dump(payload, f, sort_keys=False)
         except Exception as e:
-                logger.warning("Failed to write resolved config: %s", e)
+            logger.warning("Failed to write resolved config: %s", e)
 
     # -------------------------
     # Public API
@@ -348,7 +354,7 @@ class ConfigManager:
     def override(self, overrides: Dict[str, Any]):
         if not overrides:
             return
-        self.raw_config = _deep_update(self.raw_config, overrides)
+        self.overrides = _deep_update(self.overrides, overrides)
         self._load_and_resolve()
 
     # -------------------------

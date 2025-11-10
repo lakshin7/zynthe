@@ -146,7 +146,7 @@ def monitor_cache_directory(model_id: str, role: str, timeout: int = 300):
         time.sleep(0.5)
 
 
-def wrap_model_loading(model_loader_func: Callable, model_id: str, role: str = "teacher", *args, **kwargs):
+def wrap_model_loading(model_loader_func: Callable, model_id: str, *args, role: str = "teacher", **kwargs):
     """
     Wrapper function that monitors model loading progress.
     
@@ -216,18 +216,25 @@ def install_progress_hooks():
                 original_from_pretrained = cls.from_pretrained
                 _patched_classes[cls_name] = original_from_pretrained
                 
-                @wraps(original_from_pretrained)
-                def from_pretrained_with_progress(pretrained_model_name_or_path, *args, _monitor_role='model', **kwargs):
-                    """Wrapped from_pretrained with progress tracking"""
-                    return wrap_model_loading(
-                        original_from_pretrained,
-                        pretrained_model_name_or_path,
-                        role=_monitor_role,
-                        *args,
-                        **kwargs
-                    )
+                def make_wrapper(original_method):
+                    @wraps(original_method)
+                    def from_pretrained_with_progress(pretrained_model_name_or_path, *args, _monitor_role='model', **kwargs):
+                        """Wrapped from_pretrained with progress tracking"""
+                        # Ensure model_id is a string, not a class object
+                        if not isinstance(pretrained_model_name_or_path, str):
+                            # Fallback: call original without monitoring
+                            return original_method(pretrained_model_name_or_path, *args, **kwargs)
+                        
+                        return wrap_model_loading(
+                            original_method,
+                            pretrained_model_name_or_path,
+                            *args,
+                            role=_monitor_role,
+                            **kwargs
+                        )
+                    return from_pretrained_with_progress
                 
-                cls.from_pretrained = classmethod(from_pretrained_with_progress)
+                cls.from_pretrained = classmethod(make_wrapper(original_from_pretrained))
         
         print("[DEBUG] Progress hooks installed successfully", file=sys.stderr)
     except Exception as e:

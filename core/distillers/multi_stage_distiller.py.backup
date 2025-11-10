@@ -1,0 +1,1630 @@
+"""
+Multi-Stage Distiller - Progressive Knowledge Transfer
+
+Orchestrates sequential distillation stages with:
+1. Stage Controller: Manages sequence, duration, checkpoints
+2. Distiller Registry: Plug-and-play distiller modules
+3. Adaptive Loss Scheduler: Dynamic weight adjustment
+4. Intermediate Evaluation: Stage-wise performance tracking
+5. Knowledge Replay: Prevents catastrophic forgetting
+6. Progressive Precision: Gradual quantization
+7. Layer-wise Freezing: Efficient computation
+8. Preflight-Aware Planning: Automatic stage generation
+
+Example:
+    Stage 1: Logit Alignment (KD-Hinton) -> alpha=0.9
+    Stage 2: Feature Refinement -> beta=0.6
+    Stage 3: Attention Imitation -> gamma=0.3
+    Stage 4: QAT Fine-Tuning -> int8
+"""
+
+from typing import Dict, List, Any, Optional, Tuple
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from pathlib import Path
+import yaml
+import json
+from datetime import datetime
+import warnings
+
+from .base_distiller import BaseDistiller
+from .kd_hinton import KDHintonDistiller
+from .feature_distiller import FeatureDistiller
+
+# Optional imports
+try:
+    from .attention_transfer import AttentionTransferDistiller
+    HAS_ATTENTION = True
+except ImportError:
+    HAS_ATTENTION = False
+    warnings.warn("AttentionTransfer not available")
+
+try:
+    from ..quant.qat import QATDistiller
+    HAS_QAT = True
+except ImportError:
+    HAS_QAT = False
+
+
+class StageController:
+
+    """Controls stage execution, checkpoints, and dependencies."""
+
+    import yaml          2. Include AttentionTransferDistiller if attention_transfer is True.
+
+    def __init__(self, stages: List[Dict], output_dir: str):
+
+        self.stages = stagesimport json          3. Include FeatureDistiller if feature_transfer is True.
+
+        self.output_dir = Path(output_dir)
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)from datetime import datetime          4. Include SimilarityTransferDistiller if similarity_transfer is True.
+
+        
+
+        self.current_stage = 0from collections import defaultdict          5. Order: KD -> Attention -> Feature -> Similarity.
+
+        self.stage_history = []
+
+        self.checkpoints = {}import warnings        """
+
+    
+
+    def get_next_stage(self) -> Optional[Dict]:        distill_cfg = config.get("distillation", {})
+
+        """Get next stage configuration."""
+
+        if self.current_stage < len(self.stages):from .base_distiller import BaseDistiller        reasoning_order = []
+
+            stage = self.stages[self.current_stage]
+
+            self.current_stage += 1from .kd_hinton import KDHintonDistiller
+
+            return stage
+
+        return Nonefrom .feature_distiller import FeatureDistiller        if distill_cfg.get("method") == "kd_hinton":
+
+    
+
+    def save_checkpoint(            # KDHintonDistiller has different constructor - create wrapper
+
+        self,
+
+        stage_idx: int,# Optional imports            kd_wrapper = lambda s, t, c: KDHintonDistiller(
+
+        model: nn.Module,
+
+        optimizer: Optional[torch.optim.Optimizer],try:                temperature=c.get('temperature', 2.0),
+
+        metrics: Dict[str, float]
+
+    ) -> Path:    from .attention_transfer import AttentionTransferDistiller                alpha=c.get('alpha', 0.5)
+
+        """Save stage checkpoint."""
+
+        checkpoint_path = self.output_dir / f"stage_{stage_idx}_checkpoint.pt"    HAS_ATTENTION = True            )
+
+        
+
+        checkpoint = {except ImportError:            reasoning_order.append(kd_wrapper)
+
+            'stage_idx': stage_idx,
+
+            'model_state_dict': model.state_dict(),    HAS_ATTENTION = False        if distill_cfg.get("attention_transfer", False):
+
+            'metrics': metrics,
+
+            'timestamp': datetime.now().isoformat()    warnings.warn("AttentionTransfer not available")            reasoning_order.append(AttentionTransferDistiller)
+
+        }
+
+                if distill_cfg.get("feature_transfer", False):
+
+        if optimizer:
+
+            checkpoint['optimizer_state_dict'] = optimizer.state_dict()try:            reasoning_order.append(FeatureDistiller)
+
+        
+
+        torch.save(checkpoint, checkpoint_path)    from ..quant.qat import QATDistiller        if distill_cfg.get("similarity_transfer", False):
+
+        self.checkpoints[stage_idx] = checkpoint_path
+
+            HAS_QAT = True            reasoning_order.append(SimilarityTransferDistiller)
+
+        print(f"✓ Checkpoint saved: {checkpoint_path}")
+
+        return checkpoint_pathexcept ImportError:
+
+    
+
+    def load_checkpoint(self, stage_idx: int, model: nn.Module) -> Dict:    HAS_QAT = False        # Instantiate all selected distillers
+
+        """Load checkpoint from previous stage."""
+
+        if stage_idx not in self.checkpoints:    warnings.warn("QAT not available. Stage 'qat' will be skipped.")        for distiller_cls in reasoning_order:
+
+            raise ValueError(f"No checkpoint found for stage {stage_idx}")
+
+                    self.distillers.append(distiller_cls(self.student, self.teacher, distill_cfg))
+
+        checkpoint_path = self.checkpoints[stage_idx]
+
+        checkpoint = torch.load(checkpoint_path)
+
+        
+
+        model.load_state_dict(checkpoint['model_state_dict'])class StageController:    def forward(self, x, labels=None, return_loss=False, training=False):
+
+        print(f"✓ Loaded checkpoint from stage {stage_idx}")
+
+            """        """
+
+        return checkpoint
+
+        Controls stage execution, checkpoints, and dependencies.        Forward pass with reasoning-guided multi-stage distillation.
+
+    def check_dependencies(self, stage: Dict) -> bool:
+
+        """Check if stage dependencies are satisfied."""    """        Aggregates loss from all active distillers when training.
+
+        dependencies = stage.get('depends_on', [])
+
+                    """
+
+        for dep_idx in dependencies:
+
+            if dep_idx not in self.checkpoints:    def __init__(self, stages: List[Dict], output_dir: str):        student_output = self.student(x)
+
+                print(f"⚠ Dependency not satisfied: stage {dep_idx} not completed")
+
+                return False        """        total_loss = 0.0
+
+        
+
+        return True        Initialize stage controller.
+
+    
+
+    def log_stage(self, stage_idx: int, stage_name: str, metrics: Dict):                if training and return_loss:
+
+        """Log stage completion."""
+
+        self.stage_history.append({        Args:            for distiller in self.distillers:
+
+            'stage': stage_idx,
+
+            'name': stage_name,            stages: List of stage configurations                # Use reasoning: dynamically check if distiller can produce a loss
+
+            'metrics': metrics,
+
+            'timestamp': datetime.now().isoformat()            output_dir: Directory for checkpoints and logs                try:
+
+        })
+
+            """                    loss = distiller(x, labels=labels, return_loss=True, training=True)
+
+    def generate_report(self) -> Dict:
+
+        """Generate training report."""        self.stages = stages                    if isinstance(loss, torch.Tensor):
+
+        return {
+
+            'total_stages': len(self.stages),        self.output_dir = Path(output_dir)                        total_loss += loss
+
+            'completed_stages': len(self.stage_history),
+
+            'stage_history': self.stage_history,        self.output_dir.mkdir(parents=True, exist_ok=True)                except TypeError:
+
+            'checkpoints': {k: str(v) for k, v in self.checkpoints.items()}
+
+        }                            # fallback in case a distiller does not accept return_loss argument
+
+
+
+        self.current_stage = 0                    pass
+
+class DistillerRegistry:
+
+    """Registry for distiller modules with plug-and-play support."""        self.stage_history = []            return student_output, total_loss
+
+    
+
+    def __init__(self):        self.checkpoints = {}
+
+        """Initialize registry with built-in distillers."""
+
+        self._registry = {            return student_output
+
+            'kd': KDHintonDistiller,    def get_next_stage(self) -> Optional[Dict]:
+
+            'kd_hinton': KDHintonDistiller,        """Get next stage configuration."""
+
+            'feature': FeatureDistiller,        if self.current_stage < len(self.stages):
+
+        }            stage = self.stages[self.current_stage]
+
+                    self.current_stage += 1
+
+        # Add optional distillers            return stage
+
+        if HAS_ATTENTION:        return None
+
+            self._registry['attention'] = AttentionTransferDistiller    
+
+            def save_checkpoint(
+
+        if HAS_QAT:        self,
+
+            self._registry['qat'] = QATDistiller        stage_idx: int,
+
+            model: nn.Module,
+
+    def register(self, name: str, distiller_cls: type):        optimizer: Optional[torch.optim.Optimizer],
+
+        """Register custom distiller."""        metrics: Dict[str, float]
+
+        self._registry[name] = distiller_cls    ) -> Path:
+
+        print(f"✓ Registered distiller: {name}")        """
+
+            Save stage checkpoint.
+
+    def get(self, name: str) -> type:        
+
+        """Get distiller class by name."""        Args:
+
+        if name not in self._registry:            stage_idx: Stage index
+
+            raise ValueError(            model: Model to save
+
+                f"Distiller '{name}' not found. "            optimizer: Optimizer state
+
+                f"Available: {list(self._registry.keys())}"            metrics: Stage metrics
+
+            )            
+
+        return self._registry[name]        Returns:
+
+                Path to checkpoint
+
+    def list_available(self) -> List[str]:        """
+
+        """List available distillers."""        checkpoint_path = self.output_dir / f"stage_{stage_idx}_checkpoint.pt"
+
+        return list(self._registry.keys())        
+
+        checkpoint = {
+
+            'stage_idx': stage_idx,
+
+class AdaptiveLossScheduler:            'model_state_dict': model.state_dict(),
+
+    """Dynamically adjusts loss weights across stages."""            'metrics': metrics,
+
+                'timestamp': datetime.now().isoformat()
+
+    def __init__(self, schedule: Optional[Dict] = None):        }
+
+        """Initialize scheduler."""        
+
+        self.schedule = schedule or self._default_schedule()        if optimizer:
+
+        self.current_weights = {}            checkpoint['optimizer_state_dict'] = optimizer.state_dict()
+
+            
+
+    def _default_schedule(self) -> Dict:        torch.save(checkpoint, checkpoint_path)
+
+        """Default weight schedule."""        self.checkpoints[stage_idx] = checkpoint_path
+
+        return {        
+
+            1: {'alpha': 1.0, 'beta': 0.0, 'gamma': 0.0},  # Logit only        print(f"✓ Checkpoint saved: {checkpoint_path}")
+
+            2: {'alpha': 0.5, 'beta': 0.5, 'gamma': 0.0},  # Logit + Feature        return checkpoint_path
+
+            3: {'alpha': 0.3, 'beta': 0.4, 'gamma': 0.3},  # Balanced    
+
+            4: {'alpha': 0.0, 'beta': 0.3, 'gamma': 0.7},  # Attention focus    def load_checkpoint(self, stage_idx: int, model: nn.Module) -> Dict:
+
+        }        """
+
+            Load checkpoint from previous stage.
+
+    def get_weights(self, stage_idx: int) -> Dict[str, float]:        
+
+        """Get loss weights for stage."""        Args:
+
+        if stage_idx in self.schedule:            stage_idx: Stage index to load
+
+            weights = self.schedule[stage_idx]            model: Model to load weights into
+
+        else:            
+
+            # Use last defined stage or defaults        Returns:
+
+            max_stage = max(self.schedule.keys())            Checkpoint metadata
+
+            weights = self.schedule.get(max_stage, self.schedule[1])        """
+
+                if stage_idx not in self.checkpoints:
+
+        self.current_weights = weights            raise ValueError(f"No checkpoint found for stage {stage_idx}")
+
+        return weights        
+
+            checkpoint_path = self.checkpoints[stage_idx]
+
+    def update_weights(self, stage_idx: int, metrics: Dict[str, float]):        checkpoint = torch.load(checkpoint_path)
+
+        """Adaptively update weights based on metrics."""        
+
+        # Adaptive logic: if feature loss is high, increase beta        model.load_state_dict(checkpoint['model_state_dict'])
+
+        if 'feature_loss' in metrics and metrics['feature_loss'] > 1.0:        print(f"✓ Loaded checkpoint from stage {stage_idx}")
+
+            if 'beta' in self.current_weights:        
+
+                self.current_weights['beta'] = min(1.0, self.current_weights['beta'] * 1.2)        return checkpoint
+
+                print(f"  → Adaptive: Increased β to {self.current_weights['beta']:.3f}")    
+
+    def check_dependencies(self, stage: Dict) -> bool:
+
+        """
+
+class MultiStageDistiller:        Check if stage dependencies are satisfied.
+
+    """        
+
+    Progressive multi-stage knowledge distillation orchestrator.        Args:
+
+                stage: Stage configuration
+
+    Features:            
+
+    - Sequential stage execution with checkpointing        Returns:
+
+    - Plug-and-play distiller registry            True if dependencies satisfied
+
+    - Adaptive loss weight scheduling        """
+
+    - Intermediate evaluation and reporting        dependencies = stage.get('depends_on', [])
+
+    - Knowledge replay for forgetting prevention        
+
+    - Progressive precision reduction (QAT)        for dep_idx in dependencies:
+
+    - Layer-wise freezing for efficiency            if dep_idx not in self.checkpoints:
+
+    - Preflight-aware automatic stage planning                print(f"⚠ Dependency not satisfied: stage {dep_idx} not completed")
+
+    """                return False
+
+            
+
+    def __init__(        return True
+
+        self,    
+
+        teacher: nn.Module,    def log_stage(self, stage_idx: int, stage_name: str, metrics: Dict):
+
+        student: nn.Module,        """Log stage completion."""
+
+        config: Dict[str, Any],        self.stage_history.append({
+
+        train_loader: Optional[DataLoader] = None,            'stage': stage_idx,
+
+        val_loader: Optional[DataLoader] = None,            'name': stage_name,
+
+        device: str = 'cuda',            'metrics': metrics,
+
+        output_dir: str = 'experiments/multi_stage'            'timestamp': datetime.now().isoformat()
+
+    ):        })
+
+        """Initialize multi-stage distiller."""    
+
+        self.teacher = teacher.to(device)    def generate_report(self) -> Dict:
+
+        self.student = student.to(device)        """Generate training report."""
+
+        self.config = config        return {
+
+        self.train_loader = train_loader            'total_stages': len(self.stages),
+
+        self.val_loader = val_loader            'completed_stages': len(self.stage_history),
+
+        self.device = device            'stage_history': self.stage_history,
+
+        self.output_dir = Path(output_dir)            'checkpoints': {k: str(v) for k, v in self.checkpoints.items()}
+
+                }
+
+        # Initialize components
+
+        self.stages = self._parse_stages(config)
+
+        self.controller = StageController(self.stages, output_dir)class DistillerRegistry:
+
+        self.registry = DistillerRegistry()    """
+
+        self.loss_scheduler = AdaptiveLossScheduler(    Registry for distiller modules with plug-and-play support.
+
+            config.get('distillation', {}).get('loss_schedule')    """
+
+        )    
+
+            def __init__(self):
+
+        # Stage tracking        """Initialize registry with built-in distillers."""
+
+        self.stage_metrics = []        self._registry = {
+
+        self.knowledge_bank = []  # For knowledge replay            'kd': KDHintonDistiller,
+
+                    'kd_hinton': KDHintonDistiller,
+
+        # Create output directory            'feature': FeatureDistiller,
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)        }
+
+            
+
+    def _parse_stages(self, config: Dict) -> List[Dict]:        # Add optional distillers
+
+        """Parse stage configuration from config."""        if HAS_ATTENTION:
+
+        distill_cfg = config.get('distillation', {})            self._registry['attention'] = AttentionTransferDistiller
+
+                
+
+        # Check if multi-stage is enabled        if HAS_QAT:
+
+        if not distill_cfg.get('multi_stage', False):            self._registry['qat'] = QATDistiller
+
+            # Single stage fallback    
+
+            return [{    def register(self, name: str, distiller_cls: type):
+
+                'name': 'Single Stage Distillation',        """
+
+                'type': distill_cfg.get('method', 'kd'),        Register custom distiller.
+
+                'epochs': config.get('training', {}).get('epochs', 10),        
+
+                'config': distill_cfg        Args:
+
+            }]            name: Distiller name
+
+                    distiller_cls: Distiller class
+
+        # Parse stages from config        """
+
+        stages = distill_cfg.get('stages', [])        self._registry[name] = distiller_cls
+
+                print(f"✓ Registered distiller: {name}")
+
+        if not stages:    
+
+            # Auto-generate stages from preflight    def get(self, name: str) -> type:
+
+            stages = self._auto_generate_stages(config)        """Get distiller class by name."""
+
+                if name not in self._registry:
+
+        return stages            raise ValueError(
+
+                    f"Distiller '{name}' not found. "
+
+    def _auto_generate_stages(self, config: Dict) -> List[Dict]:                f"Available: {list(self._registry.keys())}"
+
+        """Auto-generate stages based on preflight analysis."""            )
+
+        print("🤖 Auto-generating stages from preflight analysis...")        return self._registry[name]
+
+            
+
+        preflight = config.get('preflight', {})    def list_available(self) -> List[str]:
+
+        compression_ratio = preflight.get('compression_ratio', 2.0)        """List available distillers."""
+
+        model_type = preflight.get('model_type', 'unknown')        return list(self._registry.keys())
+
+        
+
+        stages = []
+
+        class AdaptiveLossScheduler:
+
+        # Stage 1: Always start with logit alignment    """
+
+        stages.append({    Dynamically adjusts loss weights across stages.
+
+            'name': 'Stage 1 - Logit Alignment',    """
+
+            'type': 'kd',    
+
+            'epochs': 3,    def __init__(self, schedule: Optional[Dict] = None):
+
+            'config': {        """
+
+                'temperature': 4.0,        Initialize scheduler.
+
+                'alpha': 0.9        
+
+            }        Args:
+
+        })            schedule: Custom schedule or None for defaults
+
+                """
+
+        # Stage 2: Feature distillation for high compression        self.schedule = schedule or self._default_schedule()
+
+        if compression_ratio > 3.0:        self.current_weights = {}
+
+            stages.append({    
+
+                'name': 'Stage 2 - Feature Refinement',    def _default_schedule(self) -> Dict:
+
+                'type': 'feature',        """Default weight schedule."""
+
+                'epochs': 3,        return {
+
+                'config': {            1: {'alpha': 1.0, 'beta': 0.0, 'gamma': 0.0},  # Logit only
+
+                    'beta': 0.6,            2: {'alpha': 0.5, 'beta': 0.5, 'gamma': 0.0},  # Logit + Feature
+
+                    'feature_stages': [1, 2, 3]            3: {'alpha': 0.3, 'beta': 0.4, 'gamma': 0.3},  # Balanced
+
+                }            4: {'alpha': 0.0, 'beta': 0.3, 'gamma': 0.7},  # Attention focus
+
+            })        }
+
+            
+
+        # Stage 3: Attention transfer for transformers    def get_weights(self, stage_idx: int) -> Dict[str, float]:
+
+        if ('transformer' in model_type.lower() or 'bert' in model_type.lower()) and HAS_ATTENTION:        """
+
+            stages.append({        Get loss weights for stage.
+
+                'name': 'Stage 3 - Attention Imitation',        
+
+                'type': 'attention',        Args:
+
+                'epochs': 2,            stage_idx: Stage index (1-based)
+
+                'config': {            
+
+                    'gamma': 0.3        Returns:
+
+                }            Loss weight dictionary
+
+            })        """
+
+                if stage_idx in self.schedule:
+
+        # Stage 4: QAT for very high compression            weights = self.schedule[stage_idx]
+
+        if compression_ratio > 8.0 and HAS_QAT:        else:
+
+            stages.append({            # Use last defined stage or defaults
+
+                'name': 'Stage 4 - QAT Fine-Tuning',            max_stage = max(self.schedule.keys())
+
+                'type': 'qat',            weights = self.schedule.get(max_stage, self.schedule[1])
+
+                'epochs': 2,        
+
+                'config': {        self.current_weights = weights
+
+                    'precision': 'int8'        return weights
+
+                }    
+
+            })    def update_weights(self, stage_idx: int, metrics: Dict[str, float]):
+
+                """
+
+        print(f"  → Generated {len(stages)} stages")        Adaptively update weights based on metrics.
+
+        for i, stage in enumerate(stages, 1):        
+
+            print(f"     {i}. {stage['name']} ({stage['type']})")        Args:
+
+                    stage_idx: Current stage
+
+        return stages            metrics: Performance metrics
+
+            """
+
+    def run(self) -> Dict[str, Any]:        # Adaptive logic: if feature loss is high, increase beta
+
+        """Execute multi-stage distillation."""        if 'feature_loss' in metrics and metrics['feature_loss'] > 1.0:
+
+        print("\n" + "=" * 70)            if 'beta' in self.current_weights:
+
+        print("🚀 MULTI-STAGE DISTILLATION")                self.current_weights['beta'] = min(1.0, self.current_weights['beta'] * 1.2)
+
+        print("=" * 70)                print(f"  → Adaptive: Increased β to {self.current_weights['beta']:.3f}")
+
+        print(f"Total Stages: {len(self.stages)}")
+
+        print(f"Output Dir: {self.output_dir}")
+
+        print("")class MultiStageDistiller:
+
+            """
+
+        # Run each stage    Progressive multi-stage knowledge distillation orchestrator.
+
+        for stage_idx, stage_cfg in enumerate(self.stages, 1):    
+
+            print(f"\n{'=' * 70}")    Features:
+
+            print(f"📍 STAGE {stage_idx}/{len(self.stages)}: {stage_cfg['name']}")    - Sequential stage execution with checkpointing
+
+            print(f"{'=' * 70}")    - Plug-and-play distiller registry
+
+                - Adaptive loss weight scheduling
+
+            # Check dependencies    - Intermediate evaluation and reporting
+
+            if not self.controller.check_dependencies(stage_cfg):    - Knowledge replay for forgetting prevention
+
+                print("❌ Dependencies not satisfied. Skipping stage.")    - Progressive precision reduction (QAT)
+
+                continue    - Layer-wise freezing for efficiency
+
+                - Preflight-aware automatic stage planning
+
+            # Run stage    """
+
+            stage_metrics = self._run_stage(stage_idx, stage_cfg)    
+
+                def __init__(
+
+            # Save checkpoint        self,
+
+            self.controller.save_checkpoint(        teacher: nn.Module,
+
+                stage_idx,        student: nn.Module,
+
+                self.student,        config: Dict[str, Any],
+
+                None,        train_loader: Optional[DataLoader] = None,
+
+                stage_metrics        val_loader: Optional[DataLoader] = None,
+
+            )        device: str = 'cuda',
+
+                    output_dir: str = 'experiments/multi_stage'
+
+            # Log stage    ):
+
+            self.controller.log_stage(stage_idx, stage_cfg['name'], stage_metrics)        """
+
+            self.stage_metrics.append(stage_metrics)        Initialize multi-stage distiller.
+
+                    
+
+            # Adaptive weight adjustment        Args:
+
+            self.loss_scheduler.update_weights(stage_idx, stage_metrics)            teacher: Teacher model
+
+                        student: Student model
+
+            print(f"\n✅ Stage {stage_idx} completed!")            config: Configuration dictionary
+
+            self._print_stage_summary(stage_idx, stage_metrics)            train_loader: Training dataloader
+
+                    val_loader: Validation dataloader
+
+        # Generate final report            device: Device for training
+
+        report = self._generate_final_report()            output_dir: Output directory for checkpoints and logs
+
+                """
+
+        # Save report        self.teacher = teacher.to(device)
+
+        self._save_report(report)        self.student = student.to(device)
+
+                self.config = config
+
+        print("\n" + "=" * 70)        self.train_loader = train_loader
+
+        print("🎉 MULTI-STAGE DISTILLATION COMPLETED")        self.val_loader = val_loader
+
+        print("=" * 70)        self.device = device
+
+        self._print_final_summary(report)        self.output_dir = Path(output_dir)
+
+                
+
+        return report        # Initialize components
+
+            self.stages = self._parse_stages(config)
+
+    def _run_stage(self, stage_idx: int, stage_cfg: Dict) -> Dict[str, float]:        self.controller = StageController(self.stages, output_dir)
+
+        """Run single distillation stage."""        self.registry = DistillerRegistry()
+
+        # Get distiller class        self.loss_scheduler = AdaptiveLossScheduler(
+
+        distiller_cls = self.registry.get(stage_cfg['type'])            config.get('distillation', {}).get('loss_schedule')
+
+                )
+
+        # Get loss weights        
+
+        loss_weights = self.loss_scheduler.get_weights(stage_idx)        # Stage tracking
+
+        print(f"Loss weights: α={loss_weights.get('alpha', 0):.2f}, "        self.stage_metrics = []
+
+              f"β={loss_weights.get('beta', 0):.2f}, "        self.knowledge_bank = []  # For knowledge replay
+
+              f"γ={loss_weights.get('gamma', 0):.2f}")        
+
+                # Create output directory
+
+        # Merge stage config with loss weights        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        distiller_config = {**stage_cfg.get('config', {}), **loss_weights}    
+
+            def _parse_stages(self, config: Dict) -> List[Dict]:
+
+        # Initialize distiller        """
+
+        print(f"Initializing {stage_cfg['type']} distiller...")        Parse stage configuration from config.
+
+        distiller = distiller_cls(        
+
+            self.teacher,        Args:
+
+            self.student,            config: Configuration dictionary
+
+            distiller_config            
+
+        )        Returns:
+
+                    List of stage configurations
+
+        # Apply layer freezing if specified        """
+
+        if stage_cfg.get('freeze_layers'):        distill_cfg = config.get('distillation', {})
+
+            self._freeze_layers(stage_cfg['freeze_layers'])        
+
+                # Check if multi-stage is enabled
+
+        # Train stage        if not distill_cfg.get('multi_stage', False):
+
+        epochs = stage_cfg.get('epochs', 3)            # Single stage fallback
+
+        print(f"Training for {epochs} epochs...")            return [{
+
+                        'name': 'Single Stage Distillation',
+
+        stage_metrics = {                'type': distill_cfg.get('method', 'kd'),
+
+            'train_loss': 0.0,                'epochs': config.get('training', {}).get('epochs', 10),
+
+            'val_loss': 0.0,                'config': distill_cfg
+
+            'val_accuracy': 0.0            }]
+
+        }        
+
+                # Parse stages from config
+
+        # Simple training loop (can be expanded)        stages = distill_cfg.get('stages', [])
+
+        if self.train_loader:        
+
+            for epoch in range(epochs):        if not stages:
+
+                epoch_loss = self._train_epoch(distiller, epoch + 1, epochs)            # Auto-generate stages from preflight
+
+                stage_metrics['train_loss'] = epoch_loss            stages = self._auto_generate_stages(config)
+
+                        
+
+                # Evaluate        return stages
+
+                if self.val_loader and (epoch + 1) % 1 == 0:    
+
+                    val_metrics = self._evaluate(distiller)    def _auto_generate_stages(self, config: Dict) -> List[Dict]:
+
+                    stage_metrics.update(val_metrics)        """
+
+                            Auto-generate stages based on preflight analysis.
+
+                    print(f"  Epoch {epoch + 1}/{epochs}: "        
+
+                          f"Loss={epoch_loss:.4f}, "        Args:
+
+                          f"Val Acc={val_metrics.get('val_accuracy', 0):.2f}%")            config: Configuration with preflight results
+
+                    
+
+        # Unfreeze layers        Returns:
+
+        if stage_cfg.get('freeze_layers'):            Generated stage configurations
+
+            self._unfreeze_all()        """
+
+                print("🤖 Auto-generating stages from preflight analysis...")
+
+        # Knowledge replay (store teacher outputs)        
+
+        if stage_cfg.get('knowledge_replay', False):        preflight = config.get('preflight', {})
+
+            self._store_knowledge(distiller)        compression_ratio = preflight.get('compression_ratio', 2.0)
+
+                model_type = preflight.get('model_type', 'unknown')
+
+        return stage_metrics        
+
+            stages = []
+
+    def _train_epoch(self, distiller: BaseDistiller, epoch: int, total_epochs: int) -> float:        
+
+        """Train single epoch."""        # Stage 1: Always start with logit alignment
+
+        self.student.train()        stages.append({
+
+        self.teacher.eval()            'name': 'Stage 1 - Logit Alignment',
+
+                    'type': 'kd',
+
+        total_loss = 0.0            'epochs': 3,
+
+        num_batches = 0            'config': {
+
+                        'temperature': 4.0,
+
+        for batch_idx, batch in enumerate(self.train_loader):                'alpha': 0.9
+
+            # Move to device            }
+
+            if isinstance(batch, (list, tuple)):        })
+
+                inputs, labels = batch[0].to(self.device), batch[1].to(self.device)        
+
+            elif isinstance(batch, dict):        # Stage 2: Feature distillation for high compression
+
+                inputs = {k: v.to(self.device) for k, v in batch.items() if k != 'labels'}        if compression_ratio > 3.0:
+
+                labels = batch.get('labels', None)            stages.append({
+
+                if labels is not None:                'name': 'Stage 2 - Feature Refinement',
+
+                    labels = labels.to(self.device)                'type': 'feature',
+
+            else:                'epochs': 3,
+
+                inputs = batch.to(self.device)                'config': {
+
+                labels = None                    'beta': 0.6,
+
+                                'feature_stages': [1, 2, 3]
+
+            # Forward pass                }
+
+            try:            })
+
+                if isinstance(inputs, dict):        
+
+                    loss = distiller.compute_loss(inputs, labels=labels)        # Stage 3: Attention transfer for transformers
+
+                else:        if ('transformer' in model_type.lower() or 'bert' in model_type.lower()) and HAS_ATTENTION:
+
+                    loss = distiller.compute_loss(inputs, labels=labels)            stages.append({
+
+                                'name': 'Stage 3 - Attention Imitation',
+
+                if hasattr(loss, 'item'):                'type': 'attention',
+
+                    total_loss += loss.item()                'epochs': 2,
+
+                else:                'config': {
+
+                    total_loss += float(loss)                    'gamma': 0.3
+
+                                }
+
+                num_batches += 1            })
+
+                        
+
+            except Exception as e:        # Stage 4: QAT for very high compression
+
+                warnings.warn(f"Error in batch {batch_idx}: {e}")        if compression_ratio > 8.0 and HAS_QAT:
+
+                continue            stages.append({
+
+                        'name': 'Stage 4 - QAT Fine-Tuning',
+
+        return total_loss / max(num_batches, 1)                'type': 'qat',
+
+                    'epochs': 2,
+
+    def _evaluate(self, distiller: BaseDistiller) -> Dict[str, float]:                'config': {
+
+        """Evaluate current student model."""                    'precision': 'int8'
+
+        self.student.eval()                }
+
+                    })
+
+        total_loss = 0.0        
+
+        correct = 0        print(f"  → Generated {len(stages)} stages")
+
+        total = 0        for i, stage in enumerate(stages, 1):
+
+                    print(f"     {i}. {stage['name']} ({stage['type']})")
+
+        with torch.no_grad():        
+
+            for batch in self.val_loader:        return stages
+
+                # Move to device    
+
+                if isinstance(batch, (list, tuple)):    def run(self) -> Dict[str, Any]:
+
+                    inputs, labels = batch[0].to(self.device), batch[1].to(self.device)        """
+
+                elif isinstance(batch, dict):        Execute multi-stage distillation.
+
+                    inputs = {k: v.to(self.device) for k, v in batch.items() if k != 'labels'}        
+
+                    labels = batch.get('labels', None)        Returns:
+
+                    if labels is not None:            Training report with all stages
+
+                        labels = labels.to(self.device)        """
+
+                else:        print("\n" + "=" * 70)
+
+                    inputs = batch.to(self.device)        print("🚀 MULTI-STAGE DISTILLATION")
+
+                    labels = None        print("=" * 70)
+
+                        print(f"Total Stages: {len(self.stages)}")
+
+                # Forward pass        print(f"Output Dir: {self.output_dir}")
+
+                try:        print("")
+
+                    if isinstance(inputs, dict):        
+
+                        student_out = self.student(**inputs)        # Run each stage
+
+                    else:        for stage_idx, stage_cfg in enumerate(self.stages, 1):
+
+                        student_out = self.student(inputs)            print(f"\n{'=' * 70}")
+
+                                print(f"📍 STAGE {stage_idx}/{len(self.stages)}: {stage_cfg['name']}")
+
+                    # Extract logits            print(f"{'=' * 70}")
+
+                    if hasattr(student_out, 'logits'):            
+
+                        logits = student_out.logits            # Check dependencies
+
+                    elif isinstance(student_out, tuple):            if not self.controller.check_dependencies(stage_cfg):
+
+                        logits = student_out[0]                print("❌ Dependencies not satisfied. Skipping stage.")
+
+                    else:                continue
+
+                        logits = student_out            
+
+                                # Run stage
+
+                    # Compute accuracy            stage_metrics = self._run_stage(stage_idx, stage_cfg)
+
+                    if labels is not None and logits.dim() >= 2:            
+
+                        _, predicted = logits.max(1)            # Save checkpoint
+
+                        total += labels.size(0)            self.controller.save_checkpoint(
+
+                        correct += predicted.eq(labels).sum().item()                stage_idx,
+
+                                self.student,
+
+                except Exception as e:                None,  # Can add optimizer if needed
+
+                    warnings.warn(f"Error in evaluation: {e}")                stage_metrics
+
+                    continue            )
+
+                    
+
+        accuracy = 100.0 * correct / max(total, 1)            # Log stage
+
+                    self.controller.log_stage(stage_idx, stage_cfg['name'], stage_metrics)
+
+        return {            self.stage_metrics.append(stage_metrics)
+
+            'val_loss': total_loss / max(len(self.val_loader), 1),            
+
+            'val_accuracy': accuracy            # Adaptive weight adjustment
+
+        }            self.loss_scheduler.update_weights(stage_idx, stage_metrics)
+
+                
+
+    def _freeze_layers(self, layer_spec: List[int]):            print(f"\n✅ Stage {stage_idx} completed!")
+
+        """Freeze specified layers."""            self._print_stage_summary(stage_idx, stage_metrics)
+
+        print(f"  🔒 Freezing layers: {layer_spec}")        
+
+                # Generate final report
+
+        named_params = list(self.student.named_parameters())        report = self._generate_final_report()
+
+                
+
+        for idx in layer_spec:        # Save report
+
+            if idx < len(named_params):        self._save_report(report)
+
+                name, param = named_params[idx]        
+
+                param.requires_grad = False        print("\n" + "=" * 70)
+
+            print("🎉 MULTI-STAGE DISTILLATION COMPLETED")
+
+    def _unfreeze_all(self):        print("=" * 70)
+
+        """Unfreeze all layers."""        self._print_final_summary(report)
+
+        for param in self.student.parameters():        
+
+            param.requires_grad = True        return report
+
+        
+
+    def _store_knowledge(self, distiller: BaseDistiller):    def _run_stage(self, stage_idx: int, stage_cfg: Dict) -> Dict[str, float]:
+
+        """Store teacher knowledge for replay."""        """
+
+        print("  💾 Storing knowledge for replay...")        Run single distillation stage.
+
+                
+
+        self.teacher.eval()        Args:
+
+        knowledge_samples = []            stage_idx: Stage index
+
+                    stage_cfg: Stage configuration
+
+        with torch.no_grad():            
+
+            for i, batch in enumerate(self.train_loader):        Returns:
+
+                if i >= 10:  # Store first 10 batches            Stage metrics
+
+                    break        """
+
+                        # Get distiller class
+
+                if isinstance(batch, (list, tuple)):        distiller_cls = self.registry.get(stage_cfg['type'])
+
+                    inputs = batch[0].to(self.device)        
+
+                else:        # Get loss weights
+
+                    inputs = batch.to(self.device)        loss_weights = self.loss_scheduler.get_weights(stage_idx)
+
+                        print(f"Loss weights: α={loss_weights.get('alpha', 0):.2f}, "
+
+                teacher_out = self.teacher(inputs)              f"β={loss_weights.get('beta', 0):.2f}, "
+
+                knowledge_samples.append(teacher_out.cpu())              f"γ={loss_weights.get('gamma', 0):.2f}")
+
+                
+
+        self.knowledge_bank.append(knowledge_samples)        # Merge stage config with loss weights
+
+        print(f"  ✓ Stored {len(knowledge_samples)} knowledge samples")        distiller_config = {**stage_cfg.get('config', {}), **loss_weights}
+
+            
+
+    def _print_stage_summary(self, stage_idx: int, metrics: Dict):        # Initialize distiller
+
+        """Print stage summary."""        print(f"Initializing {stage_cfg['type']} distiller...")
+
+        print("\n📊 Stage Summary:")        distiller = distiller_cls(
+
+        print(f"  Train Loss: {metrics.get('train_loss', 0):.4f}")            self.teacher,
+
+        print(f"  Val Loss: {metrics.get('val_loss', 0):.4f}")            self.student,
+
+        print(f"  Val Accuracy: {metrics.get('val_accuracy', 0):.2f}%")            distiller_config
+
+            )
+
+    def _generate_final_report(self) -> Dict[str, Any]:        
+
+        """Generate comprehensive final report."""        # Apply layer freezing if specified
+
+        total_gain = 0.0        if stage_cfg.get('freeze_layers'):
+
+        for i, metrics in enumerate(self.stage_metrics):            self._freeze_layers(stage_cfg['freeze_layers'])
+
+            if i > 0:        
+
+                prev_acc = self.stage_metrics[i-1].get('val_accuracy', 0)        # Train stage
+
+                curr_acc = metrics.get('val_accuracy', 0)        epochs = stage_cfg.get('epochs', 3)
+
+                gain = curr_acc - prev_acc        print(f"Training for {epochs} epochs...")
+
+                total_gain += gain        
+
+                stage_metrics = {
+
+        preflight = self.config.get('preflight', {})            'train_loss': 0.0,
+
+                    'val_loss': 0.0,
+
+        report = {            'val_accuracy': 0.0
+
+            'preflight': {        }
+
+                'model_type': preflight.get('model_type', 'unknown'),        
+
+                'compression_ratio': preflight.get('compression_ratio', 0),        # Simple training loop (can be expanded)
+
+                'stages_completed': []        if self.train_loader:
+
+            },            for epoch in range(epochs):
+
+            'stages': [],                epoch_loss = self._train_epoch(distiller, epoch + 1, epochs)
+
+            'final_metrics': {},                stage_metrics['train_loss'] = epoch_loss
+
+            'stage_controller_report': self.controller.generate_report()                
+
+        }                # Evaluate
+
+                        if self.val_loader and (epoch + 1) % 1 == 0:
+
+        # Add stage details                    val_metrics = self._evaluate(distiller)
+
+        for i, (stage_cfg, metrics) in enumerate(zip(self.stages, self.stage_metrics)):                    stage_metrics.update(val_metrics)
+
+            stage_info = {                    
+
+                'stage': i + 1,                    print(f"  Epoch {epoch + 1}/{epochs}: "
+
+                'name': stage_cfg['name'],                          f"Loss={epoch_loss:.4f}, "
+
+                'type': stage_cfg['type'],                          f"Val Acc={val_metrics.get('val_accuracy', 0):.2f}%")
+
+                'epochs': stage_cfg.get('epochs', 0),        
+
+                'metrics': metrics        # Unfreeze layers
+
+            }        if stage_cfg.get('freeze_layers'):
+
+                        self._unfreeze_all()
+
+            report['stages'].append(stage_info)        
+
+                    # Knowledge replay (store teacher outputs)
+
+            acc_gain = 0.0        if stage_cfg.get('knowledge_replay', False):
+
+            if i > 0:            self._store_knowledge(distiller)
+
+                prev_acc = self.stage_metrics[i-1].get('val_accuracy', 0)        
+
+                curr_acc = metrics.get('val_accuracy', 0)        return stage_metrics
+
+                acc_gain = curr_acc - prev_acc    
+
+                def _train_epoch(
+
+            report['preflight']['stages_completed'].append({        self,
+
+                'name': stage_cfg['name'],        distiller: BaseDistiller,
+
+                'accuracy_gain': acc_gain        epoch: int,
+
+            })        total_epochs: int
+
+            ) -> float:
+
+        # Final metrics        """
+
+        if self.stage_metrics:        Train single epoch.
+
+            final = self.stage_metrics[-1]        
+
+            report['final_metrics'] = {        Args:
+
+                'final_accuracy': final.get('val_accuracy', 0),            distiller: Distiller instance
+
+                'total_accuracy_gain': total_gain,            epoch: Current epoch
+
+                'final_loss': final.get('val_loss', 0)            total_epochs: Total epochs
+
+            }            
+
+                Returns:
+
+        return report            Average loss
+
+            """
+
+    def _print_final_summary(self, report: Dict):        self.student.train()
+
+        """Print final summary."""        self.teacher.eval()
+
+        print("\n📊 FINAL SUMMARY")        
+
+        print("-" * 70)        total_loss = 0.0
+
+                num_batches = 0
+
+        preflight = report['preflight']        
+
+        print(f"Model Type: {preflight['model_type']}")        for batch_idx, batch in enumerate(self.train_loader):
+
+        print(f"Compression Ratio: {preflight['compression_ratio']:.1f}x")            # Move to device
+
+        print(f"Stages Completed: {len(preflight['stages_completed'])}")            if isinstance(batch, (list, tuple)):
+
+                        inputs, labels = batch[0].to(self.device), batch[1].to(self.device)
+
+        print("\n📈 Stage-wise Progress:")            elif isinstance(batch, dict):
+
+        for stage_info in preflight['stages_completed']:                inputs = {k: v.to(self.device) for k, v in batch.items() if k != 'labels'}
+
+            gain = stage_info['accuracy_gain']                labels = batch.get('labels', None)
+
+            sign = '+' if gain >= 0 else ''                if labels is not None:
+
+            print(f"  {stage_info['name']}: {sign}{gain:.2f}% accuracy gain")                    labels = labels.to(self.device)
+
+                    else:
+
+        if report.get('final_metrics'):                inputs = batch.to(self.device)
+
+            final = report['final_metrics']                labels = None
+
+            print(f"\n🎯 Final Results:")            
+
+            print(f"  Final Accuracy: {final['final_accuracy']:.2f}%")            # Forward pass
+
+            print(f"  Total Gain: {final['total_accuracy_gain']:.2f}%")            try:
+
+                    if isinstance(inputs, dict):
+
+    def _save_report(self, report: Dict):                    # For transformers
+
+        """Save report to file."""                    loss = distiller.compute_loss(
+
+        # Save JSON                        inputs,
+
+        json_path = self.output_dir / 'multi_stage_report.json'                        labels=labels
+
+        with open(json_path, 'w') as f:                    )
+
+            json.dump(report, f, indent=2, default=str)                else:
+
+        print(f"\n💾 Report saved: {json_path}")                    # For vision models
+
+                            loss = distiller.compute_loss(
+
+        # Save YAML                        inputs,
+
+        yaml_path = self.output_dir / 'multi_stage_report.yaml'                        labels=labels
+
+        with open(yaml_path, 'w') as f:                    )
+
+            yaml.dump(report, f, default_flow_style=False)                
+
+        print(f"💾 Report saved: {yaml_path}")                # Backward pass (simplified - distiller should handle this)
+
+                if hasattr(loss, 'backward'):
+
+                    total_loss += loss.item()
+
+def run_multi_stage_distillation(                else:
+
+    teacher: nn.Module,                    total_loss += float(loss)
+
+    student: nn.Module,                
+
+    config: Dict[str, Any],                num_batches += 1
+
+    train_loader: DataLoader,                
+
+    val_loader: DataLoader,            except Exception as e:
+
+    device: str = 'cuda',                warnings.warn(f"Error in batch {batch_idx}: {e}")
+
+    output_dir: str = 'experiments/multi_stage'                continue
+
+) -> Dict[str, Any]:        
+
+    """        return total_loss / max(num_batches, 1)
+
+    Convenience function to run multi-stage distillation.    
+
+    """    def _evaluate(self, distiller: BaseDistiller) -> Dict[str, float]:
+
+    distiller = MultiStageDistiller(        """
+
+        teacher=teacher,        Evaluate current student model.
+
+        student=student,        
+
+        config=config,        Args:
+
+        train_loader=train_loader,            distiller: Distiller instance
+
+        val_loader=val_loader,            
+
+        device=device,        Returns:
+
+        output_dir=output_dir            Evaluation metrics
+
+    )        """
+
+            self.student.eval()
+
+    return distiller.run()        
+
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        
+        with torch.no_grad():
+            for batch in self.val_loader:
+                # Move to device
+                if isinstance(batch, (list, tuple)):
+                    inputs, labels = batch[0].to(self.device), batch[1].to(self.device)
+                elif isinstance(batch, dict):
+                    inputs = {k: v.to(self.device) for k, v in batch.items() if k != 'labels'}
+                    labels = batch.get('labels', None)
+                    if labels is not None:
+                        labels = labels.to(self.device)
+                else:
+                    inputs = batch.to(self.device)
+                    labels = None
+                
+                # Forward pass
+                try:
+                    if isinstance(inputs, dict):
+                        student_out = self.student(**inputs)
+                    else:
+                        student_out = self.student(inputs)
+                    
+                    # Extract logits
+                    if hasattr(student_out, 'logits'):
+                        logits = student_out.logits
+                    elif isinstance(student_out, tuple):
+                        logits = student_out[0]
+                    else:
+                        logits = student_out
+                    
+                    # Compute accuracy
+                    if labels is not None and logits.dim() >= 2:
+                        _, predicted = logits.max(1)
+                        total += labels.size(0)
+                        correct += predicted.eq(labels).sum().item()
+                
+                except Exception as e:
+                    warnings.warn(f"Error in evaluation: {e}")
+                    continue
+        
+        accuracy = 100.0 * correct / max(total, 1)
+        
+        return {
+            'val_loss': total_loss / max(len(self.val_loader), 1),
+            'val_accuracy': accuracy
+        }
+    
+    def _freeze_layers(self, layer_spec: List[int]):
+        """
+        Freeze specified layers.
+        
+        Args:
+            layer_spec: List of layer indices to freeze
+        """
+        print(f"  🔒 Freezing layers: {layer_spec}")
+        
+        # Get all named parameters
+        named_params = list(self.student.named_parameters())
+        
+        for idx in layer_spec:
+            if idx < len(named_params):
+                name, param = named_params[idx]
+                param.requires_grad = False
+    
+    def _unfreeze_all(self):
+        """Unfreeze all layers."""
+        for param in self.student.parameters():
+            param.requires_grad = True
+    
+    def _store_knowledge(self, distiller: BaseDistiller):
+        """
+        Store teacher knowledge for replay.
+        
+        Args:
+            distiller: Distiller instance
+        """
+        print("  💾 Storing knowledge for replay...")
+        
+        # Store teacher outputs for a subset of data
+        self.teacher.eval()
+        knowledge_samples = []
+        
+        with torch.no_grad():
+            for i, batch in enumerate(self.train_loader):
+                if i >= 10:  # Store first 10 batches
+                    break
+                
+                if isinstance(batch, (list, tuple)):
+                    inputs = batch[0].to(self.device)
+                else:
+                    inputs = batch.to(self.device)
+                
+                teacher_out = self.teacher(inputs)
+                knowledge_samples.append(teacher_out.cpu())
+        
+        self.knowledge_bank.append(knowledge_samples)
+        print(f"  ✓ Stored {len(knowledge_samples)} knowledge samples")
+    
+    def _print_stage_summary(self, stage_idx: int, metrics: Dict):
+        """Print stage summary."""
+        print("\n📊 Stage Summary:")
+        print(f"  Train Loss: {metrics.get('train_loss', 0):.4f}")
+        print(f"  Val Loss: {metrics.get('val_loss', 0):.4f}")
+        print(f"  Val Accuracy: {metrics.get('val_accuracy', 0):.2f}%")
+    
+    def _generate_final_report(self) -> Dict[str, Any]:
+        """Generate comprehensive final report."""
+        # Calculate aggregate metrics
+        total_gain = 0.0
+        for i, metrics in enumerate(self.stage_metrics):
+            if i > 0:
+                prev_acc = self.stage_metrics[i-1].get('val_accuracy', 0)
+                curr_acc = metrics.get('val_accuracy', 0)
+                gain = curr_acc - prev_acc
+                total_gain += gain
+        
+        # Get preflight info
+        preflight = self.config.get('preflight', {})
+        
+        report = {
+            'preflight': {
+                'model_type': preflight.get('model_type', 'unknown'),
+                'compression_ratio': preflight.get('compression_ratio', 0),
+                'stages_completed': []
+            },
+            'stages': [],
+            'final_metrics': {},
+            'stage_controller_report': self.controller.generate_report()
+        }
+        
+        # Add stage details
+        for i, (stage_cfg, metrics) in enumerate(zip(self.stages, self.stage_metrics)):
+            stage_info = {
+                'stage': i + 1,
+                'name': stage_cfg['name'],
+                'type': stage_cfg['type'],
+                'epochs': stage_cfg.get('epochs', 0),
+                'metrics': metrics
+            }
+            
+            report['stages'].append(stage_info)
+            
+            # Add to preflight summary
+            acc_gain = 0.0
+            if i > 0:
+                prev_acc = self.stage_metrics[i-1].get('val_accuracy', 0)
+                curr_acc = metrics.get('val_accuracy', 0)
+                acc_gain = curr_acc - prev_acc
+            
+            report['preflight']['stages_completed'].append({
+                'name': stage_cfg['name'],
+                'accuracy_gain': acc_gain
+            })
+        
+        # Final metrics
+        if self.stage_metrics:
+            final = self.stage_metrics[-1]
+            report['final_metrics'] = {
+                'final_accuracy': final.get('val_accuracy', 0),
+                'total_accuracy_gain': total_gain,
+                'final_loss': final.get('val_loss', 0)
+            }
+        
+        return report
+    
+    def _print_final_summary(self, report: Dict):
+        """Print final summary."""
+        print("\n📊 FINAL SUMMARY")
+        print("-" * 70)
+        
+        preflight = report['preflight']
+        print(f"Model Type: {preflight['model_type']}")
+        print(f"Compression Ratio: {preflight['compression_ratio']:.1f}x")
+        print(f"Stages Completed: {len(preflight['stages_completed'])}")
+        
+        print("\n📈 Stage-wise Progress:")
+        for stage_info in preflight['stages_completed']:
+            gain = stage_info['accuracy_gain']
+            sign = '+' if gain >= 0 else ''
+            print(f"  {stage_info['name']}: {sign}{gain:.2f}% accuracy gain")
+        
+        if report.get('final_metrics'):
+            final = report['final_metrics']
+            print(f"\n🎯 Final Results:")
+            print(f"  Final Accuracy: {final['final_accuracy']:.2f}%")
+            print(f"  Total Gain: {final['total_accuracy_gain']:.2f}%")
+    
+    def _save_report(self, report: Dict):
+        """Save report to file."""
+        # Save JSON
+        json_path = self.output_dir / 'multi_stage_report.json'
+        with open(json_path, 'w') as f:
+            json.dump(report, f, indent=2, default=str)
+        print(f"\n💾 Report saved: {json_path}")
+        
+        # Save YAML
+        yaml_path = self.output_dir / 'multi_stage_report.yaml'
+        with open(yaml_path, 'w') as f:
+            yaml.dump(report, f, default_flow_style=False)
+        print(f"💾 Report saved: {yaml_path}")
+
+
+# Convenience function
+def run_multi_stage_distillation(
+    teacher: nn.Module,
+    student: nn.Module,
+    config: Dict[str, Any],
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    device: str = 'cuda',
+    output_dir: str = 'experiments/multi_stage'
+) -> Dict[str, Any]:
+    """
+    Convenience function to run multi-stage distillation.
+    
+    Args:
+        teacher: Teacher model
+        student: Student model
+        config: Configuration dictionary
+        train_loader: Training dataloader
+        val_loader: Validation dataloader
+        device: Device for training
+        output_dir: Output directory
+        
+    Returns:
+        Training report
+    """
+    distiller = MultiStageDistiller(
+        teacher=teacher,
+        student=student,
+        config=config,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        device=device,
+        output_dir=output_dir
+    )
+    
+    return distiller.run()

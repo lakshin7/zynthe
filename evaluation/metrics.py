@@ -1,12 +1,33 @@
-import torch
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix, roc_auc_score
-import numpy as np
-import os
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import roc_curve
 import json
+import os
 import warnings
+from typing import Dict, Optional, Union
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import torch
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
+    brier_score_loss,
+    cohen_kappa_score,
+    confusion_matrix,
+    f1_score,
+    matthews_corrcoef,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
+)
+
+try:  # Added guard for older scikit-learn versions
+    from sklearn.metrics import top_k_accuracy_score  # type: ignore
+except ImportError:  # pragma: no cover - fallback for older sklearn
+    top_k_accuracy_score = None
 
 
 def _to_numpy(arr):
@@ -35,6 +56,21 @@ def compute_recall(preds, labels):
 
 def compute_confusion_matrix(preds, labels):
     return confusion_matrix(_to_numpy(labels), _to_numpy(preds))
+
+
+def compute_balanced_accuracy(preds, labels):
+    return balanced_accuracy_score(_to_numpy(labels), _to_numpy(preds))
+
+
+def compute_mcc(preds, labels):
+    try:
+        return matthews_corrcoef(_to_numpy(labels), _to_numpy(preds))
+    except ValueError:
+        return 0.0
+
+
+def compute_cohen_kappa(preds, labels):
+    return cohen_kappa_score(_to_numpy(labels), _to_numpy(preds))
 
 
 def compute_classwise_metrics(preds, labels):
@@ -82,6 +118,101 @@ def compute_roc_auc(pred_probs, labels):
     return None
 
 
+def compute_top_k_accuracy(pred_probs, labels, k: int = 3):
+    if top_k_accuracy_score is None or pred_probs is None:
+        return None
+    preds_np = _to_numpy(pred_probs)
+    if preds_np.ndim != 2 or preds_np.shape[1] < k:
+        return None
+    labels_np = _to_numpy(labels)
+    try:
+        return top_k_accuracy_score(labels_np, preds_np, k=k, labels=np.unique(labels_np))
+    except Exception:
+        return None
+
+
+def compute_average_precision(pred_probs, labels):
+    if pred_probs is None:
+        return None
+    preds_np = _to_numpy(pred_probs)
+    labels_np = _to_numpy(labels)
+    try:
+        if preds_np.ndim == 1 or preds_np.shape[1] == 1:
+            return average_precision_score(labels_np, preds_np if preds_np.ndim == 1 else preds_np[:, 0])
+        return average_precision_score(labels_np, preds_np, average="macro")
+    except ValueError:
+        return None
+
+
+def compute_brier(pred_probs, labels):
+    if pred_probs is None:
+        return None
+    preds_np = _to_numpy(pred_probs)
+    labels_np = _to_numpy(labels)
+    if preds_np.ndim == 2 and preds_np.shape[1] > 1:
+        # Use probability assigned to true class
+        probs_true = preds_np[np.arange(len(labels_np)), labels_np.astype(int)]
+    else:
+        probs_true = preds_np if preds_np.ndim == 1 else preds_np.reshape(-1)
+    try:
+        return brier_score_loss(labels_np, probs_true)
+    except ValueError:
+        return None
+
+
+CalibrationPayload = Dict[str, Union[np.ndarray, float]]
+
+
+def compute_calibration(pred_probs, labels, n_bins: int = 10) -> Optional[CalibrationPayload]:
+    if pred_probs is None:
+        return None
+    preds_np = _to_numpy(pred_probs)
+    labels_np = _to_numpy(labels)
+    if preds_np.ndim == 2 and preds_np.shape[1] > 1:
+        # Use probability for predicted class
+        probs = preds_np.max(axis=1)
+    else:
+        probs = preds_np if preds_np.ndim == 1 else preds_np.reshape(-1)
+    if probs.size == 0 or labels_np.size == 0:
+        return None
+    try:
+        prob_true, prob_pred = calibration_curve(labels_np, probs, n_bins=n_bins, strategy="uniform")
+    except ValueError:
+        return None
+    brier = compute_brier(probs, labels_np)
+    payload: CalibrationPayload = {
+        "prob_true": prob_true,
+        "prob_pred": prob_pred,
+    }
+    if brier is not None:
+        payload["brier_score"] = float(brier)
+    return payload
+
+
+def compute_precision_recall_curve_data(pred_probs, labels):
+    if pred_probs is None:
+        return None
+    preds_np = _to_numpy(pred_probs)
+    labels_np = _to_numpy(labels)
+    if preds_np.ndim == 2 and preds_np.shape[1] > 1:
+        # Assume positive class is 1 (binary); for multiclass fallback to macro average by selecting predicted class
+        if preds_np.shape[1] == 2:
+            scores = preds_np[:, 1]
+        else:
+            return None
+    else:
+        scores = preds_np if preds_np.ndim == 1 else preds_np.reshape(-1)
+    try:
+        precision, recall, thresholds = precision_recall_curve(labels_np, scores)
+    except ValueError:
+        return None
+    return {
+        "precision": precision,
+        "recall": recall,
+        "thresholds": thresholds,
+    }
+
+
 def compute_all_metrics(preds, labels, pred_probs=None):
     if preds is None or labels is None:
         return {}
@@ -91,6 +222,9 @@ def compute_all_metrics(preds, labels, pred_probs=None):
         "precision": compute_precision(preds, labels),
         "recall": compute_recall(preds, labels),
         "confusion_matrix": compute_confusion_matrix(preds, labels),
+        "balanced_accuracy": compute_balanced_accuracy(preds, labels),
+        "matthews_corrcoef": compute_mcc(preds, labels),
+        "cohen_kappa": compute_cohen_kappa(preds, labels),
     }
     metrics.update(compute_classwise_metrics(preds, labels))
     if pred_probs is not None:
@@ -102,6 +236,21 @@ def compute_all_metrics(preds, labels, pred_probs=None):
                 metrics["y_score"] = _to_numpy(pred_probs)
             else:
                 metrics["y_score"] = pred_probs[:, 1]
+        top3 = compute_top_k_accuracy(pred_probs, labels, k=min(3, pred_probs.shape[1] if pred_probs.ndim == 2 else 1))
+        if top3 is not None:
+            metrics["top3_accuracy"] = top3
+        avg_precision = compute_average_precision(pred_probs, labels)
+        if avg_precision is not None:
+            metrics["average_precision"] = avg_precision
+        brier = compute_brier(pred_probs, labels)
+        if brier is not None:
+            metrics["brier_score"] = brier
+        calibration = compute_calibration(pred_probs, labels)
+        if calibration is not None:
+            metrics["calibration"] = calibration
+        pr_curve = compute_precision_recall_curve_data(pred_probs, labels)
+        if pr_curve is not None:
+            metrics["precision_recall_curve"] = pr_curve
     return metrics
 
 

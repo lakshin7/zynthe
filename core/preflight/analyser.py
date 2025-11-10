@@ -27,6 +27,7 @@ Usage:
         print(report['blockers'])
 """
 
+import math
 from typing import Dict, List, Optional, Any, Tuple
 import torch
 import torch.nn as nn
@@ -40,6 +41,12 @@ from datetime import datetime
 from .model_inspector import ModelInspector
 from .data_inspector import DataInspector
 from .resource_probe import ResourceProbe
+
+try:  # Optional dependency on distiller presets
+    from core.distillers.presets import get_preset, list_presets  # type: ignore
+except Exception:  # pragma: no cover - presets may be unavailable
+    get_preset = None  # type: ignore
+    list_presets = None  # type: ignore
 
 
 class PreflightAnalyzer:
@@ -254,8 +261,14 @@ class PreflightAnalyzer:
         print("🎯 Evaluating readiness...")
         decision = self._make_decision()
         self.results['decision'] = decision
+
+        # 6. Assess overall risk and create an action plan
+        risk_profile = self._compute_risk_profile()
+        self.results['risk_profile'] = risk_profile
+        playbook = self._generate_user_playbook()
+        self.results['playbook'] = playbook
         
-        # 6. Generate comprehensive report
+        # 7. Generate comprehensive report
         comprehensive_report = self._generate_comprehensive_report()
         
         if verbose:
@@ -302,9 +315,10 @@ class PreflightAnalyzer:
         base_batch = data_rec.get('optimal_batch_size', 32)
         multiplier = resource_rec.get('batch_size_multiplier', 1.0)
         optimal_batch = int(base_batch * multiplier)
-        
-        # Ensure batch size is power of 2 for efficiency
-        optimal_batch = 2 ** int(torch.log2(torch.tensor(optimal_batch)).item())
+
+        # Ensure batch size is power of 2 for efficiency when possible
+        if optimal_batch > 0:
+            optimal_batch = 2 ** int(math.floor(math.log2(optimal_batch))) if optimal_batch > 1 else 1
         optimization['batch_size'] = max(1, optimal_batch)
         optimization['changes'].append(
             f"Batch size: {optimization['batch_size']} "
@@ -326,12 +340,18 @@ class PreflightAnalyzer:
             )
         
         # Layer mapping
-        layer_mapping = self.results['model'].get('layer_mapping', [])
-        if layer_mapping:
-            optimization['layer_mapping'] = layer_mapping
+        layer_mapping_info = self.results['model'].get('layer_mapping', {})
+        if isinstance(layer_mapping_info, dict) and layer_mapping_info.get('mappings'):
+            optimization['layer_mapping'] = layer_mapping_info['mappings']
             optimization['changes'].append(
-                f"Layer mapping: {len(layer_mapping)} pairs auto-mapped"
+                f"Layer mapping: {len(layer_mapping_info['mappings'])} pairs auto-mapped"
             )
+
+        preset_info = self._derive_recommended_preset()
+        if preset_info:
+            optimization['recommended_preset'] = preset_info
+            preset_name = preset_info['name']
+            optimization['changes'].append(f"Preset selected: {preset_name}")
         
         # Memory estimation
         if self.student_model:
@@ -357,6 +377,50 @@ class PreflightAnalyzer:
                     )
         
         return optimization
+
+    def _derive_recommended_preset(self) -> Optional[Dict[str, Any]]:
+        """Select a distillation preset based on analysis heuristics."""
+        if get_preset is None:
+            return None
+
+        compression = self.results.get('model', {}).get('compression_ratio', 1.0)
+        data_type = self.results.get('data', {}).get('data_type', 'unknown')
+        model_arch = self.results.get('model', {}).get('teacher', {}).get('architecture_family', 'unknown')
+
+        preset_choice = 'quick_start'
+        rationale = []
+
+        if compression and compression > 8:
+            preset_choice = 'compression_max'
+            rationale.append('High compression ratio detected (>8x).')
+        elif model_arch == 'transformer' and data_type == 'text':
+            preset_choice = 'balanced'
+            rationale.append('Transformer models on text tasks benefit from balanced preset.')
+        elif data_type in {'vision', 'video'}:
+            preset_choice = 'vision_transformer'
+            rationale.append('Vision dataset detected; using vision-specific preset.')
+        elif compression and compression < 2:
+            preset_choice = 'quick_start'
+            rationale.append('Low compression ratio; quick start preset is sufficient.')
+
+        try:
+            preset_config = get_preset(preset_choice)
+            return {
+                'name': preset_choice,
+                'config': preset_config,
+                'rationale': rationale or [f"Heuristic selection for data type {data_type}."]
+            }
+        except KeyError:
+            if list_presets:
+                available = list_presets()
+                return {
+                    'name': preset_choice,
+                    'config': {},
+                    'rationale': [
+                        f"Preset '{preset_choice}' not found. Available presets: {available}"
+                    ]
+                }
+            return None
     
     def _get_available_memory(self, device: str) -> Optional[float]:
         """Get available memory for device in GB."""
@@ -474,7 +538,9 @@ class PreflightAnalyzer:
             'model_analysis': self.results['model'],
             'data_analysis': self.results['data'],
             'resource_profile': self.results['resources'],
-            'optimized_config': self.results['optimization']
+            'optimized_config': self.results['optimization'],
+            'risk_profile': self.results.get('risk_profile', {}),
+            'playbook': self.results.get('playbook', {})
         }
     
     def _format_config_validation(self, validation: Dict[str, Any]) -> str:
@@ -531,6 +597,22 @@ class PreflightAnalyzer:
             lines.append("❌ CANNOT PROCEED")
             lines.append("Critical issues must be resolved first.")
         lines.append("")
+
+        risk_profile = report.get('risk_profile', {})
+        if risk_profile:
+            lines.append(
+                f"Risk Level: {risk_profile.get('level', 'unknown').upper()} "
+                f"(score: {risk_profile.get('score', 0)})"
+            )
+            if risk_profile.get('drivers'):
+                lines.append("Top Risk Drivers:")
+                for driver in risk_profile['drivers'][:3]:
+                    lines.append(f"  • {driver}")
+            if risk_profile.get('rationale'):
+                lines.append("Key Rationale:")
+                for reason in risk_profile['rationale'][:3]:
+                    lines.append(f"  • {reason}")
+            lines.append("")
         
         # Blockers
         if report['blockers']:
@@ -573,6 +655,15 @@ class PreflightAnalyzer:
             strategy = opt['distillation_strategy']
             lines.append(f"  Recommended Strategy: {strategy.get('primary_method', 'unknown')}")
             lines.append("")
+        if opt.get('recommended_preset'):
+            preset = opt['recommended_preset']
+            lines.append(f"  Suggested Preset: {preset.get('name')}" )
+            rationale = preset.get('rationale', [])
+            if rationale:
+                lines.append("    Rationale:")
+                for reason in rationale[:2]:
+                    lines.append(f"      - {reason}")
+            lines.append("")
         
         # Summary
         model = report['model_analysis']
@@ -592,9 +683,112 @@ class PreflightAnalyzer:
             ""
         ])
         
+        playbook = report.get('playbook', {})
+        if playbook.get('priority_actions'):
+            lines.append("🚀 NEXT STEPS:")
+            for action in playbook['priority_actions'][:3]:
+                lines.append(f"  • {action}")
+            lines.append("")
+
         lines.append("=" * 70)
         
         return "\n".join(lines)
+
+    def _compute_risk_profile(self) -> Dict[str, Any]:
+        """Aggregate blockers, warnings, and critical metrics into a risk score."""
+        blockers = self.results.get('decision', {}).get('blockers', [])
+        warnings = self.results.get('decision', {}).get('warnings', [])
+        data_stats = self.results.get('data', {}).get('statistics', {}) or {}
+        compression = self.results.get('model', {}).get('compression_ratio')
+
+        risk_score = 100
+        rationale: List[str] = []
+        metrics: Dict[str, Any] = {}
+
+        risk_score -= len(blockers) * 35
+        if blockers:
+            rationale.append(f"{len(blockers)} blocker(s) must be resolved before launch.")
+
+        warning_penalty = min(len(warnings), 10) * 5
+        risk_score -= warning_penalty
+        if warnings:
+            rationale.append(f"{len(warnings)} warnings identified that could impact quality.")
+
+        if isinstance(compression, (float, int)):
+            metrics['compression_ratio'] = compression
+            if compression > 10:
+                risk_score -= 10
+                rationale.append("Compression ratio above 10x may degrade accuracy.")
+
+        num_samples = data_stats.get('num_samples')
+        if isinstance(num_samples, int):
+            metrics['num_samples'] = num_samples
+            if num_samples < 500:
+                risk_score -= 10
+                rationale.append("Dataset contains fewer than 500 samples; overfitting risk increases.")
+
+        imbalance = data_stats.get('imbalance_ratio')
+        if isinstance(imbalance, (float, int)):
+            metrics['imbalance_ratio'] = imbalance
+            if imbalance > 5:
+                risk_score -= 8
+                rationale.append(f"Class imbalance ratio {imbalance:.1f}:1 requires mitigation.")
+
+        risk_score = max(0, min(100, risk_score))
+
+        if risk_score >= 70:
+            level = 'low'
+        elif risk_score >= 40:
+            level = 'medium'
+        else:
+            level = 'high'
+
+        drivers = blockers + warnings[:5]
+
+        if not rationale:
+            rationale.append("No major risks detected; proceed with standard monitoring.")
+
+        return {
+            'score': risk_score,
+            'level': level,
+            'drivers': drivers,
+            'rationale': rationale,
+            'critical_metrics': metrics,
+        }
+
+    def _generate_user_playbook(self) -> Dict[str, List[str]]:
+        """Produce an action-oriented playbook for non-technical stakeholders."""
+        decision = self.results.get('decision', {})
+        optimization = self.results.get('optimization', {})
+        data_report = self.results.get('data', {})
+        model_report = self.results.get('model', {})
+
+        actions: List[str] = []
+        monitor: List[str] = []
+        ready: List[str] = []
+
+        if not decision.get('can_proceed', False):
+            actions.extend(decision.get('blockers', []) or ["Resolve blockers before proceeding."])
+        else:
+            ready.append("All systems go. Initiate distillation when convenient.")
+
+        if data_report.get('warnings'):
+            monitor.append("Dataset warnings detected; review imbalance and preprocessing suggestions.")
+        if model_report.get('compatibility', {}).get('warnings'):
+            monitor.append("Model compatibility warnings present; keep adaptive features enabled.")
+        if optimization.get('recommended_preset'):
+            ready.append(
+                f"Apply preset '{optimization['recommended_preset']['name']}' for automated setup."
+            )
+
+        if optimization.get('use_amp'):
+            ready.append("Enable mixed precision (AMP) to speed up training on GPU.")
+
+        return {
+            'priority_actions': actions,
+            'monitor': monitor,
+            'ready_to_launch': ready,
+        }
     
     def save_report(
         self,
@@ -636,6 +830,37 @@ class PreflightAnalyzer:
                 f.write(self._format_final_report(report))
                 f.write("\n\n")
                 
+                f.write("=" * 70 + "\n")
+                f.write("RISK PROFILE\n")
+                f.write("=" * 70 + "\n")
+                risk = report.get('risk_profile', {})
+                if risk:
+                    f.write(f"Level: {risk.get('level', 'unknown')} (score {risk.get('score', 0)})\n")
+                    for reason in risk.get('rationale', []):
+                        f.write(f" - {reason}\n")
+                    metrics = risk.get('critical_metrics', {})
+                    if metrics:
+                        f.write("Critical Metrics:\n")
+                        for name, value in metrics.items():
+                            f.write(f"   {name}: {value}\n")
+                else:
+                    f.write("No risk profile available.\n")
+                f.write("\n")
+
+                f.write("=" * 70 + "\n")
+                f.write("ACTION PLAYBOOK\n")
+                f.write("=" * 70 + "\n")
+                playbook = report.get('playbook', {})
+                for section_name, steps in playbook.items():
+                    title = section_name.replace('_', ' ').title()
+                    f.write(f"{title}:\n")
+                    if steps:
+                        for step in steps:
+                            f.write(f" - {step}\n")
+                    else:
+                        f.write(" (no actions)\n")
+                    f.write("\n")
+
                 # Add detailed reports
                 f.write("=" * 70 + "\n")
                 f.write("DETAILED MODEL ANALYSIS\n")

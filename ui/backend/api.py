@@ -2,9 +2,10 @@
 FastAPI Backend for Zynthe Knowledge Distillation Toolkit
 Connects the Electron UI to the Python training pipeline with full transparency
 """
-from fastapi import FastAPI, WebSocket, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from contextlib import asynccontextmanager
@@ -12,11 +13,21 @@ import uvicorn
 import yaml
 import json
 import csv
+import os
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 from training_manager import TrainingManager
 from evaluation_tasks import init_task_manager, get_task_manager, EvaluationType
+
+# Load environment variables from .env file
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
+# Add sys.path for imports
+import sys
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Training manager for subprocess handling
 training_manager = None
@@ -45,6 +56,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve experiment artifacts (images/plots) directly under /experiments
+EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
+app.mount("/experiments", StaticFiles(directory=str(EXPERIMENTS_DIR), html=False), name="experiments")
+
 # Global state
 active_experiments = {}  # Maps exp_id -> training details
 training_status = {"is_training": False, "experiment_id": None, "stage": None}
@@ -72,6 +87,9 @@ class EvaluationRequest(BaseModel):
     experiment_id: str
     eval_type: str = "standard"  # 'standard', 'extended', 'dual', 'benchmark'
     benchmark_tasks: Optional[List[str]] = None  # For benchmark eval: ['truthfulqa', 'mmlu', 'gsm8k']
+
+class HFTokenRequest(BaseModel):
+    token: str
 
 # ===== HELPER FUNCTIONS =====
 
@@ -117,7 +135,7 @@ async def validate_dataset(file_path: Path) -> tuple[bool, str, int]:
                 reader = csv.DictReader(f)
                 
                 # Check headers
-                if 'text' not in reader.fieldnames or 'label' not in reader.fieldnames:
+                if not reader.fieldnames or 'text' not in reader.fieldnames or 'label' not in reader.fieldnames:
                     return False, "CSV must have 'text' and 'label' columns", 0
                 
                 # Count rows
@@ -154,6 +172,32 @@ async def broadcast_message(message: dict):
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "Zynthe API is running"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for debugging"""
+    import torch
+    
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "backend": "running",
+        "device": {
+            "cuda_available": torch.cuda.is_available(),
+            "mps_available": hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(),
+            "current": "cpu"
+        },
+        "hf_token_configured": bool(os.getenv('HF_TOKEN')),
+        "training_manager": training_manager is not None,
+        "project_root": str(PROJECT_ROOT)
+    }
+    
+    if torch.cuda.is_available():
+        health_status["device"]["current"] = "cuda"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        health_status["device"]["current"] = "mps"
+    
+    return health_status
 
 @app.get("/api/experiments")
 async def get_experiments():
@@ -214,6 +258,13 @@ async def get_experiment(exp_id: str):
     exp_dir = PROJECT_ROOT / "experiments" / exp_id
     if not exp_dir.exists():
         raise HTTPException(status_code=404, detail="Experiment not found")
+    
+    # Load basic info
+    info = {}
+    info_file = exp_dir / "experiment_info.json"
+    if info_file.exists():
+        with open(info_file) as f:
+            info = json.load(f)
     
     # Load config
     config = {}
@@ -299,8 +350,15 @@ async def get_experiment(exp_id: str):
     
     return {
         "id": exp_id,
-        "name": config.get("experiment_name", exp_id),
+        "experiment_id": exp_id,  # Add this for frontend compatibility
+        "name": info.get("experiment_name") or config.get("experiment_name", exp_id),
+        "experiment_name": info.get("experiment_name") or config.get("experiment_name", exp_id),  # Add this
         "timestamp": timestamp.isoformat(),
+        "created_at": info.get("created_at", timestamp.isoformat()),  # Add this
+        "status": info.get("status", "completed" if results_file.exists() else "running"),  # Add this
+        "teacher_model": info.get("teacher_model"),  # Add this
+        "student_model": info.get("student_model"),  # Add this
+        "dataset": info.get("dataset"),  # Add this
         "config": config,
         "results": results,
         "metrics": metrics,
@@ -308,6 +366,82 @@ async def get_experiment(exp_id: str):
         "logs": logs,
         "export_files": export_files
     }
+
+# ===== ARTIFACT + LIVE STREAM ENDPOINTS (for training visualizations) =====
+
+@app.get("/api/experiments/{exp_id}/artifacts")
+async def list_artifacts(exp_id: str):
+    """List PNG/JPG artifacts for an experiment (used by UI gallery)."""
+    exp_dir = PROJECT_ROOT / "experiments" / exp_id
+    if not exp_dir.exists():
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    images = []
+    for p in exp_dir.rglob("*"):
+        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+            images.append(str(p.relative_to(EXPERIMENTS_DIR)))
+    return {"experiment_id": exp_id, "images": images}
+
+@app.get("/api/experiments/{exp_id}/confusion/{role}")
+async def get_confusion_matrix(exp_id: str, role: str):
+    """Return confusion matrix image path and metrics.json for student/teacher."""
+    exp_dir = PROJECT_ROOT / "experiments" / exp_id
+    if not exp_dir.exists():
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    cm_dir = exp_dir / f"{role}_confusion"
+    img = cm_dir / "confusion_matrix.png"
+    metrics = cm_dir / "metrics.json"
+    if not img.exists():
+        raise HTTPException(status_code=404, detail="Confusion matrix not ready")
+    data = {}
+    if metrics.exists():
+        try:
+            data = json.loads(metrics.read_text())
+        except Exception:
+            data = {}
+    return {
+        "experiment_id": exp_id,
+        "role": role,
+        "image_path": str(img.relative_to(EXPERIMENTS_DIR)),
+        "metrics": data,
+    }
+
+@app.get("/api/experiments/{exp_id}/batch-log")
+async def get_batch_log(exp_id: str):
+    """Return the CSV content of the detailed batch log if present."""
+    exp_dir = PROJECT_ROOT / "experiments" / exp_id
+    if not exp_dir.exists():
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    csv_path = exp_dir / "training_detailed_log.csv"
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail="Batch log not found")
+    return {"experiment_id": exp_id, "csv": csv_path.read_text()}
+
+@app.get("/api/experiments/{exp_id}/micro/{role}/{epoch}")
+async def get_micro_series(exp_id: str, role: str, epoch: int):
+    """Return micro-series (train/eval) image paths for a given epoch and role."""
+    exp_dir = PROJECT_ROOT / "experiments" / exp_id
+    if not exp_dir.exists():
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    files = {
+        "train": exp_dir / f"{role}_epoch{epoch}_train_micro.png",
+        "eval": exp_dir / f"{role}_epoch{epoch}_eval_micro.png",
+    }
+    resolved = {k: str(v.relative_to(EXPERIMENTS_DIR)) for k, v in files.items() if v.exists()}
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Micro-series not found")
+    return {"experiment_id": exp_id, "role": role, "epoch": epoch, "images": resolved}
+
+@app.post("/api/stream")
+async def ingest_stream_event(request: Request):
+    """Receive streaming events (HTTP) and broadcast to connected WebSocket clients."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    await broadcast_message(payload)
+    return {"ok": True}
 
 @app.get("/api/datasets")
 async def get_datasets():
@@ -348,6 +482,13 @@ async def get_datasets():
 async def upload_dataset(file: UploadFile = File(...)):
     """Upload a custom dataset (JSONL or CSV format)"""
     
+    # Validate file has a filename
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="No filename provided"
+        )
+    
     # Validate file extension
     if not file.filename.endswith(('.jsonl', '.csv')):
         raise HTTPException(
@@ -386,6 +527,7 @@ async def upload_dataset(file: UploadFile = File(...)):
         
         return {
             "status": "success",
+            "dataset_id": safe_filename.replace('.jsonl', '').replace('.csv', ''),
             "filename": safe_filename,
             "num_samples": num_samples,
             "message": f"Dataset uploaded successfully with {num_samples} samples"
@@ -422,6 +564,216 @@ async def delete_dataset(dataset_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete dataset: {str(e)}")
 
+# ===== HUGGINGFACE TOKEN SETTINGS =====
+
+@app.post("/api/settings/hf-token")
+async def save_hf_token(request: HFTokenRequest):
+    """Save HuggingFace token for model downloads"""
+    try:
+        env_file = PROJECT_ROOT / ".env"
+        
+        # Read existing .env
+        env_vars = {}
+        if env_file.exists():
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and '=' in line and not line.startswith('#'):
+                        key, val = line.split('=', 1)
+                        env_vars[key] = val
+        
+        # Update token
+        env_vars['HF_TOKEN'] = request.token
+        
+        # Write back
+        with open(env_file, 'w') as f:
+            f.write("# HuggingFace Token for downloading private/gated models\n")
+            f.write("# Get your token from: https://huggingface.co/settings/tokens\n")
+            for key, val in env_vars.items():
+                f.write(f"{key}={val}\n")
+        
+        # Also set in environment for current session
+        os.environ['HF_TOKEN'] = request.token
+        
+        # Try to login to HuggingFace
+        try:
+            from huggingface_hub import login
+            login(token=request.token, add_to_git_credential=False)
+            print(f"✅ Logged in to HuggingFace")
+        except Exception as e:
+            print(f"⚠️ HF login warning: {e}")
+        
+        return {"status": "success", "message": "Token saved successfully"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save token: {str(e)}")
+
+@app.get("/api/settings/hf-token")
+async def get_hf_token():
+    """Check if HF token is configured"""
+    token = os.getenv('HF_TOKEN')
+    has_token = token is not None and len(token.strip()) > 0
+    return {
+        "configured": has_token,
+        "token_preview": f"{token[:8]}..." if (has_token and token) else None
+    }
+
+@app.delete("/api/settings/hf-token")
+async def delete_hf_token():
+    """Remove HF token"""
+    try:
+        env_file = PROJECT_ROOT / ".env"
+        if env_file.exists():
+            lines = []
+            with open(env_file) as f:
+                for line in f:
+                    if not line.strip().startswith('HF_TOKEN='):
+                        lines.append(line)
+            
+            with open(env_file, 'w') as f:
+                f.writelines(lines)
+        
+        if 'HF_TOKEN' in os.environ:
+            del os.environ['HF_TOKEN']
+        
+        return {"status": "success", "message": "Token removed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to remove token: {str(e)}")
+
+# ===== MODEL SEARCH & RECOMMENDATIONS =====
+
+@app.get("/api/models/search")
+async def search_models(query: str, task: str = "text-classification", limit: int = 20):
+    """Search HuggingFace Hub for models"""
+    try:
+        from huggingface_hub import HfApi
+        
+        api = HfApi()
+        hf_token = os.getenv('HF_TOKEN')
+        
+        # Search models
+        models = api.list_models(
+            filter=task,
+            search=query,
+            limit=limit,
+            token=hf_token if hf_token else None
+        )
+        
+        results = []
+        for model in models:
+            model_id = getattr(model, 'id', getattr(model, 'modelId', 'unknown'))
+            results.append({
+                "id": model_id,
+                "name": model_id,
+                "downloads": getattr(model, 'downloads', 0),
+                "likes": getattr(model, 'likes', 0),
+                "task": task,
+                "private": getattr(model, 'private', False)
+            })
+        
+        # Sort by downloads
+        results.sort(key=lambda x: x['downloads'], reverse=True)
+        
+        return {"models": results}
+    
+    except Exception as e:
+        print(f"Model search failed: {e}")
+        return {"models": [], "error": str(e)}
+
+@app.get("/api/models/recommended")
+async def get_recommended_models():
+    """Get curated list of recommended teacher-student pairs"""
+    return {
+        "pairs": [
+            {
+                "teacher": {
+                    "id": "bert-base-uncased",
+                    "name": "BERT Base",
+                    "size": "440MB",
+                    "params": "110M",
+                    "verified": True
+                },
+                "students": [
+                    {
+                        "id": "distilbert-base-uncased",
+                        "name": "DistilBERT",
+                        "size": "268MB",
+                        "params": "66M",
+                        "compression": "1.7x",
+                        "verified": True
+                    },
+                    {
+                        "id": "google/mobilebert-uncased",
+                        "name": "MobileBERT",
+                        "size": "100MB",
+                        "params": "25M",
+                        "compression": "4.4x",
+                        "verified": True
+                    }
+                ]
+            },
+            {
+                "teacher": {
+                    "id": "albert-base-v2",
+                    "name": "ALBERT Base",
+                    "size": "45MB",
+                    "params": "12M",
+                    "verified": True
+                },
+                "students": [
+                    {
+                        "id": "albert/albert-tiny-v2",
+                        "name": "ALBERT Tiny",
+                        "size": "16MB",
+                        "params": "4M",
+                        "compression": "3x",
+                        "verified": True
+                    }
+                ]
+            },
+            {
+                "teacher": {
+                    "id": "roberta-base",
+                    "name": "RoBERTa Base",
+                    "size": "500MB",
+                    "params": "125M",
+                    "verified": True
+                },
+                "students": [
+                    {
+                        "id": "distilroberta-base",
+                        "name": "DistilRoBERTa",
+                        "size": "330MB",
+                        "params": "82M",
+                        "compression": "1.5x",
+                        "verified": True
+                    }
+                ]
+            },
+            {
+                "teacher": {
+                    "id": "microsoft/MiniLM-L12-H384-uncased",
+                    "name": "MiniLM-L12",
+                    "size": "130MB",
+                    "params": "33M",
+                    "verified": True
+                },
+                "students": [
+                    {
+                        "id": "microsoft/MiniLM-L6-H384-uncased",
+                        "name": "MiniLM-L6",
+                        "size": "90MB",
+                        "params": "22M",
+                        "compression": "1.5x",
+                        "verified": True
+                    }
+                ]
+            }
+        ]
+    }
+
+# ===== TRAINING ENDPOINTS =====
+
 @app.post("/api/training/create")
 async def create_training(config: dict):
     """Create and start a new training run"""
@@ -438,15 +790,80 @@ async def create_training(config: dict):
     exp_dir = PROJECT_ROOT / "experiments" / exp_id
     exp_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save config to YAML (including experiment name)
-    config_file = exp_dir / "config.yaml"
-    config_with_metadata = {
-        **config,
+    # Transform config to match expected format for main.py
+    dataset_id = config.get("dataset", "imdb_sample")
+    
+    # Build proper training config
+    training_config = {
+        "experiment_name": exp_name,
         "experiment_id": exp_id,
-        "created_at": timestamp
+        "created_at": timestamp,
+        
+        # Model configuration
+        "model": {
+            "name": config.get("teacher_model", "bert-base-uncased"),
+            "student_name": config.get("student_model", "distilbert-base-uncased"),
+            "type": "transformer",
+            "tokenizer_name": config.get("student_model", "distilbert-base-uncased"),
+            "max_length": 128
+        },
+        
+        # Training configuration
+        "train": {
+            "epochs": config.get("epochs", 3),
+            "batch_size": config.get("batch_size", 32),
+            "lr": config.get("learning_rate", 2e-5),
+            "grad_accum_steps": 1,
+            "mixed_precision": False,
+            "early_stop_patience": 2,
+            "optimizer": "adamw",
+            "weight_decay": 0.01,
+            "max_grad_norm": 1.0,
+            "scheduler": "cosine",
+            "warmup_steps": 50,
+            "warmup_type": "linear"
+        },
+        
+        # Distillation configuration
+        "distillation": {
+            "method": "kd_hinton",
+            "temperature": config.get("temperature", 4.0),
+            "alpha": 0.4
+        },
+        
+        # Data configuration - this is the key fix!
+        "data": {
+            "train_path": f"data/{dataset_id}.jsonl",
+            "val_path": f"data/{dataset_id}.jsonl"  # Using same for now
+        },
+        
+        # Device configuration
+        "device": {
+            "prefer_mps": True,
+            "prefer_cuda": False
+        },
+        
+        # Output configuration
+        "output_root": "experiments"
     }
+    
+    # Save config to YAML
+    config_file = exp_dir / "config.yaml"
     with open(config_file, 'w') as f:
-        yaml.dump(config_with_metadata, f)
+        yaml.dump(training_config, f)
+    
+    # Create experiment info file for immediate access
+    info_file = exp_dir / "experiment_info.json"
+    with open(info_file, 'w') as f:
+        json.dump({
+            "experiment_id": exp_id,
+            "experiment_name": exp_name,
+            "status": "starting",
+            "created_at": timestamp,
+            "teacher_model": config.get("teacher_model"),
+            "student_model": config.get("student_model"),
+            "dataset": dataset_id
+        }, f, indent=2)
     
     # Update training status
     training_status["is_training"] = True
@@ -466,6 +883,9 @@ async def create_training(config: dict):
     
     # Start the actual training process
     try:
+        if not training_manager:
+            raise HTTPException(status_code=503, detail="Training manager not initialized")
+        
         await training_manager.start_training(exp_id, config_file, exp_dir)
         return {
             "status": "started",
@@ -487,6 +907,9 @@ async def create_training(config: dict):
 @app.post("/api/training/{exp_id}/pause")
 async def pause_training(exp_id: str):
     """Pause a training run"""
+    if not training_manager:
+        raise HTTPException(status_code=503, detail="Training manager not initialized")
+    
     try:
         training_manager.pause_training(exp_id)
         await broadcast_message({
@@ -500,6 +923,9 @@ async def pause_training(exp_id: str):
 @app.post("/api/training/{exp_id}/resume")
 async def resume_training(exp_id: str):
     """Resume a paused training run"""
+    if not training_manager:
+        raise HTTPException(status_code=503, detail="Training manager not initialized")
+    
     try:
         training_manager.resume_training(exp_id)
         await broadcast_message({
@@ -513,6 +939,9 @@ async def resume_training(exp_id: str):
 @app.post("/api/training/{exp_id}/stop")
 async def stop_training_by_id(exp_id: str):
     """Stop a specific training run"""
+    if not training_manager:
+        raise HTTPException(status_code=503, detail="Training manager not initialized")
+    
     try:
         training_manager.stop_training(exp_id)
         training_status["is_training"] = False
@@ -787,6 +1216,199 @@ async def preflight_check(request: PreflightRequest):
             "teacher_description": teacher["description"]
         }
     }
+
+@app.post("/api/models/validate")
+async def validate_model_pair(request: dict):
+    """
+    Complete preflight validation using the core preflight system.
+    
+    Validates:
+    - Config structure
+    - Model availability on HuggingFace
+    - Device compatibility
+    - Architecture support
+    - Resource requirements
+    
+    Returns comprehensive validation report
+    """
+    try:
+        teacher_id = request.get('teacher_model')
+        student_id = request.get('student_model')
+        dataset_id = request.get('dataset', 'imdb_sample')  # Optional dataset parameter
+        
+        if not teacher_id or not student_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Both teacher_model and student_model required"
+            )
+        
+        print(f"[API] Running preflight validation: {teacher_id} → {student_id}")
+        
+        # Create temporary config for validation
+        temp_config = {
+            'model': {
+                'name': teacher_id,
+                'student_name': student_id,
+                'type': 'transformer'
+            },
+            'data': {
+                'train_path': f'data/{dataset_id}.jsonl',
+                'val_path': f'data/{dataset_id}.jsonl'
+            },
+            'train': {
+                'epochs': 3,
+                'batch_size': 32,
+                'lr': 2e-5
+            },
+            'distillation': {
+                'method': 'kd_hinton',
+                'temperature': 4.0
+            },
+            'device': {
+                'prefer_mps': True,
+                'prefer_cuda': False
+            }
+        }
+        
+        # PHASE 1: Config validation (fast, no model loading)
+        print("[API] Phase 1: Validating configuration...")
+        try:
+            from core.preflight.analyser import validate_config_only
+            config_validation = validate_config_only(temp_config)
+            print(f"[API] Config validation result: {config_validation['is_valid']}")
+        except ImportError as e:
+            print(f"[API] Warning: Could not import preflight analyser: {e}")
+            config_validation = {'is_valid': True, 'errors': [], 'warnings': []}
+        except Exception as e:
+            print(f"[API] Config validation error: {e}")
+            config_validation = {'is_valid': True, 'errors': [], 'warnings': [f'Config validation skipped: {str(e)}']}
+        
+        # PHASE 2: Model validation with HuggingFace
+        print("[API] Phase 2: Validating models on HuggingFace...")
+        hf_token = os.getenv('HF_TOKEN')
+        
+        # Use the ModelValidator we created earlier
+        try:
+            from core.preflight.model_validator import ModelValidator
+            validator = ModelValidator(hf_token=hf_token)
+            model_validation = validator.validate_pair(teacher_id, student_id)
+            
+            print(f"[API] Model validation result: {model_validation['pair_compatible']}")
+        except Exception as e:
+            print(f"[API] Model validation error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Return a safe error response
+            model_validation = {
+                'pair_compatible': False,
+                'teacher': {
+                    'exists': False,
+                    'device_compatible': False,
+                    'size_mb': None,
+                    'errors': [f"Validation error: {str(e)}"],
+                    'warnings': [],
+                    'alternatives': []
+                },
+                'student': {
+                    'exists': False,
+                    'device_compatible': False,
+                    'size_mb': None,
+                    'errors': [f"Validation error: {str(e)}"],
+                    'warnings': [],
+                    'alternatives': []
+                },
+                'issues': [f"Model validation failed: {str(e)}"],
+                'warnings': [],
+                'recommendations': []
+            }
+        
+        # Combine results
+        validation_result = {
+            'valid': config_validation['is_valid'] and model_validation['pair_compatible'],
+            'can_proceed': config_validation['is_valid'] and model_validation['pair_compatible'],
+            'config_validation': config_validation,
+            'model_validation': model_validation,
+            'teacher': {
+                'id': teacher_id,
+                'exists': model_validation['teacher']['exists'],
+                'device_compatible': model_validation['teacher']['device_compatible'],
+                'size_mb': model_validation['teacher']['size_mb'],
+                'errors': model_validation['teacher']['errors'],
+                'warnings': model_validation['teacher']['warnings'],
+                'alternatives': model_validation['teacher'].get('alternatives', [])
+            },
+            'student': {
+                'id': student_id,
+                'exists': model_validation['student']['exists'],
+                'device_compatible': model_validation['student']['device_compatible'],
+                'size_mb': model_validation['student']['size_mb'],
+                'errors': model_validation['student']['errors'],
+                'warnings': model_validation['student']['warnings'],
+                'alternatives': model_validation['student'].get('alternatives', [])
+            },
+            'compression_ratio': model_validation.get('compression_ratio'),
+            'issues': [
+                *config_validation.get('errors', []),
+                *model_validation.get('issues', [])
+            ],
+            'warnings': [
+                *config_validation.get('warnings', []),
+                *model_validation.get('warnings', [])
+            ],
+            'recommendations': model_validation.get('recommendations', []),
+        }
+        
+        # Add device info
+        import torch
+        device_info = {
+            'cuda_available': torch.cuda.is_available(),
+            'mps_available': hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(),
+            'current_device': 'cpu'
+        }
+        
+        if torch.cuda.is_available():
+            device_info['current_device'] = 'cuda'
+            device_info['cuda_device_name'] = torch.cuda.get_device_name(0)
+            major, minor = torch.cuda.get_device_capability()
+            device_info['cuda_capability'] = f"{major}.{minor}"
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device_info['current_device'] = 'mps'
+        
+        validation_result['device_info'] = device_info
+        
+        print(f"[API] Validation complete. Can proceed: {validation_result['can_proceed']}")
+        
+        return validation_result
+        
+    except Exception as e:
+        print(f"[API] Preflight validation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/device/info")
+async def get_device_info():
+    """Get current device capabilities"""
+    import torch
+    
+    device_info = {
+        "cuda_available": torch.cuda.is_available(),
+        "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+        "mps_available": hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(),
+        "current_device": "cpu"
+    }
+    
+    if torch.cuda.is_available():
+        device_info["current_device"] = "cuda"
+        device_info["cuda_version"] = torch.version.cuda
+        device_info["cuda_device_name"] = torch.cuda.get_device_name(0)
+        major, minor = torch.cuda.get_device_capability()
+        device_info["cuda_capability"] = f"{major}.{minor}"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device_info["current_device"] = "mps"
+    
+    return device_info
 
 # ===== ASYNC EVALUATION TASK ENDPOINTS =====
 

@@ -50,7 +50,7 @@ class SimilarityTransfer(BaseDistiller):
         self,
         teacher: nn.Module,
         student: nn.Module,
-        config: Dict[str, Any]
+        config: Optional[Dict[str, Any]] = None
     ):
         """
         Initialize Similarity Transfer distiller.
@@ -70,24 +70,38 @@ class SimilarityTransfer(BaseDistiller):
                 - kd_weight: Weight for KD loss if combined (default: 0.3)
                 - normalize: Normalize features before similarity (default: True)
         """
+        if config is None:
+            config = {}
+        transfer_cfg = config.get('similarity_transfer', {})
+        if transfer_cfg:
+            base_cfg = transfer_cfg
+        else:
+            base_cfg = config
+
         # Set config attributes BEFORE calling super().__init__()
         # because BaseDistiller calls _register_hooks() which needs these
         self.config = config
-        self.layer = config.get('layer', -1)
-        self.layers = config.get('layers', [self.layer] if self.layer != -1 else [])
-        self.similarity_metric = config.get('similarity_metric', 'cosine')
-        self.weight = config.get('weight', 1.0)
-        self.temperature = config.get('temperature', 1.0)
-        self.progressive = config.get('progressive', False)
-        self.cross_modality = config.get('cross_modality', False)
-        self.graph_mode = config.get('graph_mode', False)
-        self.kd_weight = config.get('kd_weight', 0.3)
-        self.normalize = config.get('normalize', True)
+        self.layer = base_cfg.get('layer', -1)
+        layers_cfg = base_cfg.get('layers', [self.layer] if self.layer != -1 else [])
+        self.layers = layers_cfg
+        self.similarity_metric = base_cfg.get('similarity_metric', 'cosine')
+        self.weight = base_cfg.get('weight', 1.0)
+        self.temperature = base_cfg.get('temperature', 1.0)
+        self.progressive = base_cfg.get('progressive', False)
+        self.cross_modality = base_cfg.get('cross_modality', False)
+        self.graph_mode = base_cfg.get('graph_mode', False)
+        self.graph_threshold = base_cfg.get('graph_threshold', 0.0)
+        self.kd_weight = base_cfg.get('kd_weight', 0.3)
+        self.normalize = base_cfg.get('normalize', True)
+        self.cross_modality_weight = base_cfg.get('cross_modality_weight', 0.5)
+        self.use_hidden_state_fallback = base_cfg.get('fallback_to_hidden_states', True)
+        self.auto_layer_strategy = base_cfg.get('auto_layers')
+        self.auto_layer_count = base_cfg.get('auto_layer_count', 2)
         
         # Progressive training state
         self.current_epoch = 0
-        self.total_epochs = config.get('total_epochs', 100)
-        self.progressive_epochs = config.get('progressive_epochs', 3)
+        self.total_epochs = base_cfg.get('total_epochs', 100)
+        self.progressive_epochs = base_cfg.get('progressive_epochs', 3)
         self.current_layers = [self.layers[0]] if self.progressive and self.layers else self.layers
         
         # Feature extraction hooks
@@ -97,6 +111,10 @@ class SimilarityTransfer(BaseDistiller):
         # Metrics tracking
         self.structural_alignment_scores = []
         
+        if (not self.layers) and self.auto_layer_strategy:
+            self.layers = self._infer_auto_layers(self.auto_layer_strategy, self.auto_layer_count)
+            self.current_layers = [self.layers[0]] if self.progressive and self.layers else self.layers
+
         # Now call super().__init__() which will call _register_hooks()
         super().__init__(teacher, student)
         
@@ -122,6 +140,8 @@ class SimilarityTransfer(BaseDistiller):
         
         # Register hooks for specified layers by name
         for layer_name in self.layers:
+            if isinstance(layer_name, str) and layer_name.startswith('hidden:'):
+                continue  # Hidden-state shorthand handled dynamically
             # Get module by name (e.g., "layer_5" or "transformer.layer.5")
             try:
                 teacher_module = dict(self.teacher.named_modules()).get(layer_name)
@@ -141,6 +161,60 @@ class SimilarityTransfer(BaseDistiller):
                     warnings.warn(f"Student layer '{layer_name}' not found")
             except Exception as e:
                 warnings.warn(f"Failed to register hook for layer '{layer_name}': {e}")
+
+    def _infer_auto_layers(self, strategy: str, count: int) -> List[str]:
+        """Infer layer identifiers when user opts into auto selection."""
+        count = max(1, int(count))
+        strategy = strategy.lower()
+        if strategy in ('last', 'tail', 'default'):
+            return [f'hidden:-{idx + 1}' for idx in range(count)]
+        if strategy in ('first', 'head'):
+            return [f'hidden:{idx}' for idx in range(count)]
+        if strategy == 'mixed':
+            layers = [f'hidden:0', f'hidden:-1']
+            if count > 2:
+                mid = count - 2
+                layers.extend([f'hidden:-{idx + 2}' for idx in range(mid)])
+            return layers[:count]
+        if strategy == 'uniform':
+            return [f'hidden:-{idx + 1}' for idx in range(count)]
+        if strategy == 'attn':
+            # Attention heads typically live in the last few hidden states
+            return [f'hidden:-{idx + 1}' for idx in range(count)]
+        return [f'hidden:-{idx + 1}' for idx in range(count)]
+
+    @staticmethod
+    def _extract_hidden_states(output: Any) -> Optional[Tuple[torch.Tensor, ...]]:
+        if isinstance(output, dict):
+            return output.get('hidden_states')
+        return getattr(output, 'hidden_states', None)
+
+    @staticmethod
+    def _extract_logits(output: Any) -> Any:
+        if isinstance(output, dict) and 'logits' in output:
+            return output['logits']
+        logits_attr = getattr(output, 'logits', None)
+        if logits_attr is not None:
+            return logits_attr
+        if isinstance(output, tuple) and len(output) > 0:
+            return output[0]
+        return output
+
+    def _get_feature(
+        self,
+        layer_name: str,
+        cache: Dict[str, torch.Tensor],
+        hidden_states: Optional[Tuple[torch.Tensor, ...]]
+    ) -> Optional[torch.Tensor]:
+        if layer_name in cache:
+            return cache[layer_name]
+        if layer_name.startswith('hidden:') and hidden_states is not None:
+            try:
+                index = int(layer_name.split(':', 1)[1])
+            except ValueError:
+                return None
+            return hidden_states[index]
+        return None
     
     def compute_similarity_matrix(
         self,
@@ -181,7 +255,10 @@ class SimilarityTransfer(BaseDistiller):
             sim_matrix = torch.matmul(features, features.T)
             
             # Apply threshold to create sparse adjacency
-            threshold = sim_matrix.mean() + sim_matrix.std()
+            if self.graph_threshold and self.graph_threshold > 0:
+                threshold = self.graph_threshold
+            else:
+                threshold = sim_matrix.mean() + sim_matrix.std()
             sim_matrix = torch.where(
                 sim_matrix > threshold,
                 sim_matrix,
@@ -350,12 +427,11 @@ class SimilarityTransfer(BaseDistiller):
         student_output = self.student(x)
         
         # Extract logits based on output type
-        if isinstance(teacher_output, dict):
-            teacher_logits = teacher_output['logits']
-            student_logits = student_output['logits']
-        else:
-            teacher_logits = teacher_output
-            student_logits = student_output
+        teacher_hidden_states = self._extract_hidden_states(teacher_output)
+        student_hidden_states = self._extract_hidden_states(student_output)
+
+        teacher_logits = self._extract_logits(teacher_output)
+        student_logits = self._extract_logits(student_output)
         
         # Compute similarity loss
         sim_loss_total = 0.0
@@ -367,10 +443,10 @@ class SimilarityTransfer(BaseDistiller):
         
         # Multi-layer similarity loss
         for layer_name in active_layers:
-            if layer_name in self.teacher_features and layer_name in self.student_features:
-                t_feats = self.teacher_features[layer_name]
-                s_feats = self.student_features[layer_name]
-                
+            t_feats = self._get_feature(layer_name, self.teacher_features, teacher_hidden_states)
+            s_feats = self._get_feature(layer_name, self.student_features, student_hidden_states)
+
+            if t_feats is not None and s_feats is not None:
                 # Ensure matching dimensions
                 if t_feats.shape != s_feats.shape:
                     warnings.warn(f"Feature shape mismatch at layer {layer_name}")
@@ -454,15 +530,11 @@ class SimilarityTransfer(BaseDistiller):
             Tuple of (loss tensor, metrics dict)
         """
         # Extract logits
-        if isinstance(student_outputs, dict):
-            student_logits = student_outputs['logits']
-        else:
-            student_logits = student_outputs
-            
-        if isinstance(teacher_outputs, dict):
-            teacher_logits = teacher_outputs['logits']
-        else:
-            teacher_logits = teacher_outputs
+        teacher_hidden_states = self._extract_hidden_states(teacher_outputs)
+        student_hidden_states = self._extract_hidden_states(student_outputs)
+
+        student_logits = self._extract_logits(student_outputs)
+        teacher_logits = self._extract_logits(teacher_outputs)
         
         # Compute similarity loss across registered layers
         sim_loss_total = 0.0
@@ -474,10 +546,10 @@ class SimilarityTransfer(BaseDistiller):
         
         # Multi-layer similarity loss
         for layer_name in active_layers:
-            if layer_name in self.teacher_features and layer_name in self.student_features:
-                t_feats = self.teacher_features[layer_name]
-                s_feats = self.student_features[layer_name]
-                
+            t_feats = self._get_feature(layer_name, self.teacher_features, teacher_hidden_states)
+            s_feats = self._get_feature(layer_name, self.student_features, student_hidden_states)
+
+            if t_feats is not None and s_feats is not None:
                 # Ensure matching dimensions
                 if t_feats.shape != s_feats.shape:
                     warnings.warn(f"Feature shape mismatch at layer {layer_name}")
@@ -616,6 +688,15 @@ class SimilarityTransfer(BaseDistiller):
             metrics['final_sas'] = self.structural_alignment_scores[-1]
         
         return metrics
+
+    @classmethod
+    def from_config(
+        cls,
+        teacher: nn.Module,
+        student: nn.Module,
+        config: Optional[Dict[str, Any]] = None
+    ) -> "SimilarityTransfer":
+        return cls(teacher=teacher, student=student, config=config or {})
 
 
 # Backward compatibility alias

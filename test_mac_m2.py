@@ -1,201 +1,399 @@
-#!/usr/bin/env python3
-"""
-Quick validation test for the knowledge distillation toolkit on Mac M2.
-This script validates that all components work together correctly.
+"""#!/usr/bin/env python3
+
+Quick Mac M2 Test - Verify Fix Works"""
+
+#Tests the trainer fix on Apple Silicon without running full training.Quick validation test for the knowledge distillation toolkit on Mac M2.
+
+"""This script validates that all components work together correctly.
+
 """
 
 import sys
-import torch
+
+from pathlib import Pathimport sys
+
+sys.path.insert(0, str(Path(__file__).parent))import torch
+
 from pathlib import Path
 
-# Add project root to path
+import torch
+
+import inspect# Add project root to path
+
 project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
 
-def test_imports():
-    """Test that all required modules can be imported."""
-    print("🔍 Testing imports...")
-    
-    try:
-        from core.config.config_manager import ConfigManager
-        print("✅ ConfigManager imported successfully")
+def test_environment():sys.path.insert(0, str(project_root))
+
+    """Test 1: Check environment and MPS availability."""
+
+    print("\n" + "="*70)def test_imports():
+
+    print("TEST 1: Environment Check")    """Test that all required modules can be imported."""
+
+    print("="*70)    print("🔍 Testing imports...")
+
         
-        from core.models.model_loader import load_models, model_summary
-        print("✅ Model loader imported successfully")
-        
-        from transformers import AutoTokenizer
-        print("✅ Transformers imported successfully")
-        
-        # Make functions available globally for other tests
-        globals()['ConfigManager'] = ConfigManager
-        globals()['load_models'] = load_models
-        globals()['model_summary'] = model_summary
-        
+
+    print(f"Python: {sys.version}")    try:
+
+    print(f"PyTorch: {torch.__version__}")        from core.config.config_manager import ConfigManager
+
+            print("✅ ConfigManager imported successfully")
+
+    if torch.backends.mps.is_available():        
+
+        print("✅ MPS (Apple Silicon) available")        from core.models.model_loader import load_models, model_summary
+
+        device = "mps"        print("✅ Model loader imported successfully")
+
+    elif torch.cuda.is_available():        
+
+        print("✅ CUDA available")        from transformers import AutoTokenizer
+
+        device = "cuda"        print("✅ Transformers imported successfully")
+
+    else:        
+
+        print("⚠️  Using CPU")        # Make functions available globally for other tests
+
+        device = "cpu"        globals()['ConfigManager'] = ConfigManager
+
+            globals()['load_models'] = load_models
+
+    print(f"Device: {device}")        globals()['model_summary'] = model_summary
+
+    return True, device        
+
         return True
+
     except ImportError as e:
-        print(f"❌ Import error: {e}")
-        return False
 
-def test_device():
-    """Test device detection and MPS availability."""
-    print("\n🖥️  Testing device detection...")
-    
-    print(f"PyTorch version: {torch.__version__}")
-    
-    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        print("✅ MPS (Apple Silicon GPU) is available")
-        device = torch.device("mps")
-        
-        # Test basic MPS operation
-        try:
-            x = torch.randn(2, 3).to(device)
-            y = torch.matmul(x, x.T)
-            print(f"✅ MPS basic operation test passed: {y.shape}")
-            return "mps"
-        except Exception as e:
-            print(f"⚠️  MPS available but operation failed: {e}")
-            return "cpu"
-    else:
-        print("ℹ️  MPS not available, using CPU")
-        return "cpu"
+def test_model_loader():        print(f"❌ Import error: {e}")
 
-def test_config():
-    """Test configuration loading."""
-    print("\n⚙️  Testing configuration...")
-    
-    try:
-        from core.config.config_manager import ConfigManager
-        
-        # Test with our Mac M2 config
+    """Test 2: Verify model loader has label mappings."""        return False
+
+    print("\n" + "="*70)
+
+    print("TEST 2: Model Loader Fix (Label Mappings)")def test_device():
+
+    print("="*70)    """Test device detection and MPS availability."""
+
+        print("\n🖥️  Testing device detection...")
+
+    try:    
+
+        from core.models.model_loader import load_models    print(f"PyTorch version: {torch.__version__}")
+
+        from core.config.config_manager import ConfigManager    
+
+            if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+
+        cfg = ConfigManager('configs/retrain_teacher.yaml')        print("✅ MPS (Apple Silicon GPU) is available")
+
+        print("Loading models (this may take a minute)...")        device = torch.device("mps")
+
+        teacher, student, tokenizer = load_models(cfg, device='cpu')        
+
+                # Test basic MPS operation
+
+        # Check teacher        try:
+
+        assert hasattr(teacher.config, 'label2id'), "Teacher missing label2id"            x = torch.randn(2, 3).to(device)
+
+        assert hasattr(teacher.config, 'id2label'), "Teacher missing id2label"            y = torch.matmul(x, x.T)
+
+        assert teacher.config.label2id == {'negative': 0, 'positive': 1}, \            print(f"✅ MPS basic operation test passed: {y.shape}")
+
+            f"Wrong label2id: {teacher.config.label2id}"            return "mps"
+
+                except Exception as e:
+
+        print(f"✅ Teacher label2id: {teacher.config.label2id}")            print(f"⚠️  MPS available but operation failed: {e}")
+
+        print(f"✅ Teacher id2label: {teacher.config.id2label}")            return "cpu"
+
+            else:
+
+        # Check student        print("ℹ️  MPS not available, using CPU")
+
+        assert hasattr(student.config, 'label2id'), "Student missing label2id"        return "cpu"
+
+        assert student.config.label2id == {'negative': 0, 'positive': 1}
+
+        def test_config():
+
+        print(f"✅ Student label2id: {student.config.label2id}")    """Test configuration loading."""
+
+        print(f"✅ Student id2label: {student.config.id2label}")    print("\n⚙️  Testing configuration...")
+
+            
+
+        return True    try:
+
+    except Exception as e:        from core.config.config_manager import ConfigManager
+
+        print(f"❌ Error: {e}")        
+
+        return False        # Test with our Mac M2 config
+
         config_path = "configs/mac_m2_test.yaml"
+
         if not Path(config_path).exists():
-            config_path = "configs/default.yaml"
-            
-        cm = ConfigManager(config_path=config_path)
-        print(f"✅ Configuration loaded from {config_path}")
-        
-        device = cm.device()
-        print(f"✅ Device detected: {device}")
-        
-        config = cm.resolved_config
-        print(f"✅ Model config: {config.get('model', {}).get('name')} → {config.get('model', {}).get('student_name')}")
-        
-        return cm
-    except Exception as e:
-        print(f"❌ Configuration test failed: {e}")
-        return None
 
-def test_model_loading(config_manager, device_str):
-    """Test model loading (lightweight models only)."""
-    print("\n🤖 Testing model loading...")
-    
-    try:
-        # Create a test ConfigManager with very small models
-        import tempfile
-        import yaml
-        
-        test_config_data = {
-            "model": {
-                "name": "prajjwal1/bert-tiny",       # Only 4M parameters
-                "student_name": "prajjwal1/bert-mini", # Only 11M parameters  
-                "type": "transformer",
-                "tokenizer_name": "prajjwal1/bert-tiny"
-            },
-            "train": {"epochs": 1, "batch_size": 4, "lr": 5e-5},
+def test_trainer_fix():            config_path = "configs/default.yaml"
+
+    """Test 3: Verify trainer has teacher fine-tuning."""            
+
+    print("\n" + "="*70)        cm = ConfigManager(config_path=config_path)
+
+    print("TEST 3: Trainer Fix (Teacher Fine-tuning)")        print(f"✅ Configuration loaded from {config_path}")
+
+    print("="*70)        
+
+            device = cm.device()
+
+    try:        print(f"✅ Device detected: {device}")
+
+        from training.trainer import Trainer        
+
+                config = cm.resolved_config
+
+        # Check finetune_teacher method exists        print(f"✅ Model config: {config.get('model', {}).get('name')} → {config.get('model', {}).get('student_name')}")
+
+        assert hasattr(Trainer, 'finetune_teacher'), "Missing finetune_teacher method"        
+
+        print("✅ Trainer has finetune_teacher method")        return cm
+
+            except Exception as e:
+
+        # Check __init__ creates teacher_optimizer        print(f"❌ Configuration test failed: {e}")
+
+        init_source = inspect.getsource(Trainer.__init__)        return None
+
+        assert 'teacher_optimizer' in init_source, "Missing teacher_optimizer in __init__"
+
+        print("✅ Trainer creates teacher_optimizer")def test_model_loading(config_manager, device_str):
+
+            """Test model loading (lightweight models only)."""
+
+        # Check fit calls finetune_teacher    print("\n🤖 Testing model loading...")
+
+        fit_source = inspect.getsource(Trainer.fit)    
+
+        assert 'finetune_teacher' in fit_source, "fit() doesn't call finetune_teacher"    try:
+
+        print("✅ Trainer.fit() calls finetune_teacher")        # Create a test ConfigManager with very small models
+
+                import tempfile
+
+        # Check for PHASE comments        import yaml
+
+        if "PHASE 1" in fit_source and "PHASE 2" in fit_source:        
+
+            print("✅ Two-phase training (teacher + distillation)")        test_config_data = {
+
+                    "model": {
+
+        return True                "name": "prajjwal1/bert-tiny",       # Only 4M parameters
+
+    except Exception as e:                "student_name": "prajjwal1/bert-mini", # Only 11M parameters  
+
+        print(f"❌ Error: {e}")                "type": "transformer",
+
+        import traceback                "tokenizer_name": "prajjwal1/bert-tiny"
+
+        traceback.print_exc()            },
+
+        return False            "train": {"epochs": 1, "batch_size": 4, "lr": 5e-5},
+
             "data": {"train_path": "dummy", "val_path": "dummy"},
-            "distillation": {"method": "kd_hinton"}
-        }
-        
-        # Create temporary config file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            yaml.safe_dump(test_config_data, f)
-            temp_config_path = f.name
-        
-        try:
-            # Create ConfigManager with test config
-            from core.config.config_manager import ConfigManager
-            from core.models.model_loader import load_models, model_summary
-            
-            test_cm = ConfigManager(config_path=temp_config_path)
-            
-            print("Loading tiny models for testing...")
-            teacher, student, tokenizer = load_models(test_cm, device=device_str)
-            
-            print("✅ Teacher model loaded:")
-            teacher_summary = model_summary(teacher)
-            print(f"   - Name: {teacher_summary['name']}")
-            print(f"   - Parameters: {teacher_summary['parameters']:,}")
-            print(f"   - Device: {teacher_summary['device']}")
-            
-            print("✅ Student model loaded:")
-            student_summary = model_summary(student)
-            print(f"   - Name: {student_summary['name']}")
-            print(f"   - Parameters: {student_summary['parameters']:,}")
-            print(f"   - Device: {student_summary['device']}")
-            
-            print(f"✅ Tokenizer loaded: {type(tokenizer).__name__}")
-            
-            return teacher, student, tokenizer
-            
-        finally:
-            # Clean up temp file
-            import os
-            os.unlink(temp_config_path)
-        
-    except Exception as e:
-        print(f"❌ Model loading failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None, None
 
-def test_forward_pass(teacher, student, tokenizer, device_str):
-    """Test forward pass with sample data."""
-    print("\n🚀 Testing forward pass...")
-    
+            "distillation": {"method": "kd_hinton"}
+
+def test_config():        }
+
+    """Test 4: Verify config has teacher settings."""        
+
+    print("\n" + "="*70)        # Create temporary config file
+
+    print("TEST 4: Configuration")        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+
+    print("="*70)            yaml.safe_dump(test_config_data, f)
+
+                temp_config_path = f.name
+
+    try:        
+
+        import yaml        try:
+
+        with open('configs/retrain_teacher.yaml') as f:            # Create ConfigManager with test config
+
+            cfg = yaml.safe_load(f)            from core.config.config_manager import ConfigManager
+
+                    from core.models.model_loader import load_models, model_summary
+
+        teacher_epochs = cfg['train'].get('teacher_epochs')            
+
+        finetune_teacher = cfg['train'].get('finetune_teacher')            test_cm = ConfigManager(config_path=temp_config_path)
+
+                    
+
+        assert teacher_epochs is not None, "Missing teacher_epochs in config"            print("Loading tiny models for testing...")
+
+        assert finetune_teacher is not None, "Missing finetune_teacher in config"            teacher, student, tokenizer = load_models(test_cm, device=device_str)
+
+                    
+
+        print(f"✅ Teacher epochs: {teacher_epochs}")            print("✅ Teacher model loaded:")
+
+        print(f"✅ Finetune teacher: {finetune_teacher}")            teacher_summary = model_summary(teacher)
+
+        print(f"✅ Distillation epochs: {cfg['train']['epochs']}")            print(f"   - Name: {teacher_summary['name']}")
+
+        print(f"✅ Batch size: {cfg['train']['batch_size']}")            print(f"   - Parameters: {teacher_summary['parameters']:,}")
+
+                    print(f"   - Device: {teacher_summary['device']}")
+
+        return True            
+
+    except Exception as e:            print("✅ Student model loaded:")
+
+        print(f"❌ Error: {e}")            student_summary = model_summary(student)
+
+        return False            print(f"   - Name: {student_summary['name']}")
+
+            print(f"   - Parameters: {student_summary['parameters']:,}")
+
+            print(f"   - Device: {student_summary['device']}")
+
+def test_tools():            
+
+    """Test 5: Verify diagnostic tools exist."""            print(f"✅ Tokenizer loaded: {type(tokenizer).__name__}")
+
+    print("\n" + "="*70)            
+
+    print("TEST 5: Diagnostic Tools")            return teacher, student, tokenizer
+
+    print("="*70)            
+
+            finally:
+
+    tools = [            # Clean up temp file
+
+        'tools/diagnose_teacher.py',            import os
+
+        'tools/repair_teacher_labels.py',            os.unlink(temp_config_path)
+
+    ]        
+
+        except Exception as e:
+
+    all_exist = True        print(f"❌ Model loading failed: {e}")
+
+    for tool in tools:        import traceback
+
+        if Path(tool).exists():        traceback.print_exc()
+
+            print(f"✅ {tool}")        return None, None, None
+
+        else:
+
+            print(f"❌ {tool} not found")def test_forward_pass(teacher, student, tokenizer, device_str):
+
+            all_exist = False    """Test forward pass with sample data."""
+
+        print("\n🚀 Testing forward pass...")
+
+    return all_exist    
+
     try:
+
         device = torch.device(device_str)
-        
-        # Create sample input
-        sample_text = ["This is a great movie!", "This movie is terrible."]
-        inputs = tokenizer(
-            sample_text, 
-            return_tensors="pt", 
-            padding=True, 
-            truncation=True, 
-            max_length=64
-        )
-        
-        # Move inputs to device
-        input_ids = inputs["input_ids"].to(device)
-        attention_mask = inputs["attention_mask"].to(device)
-        
-        print(f"✅ Sample input shape: {input_ids.shape}")
-        
-        # Test teacher forward pass
-        with torch.no_grad():
-            teacher_output = teacher(input_ids=input_ids, attention_mask=attention_mask)
-            print(f"✅ Teacher forward pass: output shape {teacher_output.logits.shape}")
-        
-        # Test student forward pass
-        with torch.no_grad():
-            student_output = student(input_ids=input_ids, attention_mask=attention_mask)
-            print(f"✅ Student forward pass: output shape {student_output.logits.shape}")
+
+def main():        
+
+    print("\n" + "╔" + "="*68 + "╗")        # Create sample input
+
+    print("║" + " "*20 + "Mac M2 Quick Test" + " "*30 + "║")        sample_text = ["This is a great movie!", "This movie is terrible."]
+
+    print("║" + " "*15 + "Verify Trainer Fix Works" + " "*25 + "║")        inputs = tokenizer(
+
+    print("╚" + "="*68 + "╝")            sample_text, 
+
+                return_tensors="pt", 
+
+    results = []            padding=True, 
+
+                truncation=True, 
+
+    # Run tests            max_length=64
+
+    results.append(("Environment", test_environment()[0]))        )
+
+    results.append(("Model Loader", test_model_loader()))        
+
+    results.append(("Trainer Fix", test_trainer_fix()))        # Move inputs to device
+
+    results.append(("Configuration", test_config()))        input_ids = inputs["input_ids"].to(device)
+
+    results.append(("Tools", test_tools()))        attention_mask = inputs["attention_mask"].to(device)
+
             
-        # Test basic distillation loss computation
-        teacher_logits = teacher_output.logits
-        student_logits = student_output.logits
-        
-        temperature = 2.0
-        alpha = 0.5
-        
-        # Soft targets from teacher
-        soft_teacher = torch.softmax(teacher_logits / temperature, dim=1)
-        soft_student = torch.log_softmax(student_logits / temperature, dim=1)
-        
+
+    # Summary        print(f"✅ Sample input shape: {input_ids.shape}")
+
+    print("\n" + "="*70)        
+
+    print("TEST SUMMARY")        # Test teacher forward pass
+
+    print("="*70)        with torch.no_grad():
+
+                teacher_output = teacher(input_ids=input_ids, attention_mask=attention_mask)
+
+    passed = sum(1 for _, result in results if result)            print(f"✅ Teacher forward pass: output shape {teacher_output.logits.shape}")
+
+    total = len(results)        
+
+            # Test student forward pass
+
+    for name, result in results:        with torch.no_grad():
+
+        status = "✅ PASS" if result else "❌ FAIL"            student_output = student(input_ids=input_ids, attention_mask=attention_mask)
+
+        print(f"{status}: {name}")            print(f"✅ Student forward pass: output shape {student_output.logits.shape}")
+
+                
+
+    print(f"\nResults: {passed}/{total} tests passed")        # Test basic distillation loss computation
+
+            teacher_logits = teacher_output.logits
+
+    if passed == total:        student_logits = student_output.logits
+
+        print("\n🎉 All tests passed! Ready to train.")        
+
+        print("\nNext steps:")        temperature = 2.0
+
+        print("  1. Run training: ./run_training.sh")        alpha = 0.5
+
+        print("  2. Or full test: ./test_pipeline.sh")        
+
+        return 0        # Soft targets from teacher
+
+    else:        soft_teacher = torch.softmax(teacher_logits / temperature, dim=1)
+
+        print("\n⚠️  Some tests failed. Check the output above.")        soft_student = torch.log_softmax(student_logits / temperature, dim=1)
+
+        return 1        
+
         # KL divergence loss
+
         kd_loss = torch.nn.functional.kl_div(soft_student, soft_teacher, reduction='batchmean')
-        print(f"✅ KD loss computed: {kd_loss.item():.4f}")
-        
+
+if __name__ == "__main__":        print(f"✅ KD loss computed: {kd_loss.item():.4f}")
+
+    sys.exit(main())        
+
         return True
         
     except Exception as e:

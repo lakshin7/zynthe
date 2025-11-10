@@ -1,0 +1,67 @@
+experiment:
+  name: "backend_validation_test"
+  output_dir: "experiments"
+  seed: 42
+  log_level: "INFO"
+
+# Teacher and Student Models
+teacher:
+  model_name: "distilbert-base-uncased"
+  
+student:
+  model_name: "prajjwal1/bert-tiny"
+
+# Data Configuration - Using SST-2 dataset
+data:
+  train_path: "data/sst2_test/train.jsonl"
+  val_path: "data/sst2_test/validation.jsonl"
+  test_path: "data/sst2_test/test.jsonl"
+  max_length: 128
+  batch_size: 16
+  num_workers: 2
+  text_key: "text"
+  label_key: "label"
+
+# Training Configuration
+training:
+  num_epochs: 3  # Short for quick testing
+  learning_rate: 2e-5
+  warmup_steps: 100
+  eval_steps: 50
+  save_steps: 100
+  logging_steps: 10
+  gradient_accumulation_steps: 1
+  fp16: false
+  max_grad_norm: 1.0
+
+# Knowledge Distillation
+distillation:
+  temperature: 2.0
+  alpha: 0.5  # Balance between distillation and ground truth
+  method: "hinton"  # Options: hinton, attention, feature, multi_stage
+
+# Optimizer
+optimizer:
+  type: "adamw"
+  betas: [0.9, 0.999]
+  eps: 1e-8
+  weight_decay: 0.01
+
+# Scheduler
+scheduler:
+  type: "linear"
+  num_warmup_steps: 100
+
+# Model Configuration
+model:
+  num_labels: 2
+  dropout: 0.1
+  hidden_dropout_prob: 0.1
+  attention_probs_dropout_prob: 0.1
+
+# Evaluation
+evaluation:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  save_best_model: true
+  metric_for_best_model: "accuracy"
+  greater_is_better: true

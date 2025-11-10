@@ -1,0 +1,31 @@
+{
+  "recommendations": [
+    {
+      "model_name": "bert-base-uncased",
+      "confidence": 0.95,
+      "reasoning": "BERT-base: Industry standard, excellent accuracy, well-documented",
+      "size": "110M params",
+      "download_size": "440MB",
+      "task_fit": 0.95,
+      "requires_finetuning": false
+    },
+    {
+      "model_name": "roberta-base",
+      "confidence": 0.9,
+      "reasoning": "RoBERTa: Improved BERT training, better on sentiment tasks",
+      "size": "125M params",
+      "download_size": "500MB",
+      "task_fit": 0.9,
+      "requires_finetuning": false
+    },
+    {
+      "model_name": "distilbert-base-uncased",
+      "confidence": 0.75,
+      "reasoning": "DistilBERT: Faster, smaller, good for tight resources",
+      "size": "66M params",
+      "download_size": "268MB",
+      "task_fit": 0.75,
+      "requires_finetuning": false
+    }
+  ]
+}

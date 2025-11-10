@@ -1,0 +1,157 @@
+# ============================================================================
+# Advanced Attention Transfer Configuration
+# ============================================================================
+# 
+# This configuration demonstrates all available attention transfer methods
+# in Zynthe-AT, including classical and advanced techniques.
+#
+# Reference: Zagoruyko & Komodakis (2017), Abnar & Zuidema (2020)
+# ============================================================================
+
+train:
+  epochs: 4
+  batch_size: 8
+  lr: 2e-5
+  grad_accum_steps: 1
+  mixed_precision: false
+  early_stop_patience: 2
+  save_best_only: true
+  log_interval: 10
+
+model:
+  name: "bert-base-uncased"
+  student_name: "distilbert-base-uncased"
+  type: "transformer"
+  tokenizer_name: "bert-base-uncased"
+  max_length: 128
+  num_labels: 2
+
+# ============================================================================
+# DISTILLATION METHOD: Attention Transfer
+# ============================================================================
+distillation:
+  method: "attention_transfer"  # Use attention transfer instead of KD Hinton
+  temperature: 2.0              # Temperature for probabilistic attention
+  alpha: 0.5                    # Weight for attention loss
+
+# ============================================================================
+# ATTENTION TRANSFER CONFIGURATION
+# ============================================================================
+attention_transfer:
+  enabled: true
+  
+  # ----------------------------------------------------------------------------
+  # Classical Methods
+  # ----------------------------------------------------------------------------
+  # Available types: ["spatial", "self", "affinity", "probabilistic", "scat", "relational"]
+  # Or use "hybrid" to combine multiple methods
+  type: ["spatial", "relational", "probabilistic"]
+  
+  # ----------------------------------------------------------------------------
+  # Advanced Methods (NEW)
+  # ----------------------------------------------------------------------------
+  # 1. Attention Rollout: Aggregate multi-head attention across layers
+  #    Best for: Transformer-based teacher-student pairs
+  use_attention_rollout: true
+  
+  # 2. Cross-layer Attention Flow: Propagate teacher's attention backward
+  #    Best for: Deep models with many layers
+  #    Note: Requires custom backprop hooks, computationally intensive
+  use_cross_layer_flow: false
+  
+  # 3. Dual Attention Matching: Combine feature-space + token-space attention
+  #    Best for: Multimodal KD (e.g., CLIP, BLIP)
+  use_dual_matching: true
+  
+  # 4. Temporal Attention Transfer: For video models
+  #    Best for: Video transformers with temporal dimension
+  use_temporal_attention: false
+  
+  # ----------------------------------------------------------------------------
+  # Layer Configuration
+  # ----------------------------------------------------------------------------
+  # Specify which layers to extract attention from
+  # For BERT: ["encoder.layer.6", "encoder.layer.11"]
+  # For ResNet: ["layer3", "layer4"]
+  # Leave empty to use default (output attentions only)
+  teacher_layers: []
+  student_layers: []
+  
+  # Map teacher layers to student layers (for depth mismatch)
+  # Example: {"encoder.layer.11": "encoder.layer.5"}
+  layer_mapping: {}
+  
+  # ----------------------------------------------------------------------------
+  # Normalization & Loss Configuration
+  # ----------------------------------------------------------------------------
+  normalization: "softmax"  # Options: "l2", "softmax", "sigmoid", "none"
+  
+  # Loss composition: combine multiple loss formulations
+  # Available: ["l2", "kl", "contrastive", "relational"]
+  loss_types: ["l2", "kl"]
+  
+  # Weights for each loss type (must match length of loss_types)
+  loss_weights: [0.6, 0.4]
+  
+  # Overall weight for attention transfer loss
+  weight: 0.25
+
+# ============================================================================
+# DATA CONFIGURATION
+# ============================================================================
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+
+# ============================================================================
+# DEVICE & OPTIMIZATION
+# ============================================================================
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+output_root: "experiments"
+seed: 42
+
+# ============================================================================
+# OPTIONAL FEATURES
+# ============================================================================
+quantization:
+  enable: true
+  mode: ptq
+
+similarity_transfer: false  # Disable to focus purely on attention transfer
+
+# Enable automatic evaluation and comparison
+evaluate: true
+compare_models: true
+
+# ============================================================================
+# EXPLAINABILITY (optional)
+# ============================================================================
+explainability:
+  enable_shap: false
+  enable_lime: false
+  
+  # Attention-specific visualization
+  visualize_attention: true
+  attention_visualization_path: "attention_maps"
+
+# ============================================================================
+# EVALUATION METRICS (computed automatically)
+# ============================================================================
+# The following metrics will be computed and saved:
+#
+# 1. Attention Alignment Score
+#    - Cosine similarity between teacher and student attentions
+#    - L2 distance
+#    - KL divergence
+#    - Pearson correlation
+#
+# 2. Interpretability Score (optional Grad-CAM correlation)
+#    - Measures alignment with gradient-based importance
+#
+# 3. Attention Flow Visualization
+#    - Side-by-side heatmaps of teacher vs student attention
+#    - Saved to experiments/<exp_id>/attention_maps/
+# ============================================================================

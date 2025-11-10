@@ -94,6 +94,7 @@ class DataInspector:
             report['is_valid'] = False
             report['errors'].append("No dataset or config provided")
         
+        self.inspection_results = report
         return report
     
     def _analyze_dataset(self) -> Dict[str, Any]:
@@ -335,17 +336,26 @@ class DataInspector:
         if self.dataset is None:
             return {}
         
+        dataset_len = len(self.dataset) if hasattr(self.dataset, '__len__') else 0  # type: ignore[arg-type]
+
         stats = {
-            'num_samples': len(self.dataset) if hasattr(self.dataset, '__len__') else 0,  # type: ignore[arg-type]
+            'num_samples': dataset_len,
             'class_distribution': None,
             'input_statistics': {}
         }
         
         try:
-            # Sample subset for statistics
-            dataset_len = len(self.dataset) if hasattr(self.dataset, '__len__') else 0  # type: ignore[arg-type]
+            if dataset_len == 0:
+                return stats
+
             sample_size = min(1000, dataset_len)
-            indices = np.random.choice(dataset_len, sample_size, replace=False)
+            if sample_size == 0:
+                return stats
+
+            replace = sample_size > dataset_len
+            indices = np.random.choice(dataset_len, sample_size, replace=replace)
+            if not isinstance(indices, np.ndarray):
+                indices = np.array([indices])
             
             # Collect labels if available
             labels = []
@@ -453,9 +463,16 @@ class DataInspector:
         """
         warnings_list = []
         
-        stats = self.inspection_results.get('statistics', self._compute_statistics())
-        
-        if 'class_distribution' in stats and stats['class_distribution']:
+        stats: Dict[str, Any] = (
+            self.inspection_results.get('statistics')  # type: ignore[assignment]
+            if self.inspection_results else self._compute_statistics()
+        )
+
+        if not stats:
+            return warnings_list
+
+        class_dist = stats.get('class_distribution') if isinstance(stats, dict) else None
+        if class_dist:
             imbalance_ratio = stats.get('imbalance_ratio', 1.0)
             
             if imbalance_ratio > 10:
@@ -470,7 +487,6 @@ class DataInspector:
                 )
             
             # Check for very small classes
-            class_dist = stats['class_distribution']
             total_samples = sum(class_dist.values())
             
             for cls, count in class_dist.items():

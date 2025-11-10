@@ -1,0 +1,183 @@
+# ============================================================================
+# KD-Hinton Configuration - Classical + Hint-Based Learning
+# ============================================================================
+
+experiment_name: "kd_hinton_with_hints"
+description: "Advanced Hinton KD with multi-hint intermediate layer guidance"
+
+# ============================================================================
+# Models
+# ============================================================================
+models:
+  teacher:
+    name: "bert-base-uncased"
+    checkpoint: null
+  
+  student:
+    name: "distilbert-base-uncased"
+    checkpoint: null
+
+# ============================================================================
+# KD-Hinton Configuration
+# ============================================================================
+kd_hinton:
+  # ============================================================================
+  # Classical Hinton KD Settings
+  # ============================================================================
+  temperature: 4.0
+  alpha: 0.7  # Weight for KD loss (1-alpha for CE loss)
+  
+  # Label smoothing (helps prevent overconfidence)
+  label_smoothing: 0.1
+  
+  # Class weights for imbalanced datasets
+  class_weights: null  # [0.9766, 1.0246] for binary imbalanced
+  
+  # ============================================================================
+  # Hint-Based Intermediate Layer Guidance (FitNets-style)
+  # ============================================================================
+  hint_enabled: true
+  
+  # Multi-hint configuration (progressive hierarchical guidance)
+  hints:
+    # Early layer hint (low-level features)
+    - teacher: "bert.encoder.layer.2"
+      student: "distilbert.transformer.layer.0"
+      weight: 0.3
+      regressor: "1x1conv"
+      loss: "mse"
+      description: "Low-level feature alignment"
+    
+    # Middle layer hint (semantic features)
+    - teacher: "bert.encoder.layer.6"
+      student: "distilbert.transformer.layer.2"
+      weight: 0.5
+      regressor: "1x1conv"
+      loss: "cosine"
+      description: "Mid-level semantic alignment"
+    
+    # Late layer hint (high-level representations)
+    - teacher: "bert.encoder.layer.10"
+      student: "distilbert.transformer.layer.4"
+      weight: 0.4
+      regressor: "1x1conv"
+      loss: "mse"
+      description: "High-level representation alignment"
+  
+  # ============================================================================
+  # Hint Weight Scheduler (Curriculum Learning)
+  # ============================================================================
+  hint_scheduler:
+    type: "cosine_decay"  # Options: constant, linear_decay, exponential_decay, cosine_decay
+    initial_weight: 1.0   # Strong guidance early
+    final_weight: 0.1     # Gentle guidance late
+    total_steps: 10000
+    description: "Progressive hint decay - student matures over time"
+  
+  # ============================================================================
+  # Temperature Scheduler (Dynamic Softening)
+  # ============================================================================
+  temperature_scheduler:
+    enabled: true
+    type: "cosine"  # Options: constant, linear, cosine
+    initial_temp: 4.0  # Softer distributions early
+    final_temp: 2.0    # Sharper distributions late
+    total_steps: 10000
+    description: "Gradually sharpen knowledge transfer"
+
+# ============================================================================
+# Advanced Hint Variants (Optional Enhancements)
+# ============================================================================
+advanced_hints:
+  # Contrastive hint learning
+  contrastive_hints: false
+  contrastive_temperature: 0.07
+  
+  # Attention-based hint regressors (more expressive)
+  use_attention_regressor: false
+  
+  # Multi-scale hints (combine multiple resolutions)
+  multi_scale: false
+
+# ============================================================================
+# Training Configuration
+# ============================================================================
+training:
+  batch_size: 16
+  num_epochs: 10
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  grad_clip: 1.0
+  
+  optimizer:
+    type: "adamw"
+    lr: 2e-5
+    weight_decay: 0.01
+  
+  scheduler:
+    type: "cosine"
+    warmup_steps: 500
+
+# ============================================================================
+# Loss Composition
+# ============================================================================
+loss:
+  # L = α*L_KD + (1-α)*L_CE + β*L_hint
+  kd_weight: 0.7        # α: Knowledge distillation
+  ce_weight: 0.3        # 1-α: Cross-entropy
+  hint_base_weight: 0.5 # β: Hint guidance (modulated by scheduler)
+
+# ============================================================================
+# Evaluation Metrics
+# ============================================================================
+evaluation:
+  metrics:
+    - "accuracy"
+    - "f1"
+    - "hint_feature_alignment"  # HFA: Cosine similarity
+    - "hint_gradient_influence"  # HGI: Gradient contribution
+  
+  # Compute hint alignment every N steps
+  hint_eval_steps: 100
+  
+  # Visualize hint features
+  visualize_hints: true
+  visualization_interval: 500
+
+# ============================================================================
+# Device & Performance
+# ============================================================================
+device: "auto"  # auto, cuda, mps, cpu
+mixed_precision: false
+gradient_checkpointing: false
+
+# ============================================================================
+# Logging & Checkpointing
+# ============================================================================
+logging:
+  log_interval: 10
+  save_steps: 500
+  eval_steps: 100
+  
+  # Track scheduler values
+  track_temperature: true
+  track_hint_weight: true
+
+output_dir: "./experiments"
+
+# ============================================================================
+# Cross-Architecture Support Examples
+# ============================================================================
+
+# Example 1: CNN → Transformer
+# hints:
+#   - teacher: "resnet.layer3"
+#     student: "vit.encoder.layer.6"
+#     regressor: "attention"  # More flexible for cross-arch
+
+# Example 2: Vision-Language (CLIP-style)
+# hints:
+#   - teacher: "vision_encoder.layer.10"
+#     student: "text_encoder.layer.6"
+#     regressor: "mlp"  # Cross-modal projection
+#     loss: "contrastive"

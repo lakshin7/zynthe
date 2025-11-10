@@ -8,6 +8,7 @@ import signal
 import sys
 import json
 import re
+import os
 from pathlib import Path
 from typing import Optional, Dict, Callable
 from datetime import datetime
@@ -36,12 +37,51 @@ class TrainingProcess:
         if self.is_running:
             return
         
-        # Get Python executable from current environment
-        python_exe = sys.executable
-        
         # Get project root (go up from ui/backend to project root)
         project_root = Path(__file__).parent.parent.parent
+        
+        # Find Python executable with dependencies
+        # Priority: 1. ZYNTHE_PYTHON env var 2. .venv 3. conda env 4. system Python
+        python_exe = None
+        
+        # Check for environment variable (useful for packaged apps)
+        if os.getenv("ZYNTHE_PYTHON"):
+            python_exe = os.getenv("ZYNTHE_PYTHON")
+        # Check for .venv in project root
+        elif (venv_python := project_root / ".venv" / "bin" / "python").exists():
+            python_exe = str(venv_python)
+        # Check if we're in a conda environment
+        elif (conda_prefix := Path(sys.prefix)) and (conda_prefix / "conda-meta").exists():
+            python_exe = sys.executable
+        else:
+            # Fallback to system Python with warning
+            python_exe = sys.executable
+            print(f"⚠️  WARNING: Using system Python ({python_exe}). Set ZYNTHE_PYTHON env var for packaged apps.")
+        
         main_script = project_root / "app" / "main.py"
+        
+        # Verify Python has required packages
+        verify_cmd = [python_exe, "-c", "import torch; import transformers; print('OK')"]
+        try:
+            result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode != 0 or "OK" not in result.stdout:
+                error_msg = f"Python environment missing dependencies: {result.stderr}"
+                await self.websocket_broadcast({
+                    "type": "training_error",
+                    "experiment_id": self.exp_id,
+                    "error": error_msg
+                })
+                raise RuntimeError(error_msg)
+        except subprocess.TimeoutExpired:
+            print("Warning: Dependency check timed out, proceeding anyway...")
+        except Exception as e:
+            error_msg = f"Failed to verify Python environment: {str(e)}"
+            await self.websocket_broadcast({
+                "type": "training_error",
+                "experiment_id": self.exp_id,
+                "error": error_msg
+            })
+            raise RuntimeError(error_msg)
         
         # Build command
         cmd = [
@@ -141,8 +181,40 @@ class TrainingProcess:
             return 'info'
     
     async def _parse_metrics(self, line: str):
-        """Parse training metrics from log line"""
+        """Parse training metrics and progress from log line"""
         try:
+            # Parse [PROGRESS] messages
+            progress_match = re.match(r'\[PROGRESS\]\s+stage=(\w+)\s+progress=([\d.]+)\s+message=(.+)', line)
+            if progress_match:
+                stage = progress_match.group(1)
+                progress = float(progress_match.group(2))
+                message = progress_match.group(3)
+                
+                # Map stages to user-friendly names
+                stage_names = {
+                    'initializing': 'Initializing',
+                    'downloading_teacher': 'Downloading Teacher Model',
+                    'downloading_student': 'Downloading Student Model',
+                    'loading_data': 'Loading Data',
+                    'training': 'Training',
+                    'evaluating': 'Evaluating',
+                    'complete': 'Complete',
+                    'failed': 'Failed'
+                }
+                
+                self.current_stage = stage_names.get(stage, stage.title())
+                
+                # Broadcast progress update
+                await self.websocket_broadcast({
+                    "type": "training_progress",
+                    "experiment_id": self.exp_id,
+                    "stage": self.current_stage,
+                    "progress": progress * 100,  # Convert to percentage
+                    "message": message
+                })
+                
+                return  # Don't continue parsing if we found a PROGRESS message
+            
             # Parse epoch: "Epoch 1/10" or "Epoch: 1"
             epoch_match = re.search(r'[Ee]poch[:\s]+(\d+)(?:/(\d+))?', line)
             if epoch_match:
@@ -162,10 +234,10 @@ class TrainingProcess:
                 # Convert to 0-1 range if it's a percentage
                 self.current_accuracy = acc_value / 100.0 if acc_value > 1 else acc_value
             
-            # Parse stage
+            # Parse stage (legacy, for backward compatibility)
             if 'preflight' in line.lower():
                 self.current_stage = 'Preflight'
-            elif 'distillation' in line.lower() or 'training' in line.lower():
+            elif 'distillation' in line.lower():
                 self.current_stage = 'Distillation'
             elif 'quantization' in line.lower() or 'quantizing' in line.lower():
                 self.current_stage = 'Quantization'

@@ -1,0 +1,48 @@
+{
+  "validation_passed": true,
+  "errors": [],
+  "warnings": [],
+  "leakage": {
+    "train_size": 500,
+    "val_size": 500,
+    "train_unique": 500,
+    "val_unique": 500,
+    "exact_overlap_count": 0,
+    "exact_overlap_pct": 0.0,
+    "has_exact_leakage": false,
+    "exact_overlap_samples": [],
+    "prefix_overlap_count": 0,
+    "prefix_overlap_pct": 0.0,
+    "has_near_duplicates": false
+  },
+  "train_balance": {
+    "total_samples": 500,
+    "num_classes": 2,
+    "class_distribution": {
+      "0": 241,
+      "1": 259
+    },
+    "class_percentages": {
+      "0": 48.199999999999996,
+      "1": 51.800000000000004
+    },
+    "imbalance_ratio": 1.0746887966804979,
+    "is_balanced": true,
+    "is_severely_imbalanced": false
+  },
+  "val_balance": {
+    "total_samples": 500,
+    "num_classes": 2,
+    "class_distribution": {
+      "1": 265,
+      "0": 235
+    },
+    "class_percentages": {
+      "1": 53.0,
+      "0": 47.0
+    },
+    "imbalance_ratio": 1.127659574468085,
+    "is_balanced": true,
+    "is_severely_imbalanced": false
+  }
+}

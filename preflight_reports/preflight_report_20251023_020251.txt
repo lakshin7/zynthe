@@ -1,0 +1,225 @@
+
+======================================================================
+PREFLIGHT ANALYSIS SUMMARY
+======================================================================
+
+❌ CANNOT PROCEED
+Critical issues must be resolved first.
+
+🚫 BLOCKERS:
+  • Output shape mismatch: teacher=[768], student=[384]. Cannot perform logit distillation.
+
+💡 RECOMMENDATIONS:
+  • Use feature distillation only, or add projection layer
+
+⚙️  OPTIMIZED CONFIGURATION:
+  Device: mps
+  Precision: bf16
+  Batch Size: 32
+  Workers: 4
+  Use AMP: True
+
+  Recommended Strategy: logit
+
+📊 ANALYSIS SUMMARY:
+  Teacher: nlp (109.5M params)
+  Student: nlp (22.7M params)
+  Compression: 4.8x
+  Dataset: 2000 samples
+  Task: classification
+  Device: mps
+
+======================================================================
+
+======================================================================
+DETAILED MODEL ANALYSIS
+======================================================================
+======================================================================
+MODEL INSPECTION REPORT
+======================================================================
+
+TEACHER MODEL
+----------------------------------------------------------------------
+Name: BertModel
+Type: nlp
+Architecture: transformer
+Total Parameters: 109,482,240
+Trainable Parameters: 109,482,240
+Depth: 12 layers
+Width: 768 dimensions
+Attention Layers: 24
+Has Embeddings: True
+
+STUDENT MODEL
+----------------------------------------------------------------------
+Name: BertModel
+Type: nlp
+Architecture: transformer
+Total Parameters: 22,713,216
+Trainable Parameters: 22,713,216
+Depth: 6 layers
+Width: 384 dimensions
+Attention Layers: 12
+Has Embeddings: True
+
+COMPATIBILITY ANALYSIS
+----------------------------------------------------------------------
+Status: ✗ Incompatible
+Compression Ratio: 4.82x
+
+Errors:
+  ✗ Output shape mismatch: teacher=[768], student=[384]. Cannot perform logit distillation.
+
+Recommendations:
+  → Use feature distillation only, or add projection layer
+
+RECOMMENDED DISTILLATION STRATEGY
+----------------------------------------------------------------------
+Primary Method: logit
+Additional Methods: feature, attention
+Hint Learning: No
+Adaptive Features: No
+Temperature: 4.0
+Alpha (KD weight): 0.7
+
+LAYER MAPPING
+----------------------------------------------------------------------
+Teacher Depth: 11
+Student Depth: 11
+Total Mappings: 11
+
+Suggested Mappings (first 5):
+  embeddings.LayerNorm ← embeddings.LayerNorm (high confidence)
+  encoder.layer.0 ← encoder.layer.0 (high confidence)
+  encoder.layer.0.attention ← encoder.layer.0.attention (high confidence)
+  encoder.layer.1 ← encoder.layer.1 (high confidence)
+  encoder.layer.1.attention ← encoder.layer.1.attention (high confidence)
+
+======================================================================
+
+======================================================================
+DETAILED DATA ANALYSIS
+======================================================================
+======================================================================
+DATA INSPECTION REPORT
+======================================================================
+
+Validation Status: ✓ Valid
+
+DATASET INFORMATION
+----------------------------------------------------------------------
+Type: TextClassificationDataset
+Size: 2000
+
+Sample Structure:
+  input_ids:
+    Type: Tensor
+    Shape: [128]
+    Dtype: torch.int64
+  attention_mask:
+    Type: Tensor
+    Shape: [128]
+    Dtype: torch.float32
+  labels:
+    Type: Tensor
+    Dtype: torch.int64
+
+Data Type: text
+Task Type: classification
+
+STATISTICS
+----------------------------------------------------------------------
+Number of Samples: 2000
+Number of Classes: 2
+Imbalance Ratio: 1.02:1
+
+Class Distribution:
+  Class 0: 505 (25.2%)
+  Class 1: 495 (24.8%)
+
+BATCH SIZE RECOMMENDATIONS
+----------------------------------------------------------------------
+Optimal: 32
+Range: 8-64
+
+Reasoning:
+  • Large dataset: can use larger batches
+
+PREPROCESSING RECOMMENDATIONS
+----------------------------------------------------------------------
+Required:
+  ✓ Tokenization (using teacher tokenizer)
+  ✓ Padding to max length or dynamic padding
+
+Recommended:
+  → Lowercase normalization
+  → Class weight computation for imbalance
+
+Optional:
+  ○ Special token handling
+
+======================================================================
+
+======================================================================
+DETAILED RESOURCE PROFILE
+======================================================================
+======================================================================
+RESOURCE PROBE REPORT
+======================================================================
+
+SYSTEM INFORMATION
+----------------------------------------------------------------------
+Platform: Darwin 25.0.0
+Architecture: arm64
+Processor: arm
+Python: 3.13.5
+PyTorch: 2.8.0
+
+COMPUTE DEVICES
+----------------------------------------------------------------------
+Primary Device: mps
+Available: mps, cpu
+
+MPS (Metal Performance Shaders): Available
+  Built: True
+
+CPU Cores: 8 physical, 8 logical
+
+MEMORY
+----------------------------------------------------------------------
+System RAM:
+  Total: 16.00 GB
+  Available: 5.58 GB
+  Used: 7.13 GB (65.1%)
+
+PRECISION SUPPORT
+----------------------------------------------------------------------
+  ✓ FP32
+  ✓ FP16
+  ✓ BF16
+  ✓ INT8
+  ✗ TF32
+
+COMPUTE CAPABILITIES
+----------------------------------------------------------------------
+  ✗ Cudnn Available
+  ✗ Nccl Available
+  ✗ Distributed Available
+  ✓ Amp Available
+
+RECOMMENDATIONS
+----------------------------------------------------------------------
+Device: mps
+Precision: bf16
+Use AMP: True
+Batch Size Multiplier: 1.0x
+DataLoader Workers: 4
+Pin Memory: True
+Distributed Training: False
+
+Reasoning:
+  • MPS available: using Apple Silicon acceleration
+  • BF16 supported: recommend mixed precision for speed
+  • Using 4 workers with pinned memory for fast data loading
+
+======================================================================

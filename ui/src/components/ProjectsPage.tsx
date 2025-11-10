@@ -32,15 +32,17 @@ interface Project {
   stages: Stage[];
 }
 
+const LATEST_EXPERIMENT_ID = '20251109T192423Z_9b43b1f4';
+
 // Mock project data (fallback)
 const mockProjects: Project[] = [
   {
-    id: '1',
-    title: 'LLaMA 3.1 Quantization',
-    modelCount: 3,
-    lastUpdated: '2 min ago',
-    cpuUsage: 45,
-    gpuUsage: 87,
+    id: LATEST_EXPERIMENT_ID,
+    title: 'DistilBERT KD (3 epochs)',
+    modelCount: 2,
+    lastUpdated: 'moments ago',
+    cpuUsage: 28,
+    gpuUsage: 72,
     autoProgress: true,
     stages: [
       {
@@ -57,23 +59,23 @@ const mockProjects: Project[] = [
         icon: stageIcons.distillation,
         status: 'completed' as const,
         color: stageColors.distillation,
-        tooltipText: 'Distillation loss: 0.87 (converged)',
+        tooltipText: 'Distillation complete — val loss 0.1832',
       },
       {
         id: 'quantization-1',
         label: 'Quantization',
         icon: stageIcons.quantization,
-        status: 'running' as const,
+        status: 'completed' as const,
         color: stageColors.quantization,
-        tooltipText: 'Quantization: INT8 conversion 67% complete',
+        tooltipText: 'PTQ applied (float16 fallback on MPS)',
       },
       {
         id: 'evaluation-1',
         label: 'Evaluation',
         icon: stageIcons.evaluation,
-        status: 'upcoming' as const,
+        status: 'completed' as const,
         color: stageColors.evaluation,
-        tooltipText: 'Evaluation: pending',
+        tooltipText: 'Evaluation accuracy: 83.2%',
       },
       {
         id: 'deployment-1',

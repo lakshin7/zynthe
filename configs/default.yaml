@@ -1,5 +1,5 @@
 train:
-  epochs: 3                   # low for fast testing
+  epochs: 5                   # extended epochs for deeper evaluation
   batch_size: 8               # fits Mac M2 memory
   lr: 2e-5                   # reduced learning rate for better convergence
   grad_accum_steps: 1
@@ -15,10 +15,12 @@ train:
   
   # Learning rate scheduler (NEW - Advanced Scheduler System)
   scheduler: cosine           # cosine, linear, step, plateau, onecycle, cyclic, etc.
-  warmup_steps: 50            # Number of warmup steps (gradual LR increase)
+  warmup_steps: 20            # Reduced from 50 - more appropriate for 3 epochs (~189 total steps)
   warmup_type: linear         # linear, cosine, or constant warmup
   # For step scheduler: step_size: 10, gamma: 0.1
   # For plateau scheduler: patience: 5, factor: 0.5
+  # Note: With 3 epochs and batch_size 8, total steps ≈ 189
+  #       warmup_steps=20 gives ~10% warmup, leaving 169 steps for cosine annealing
   
   # Teacher training options (optional)
   train_teacher: false         # Set to true to fine-tune teacher before distillation
@@ -41,8 +43,21 @@ distillation:
   alpha: 0.4                  # slightly more weight on ground truth labels
 
 data:
-  train_path: "data/imdb_train.jsonl"   # after splitting the downloaded CSV
-  val_path: "data/imdb_val.jsonl"       # validation split
+  train_path: "data/sst2_test/train.jsonl"       # SST-2 from HuggingFace
+  val_path: "data/sst2_test/validation.jsonl"    # validation split
+  dataset_id: "glue/sst2"                        # Added for adaptive preprocessing registry
+  label_names:
+    - negative
+    - positive
+
+preprocessing:
+  text_field: text            # default logical text field name after adapter
+  label_field: label          # logical label field name
+  merge_fields: []            # list of raw fields to concatenate if needed
+  task_prefix: null           # e.g., "classify: " for T5 models
+  lowercase: true             # apply lowercasing (adapter level) FUTURE USE
+  strip: true                 # strip whitespace
+  cache_tokenized: false      # future: enable disk caching of tokenized dataset
 
 device:
   prefer_mps: true
@@ -56,3 +71,11 @@ quantization:
   mode: ptq       # Post-Training Quantization; can switch to QAT later
 
 similarity_transfer: true
+
+explainability:
+  enable_lime: true
+  enable_shap: true
+  num_samples: 4
+  lime_num_features: 8
+  shap_top_k: 10
+  shap_background_size: 8

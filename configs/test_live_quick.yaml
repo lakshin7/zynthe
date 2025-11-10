@@ -1,0 +1,54 @@
+# Minimal quick live training config for end-to-end streaming validation
+train:
+  epochs: 1
+  batch_size: 8
+  lr: 0.00003
+  gradient_accumulation_steps: 1
+  use_amp: false
+  early_stop_patience: 2
+  log_detail: true
+  batch_log_interval: 2
+  csv_logging: true
+  enable_comparison_plot: true
+  show_eta: true
+  train_teacher: true
+  teacher_epochs: 1
+  teacher_lr: 0.00002
+
+model:
+  name: "distilbert-base-uncased"
+  student_name: "distilbert-base-uncased"  # Using same for speed; still exercises pipeline
+  type: "transformer"
+  tokenizer_name: "distilbert-base-uncased"
+  max_length: 128
+
+distillation:
+  type: "kd"
+  method: "kd_hinton"
+  temperature: 2.0
+  alpha: 0.5
+  config:
+    temperature: 2.0
+    alpha: 0.5
+
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+  preprocessing:
+    max_examples: 120  # keep very small for quick run
+
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+output_root: "experiments"
+seed: 42
+quantization:
+  enable: false
+visualization:
+  enable: true
+  save_plots: true
+  plot_confusion_matrix: true
+live:
+  enabled: true
+  stream_url: "http://127.0.0.1:8000/api/stream"

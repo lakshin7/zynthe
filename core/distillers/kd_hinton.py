@@ -30,11 +30,13 @@ Reference:
 """
 
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import warnings
+import math
 from collections import OrderedDict
 
 from .base_distiller import BaseDistiller
@@ -382,16 +384,38 @@ class KDHintonDistiller(BaseDistiller):
             config = {}
         
         kd_config = config.get('kd_hinton', {})
-        self.hint_enabled = kd_config.get('hint_enabled', False)
         self.hint_configs = kd_config.get('hints', [])
+        self.hint_enabled = kd_config.get('hint_enabled', bool(self.hint_configs))
+
+        auto_hint_cfg = kd_config.get('auto_hints') or config.get('auto_hints')
+        if not self.hint_configs and auto_hint_cfg:
+            self.hint_configs = self._generate_auto_hints(auto_hint_cfg, teacher, student)
+            kd_config['hints'] = self.hint_configs
+            self.hint_enabled = bool(self.hint_configs)
+
+        if 'hint_enabled' in config:
+            self.hint_enabled = bool(config['hint_enabled'])
         
-        # Call parent
+    # Call parent
         super().__init__(teacher, student, config, device, **kwargs)
         
         # Classical KD parameters
         self.temperature = kd_config.get('temperature', 4.0)
         self.alpha = kd_config.get('alpha', 0.7)
         self.label_smoothing = kd_config.get('label_smoothing', 0.0)
+
+        if 'temperature' in config:
+            self.temperature = config['temperature']
+        if 'alpha' in config:
+            self.alpha = config['alpha']
+        if 'label_smoothing' in config:
+            self.label_smoothing = config['label_smoothing']
+        self.confidence_scaling = kd_config.get(
+            'confidence_scaling', config.get('confidence_scaling', False)
+        )
+        self.min_confidence = kd_config.get(
+            'min_confidence', config.get('min_confidence', 0.0)
+        )
         
         # Class weights for imbalanced datasets
         class_weights = kd_config.get('class_weights', None)
@@ -429,30 +453,143 @@ class KDHintonDistiller(BaseDistiller):
             'kl': lambda h_t, h_s: HintLossFunctions.kl_loss(h_t, h_s, self.temperature),
             'contrastive': lambda h_t, h_s: HintLossFunctions.contrastive_hint_loss(h_t, h_s, 0.07)
         }
+
+        # Structured loss logging configuration
+        self._loss_log_interval = int(kd_config.get('log_interval', config.get('kd_log_interval', 100)))
+        self._loss_log_interval = max(self._loss_log_interval, 1)
+        self._loss_step = 0
+        self._loss_logger = logging.getLogger(f"{self.__class__.__name__}")
     
     def _init_hint_regressors(self):
-        """Initialize hint regressors for each hint pair."""
-        teacher_modules = dict(self.teacher.named_modules())
-        student_modules = dict(self.student.named_modules())
-        
-        for i, hint_cfg in enumerate(self.hint_configs):
-            t_layer_name = hint_cfg['teacher']
-            s_layer_name = hint_cfg['student']
-            
-            # Get layer dimensions (this is simplified, real implementation needs shape inference)
-            # In practice, you'd do a forward pass to get actual shapes
-            regressor_type = hint_cfg.get('regressor', '1x1conv')
-            
-            # Create a unique key for this hint pair
-            hint_key = f"hint_{i}_{s_layer_name}"
-            
-            # For now, create a placeholder regressor
-            # In production, you'd infer dimensions from a forward pass
-            # self.hint_regressors[hint_key] = HintRegressor(
-            #     student_dim=inferred_s_dim,
-            #     teacher_dim=inferred_t_dim,
-            #     regressor_type=regressor_type
-            # )
+        """Regressors are created lazily once feature shapes are known."""
+        return
+
+    def _generate_auto_hints(
+        self,
+        auto_cfg: Dict[str, Any],
+        teacher: nn.Module,
+        student: nn.Module
+    ) -> List[Dict[str, Any]]:
+        count = max(1, int(auto_cfg.get('count', 2)))
+        strategy = str(auto_cfg.get('strategy', 'last')).lower()
+
+        teacher_layers = self._auto_select_layers(teacher, strategy, count)
+        student_layers = self._auto_select_layers(student, strategy, count)
+
+        pairs: List[Dict[str, Any]] = []
+        usable = min(len(teacher_layers), len(student_layers), count)
+        if usable == 0:
+            return pairs
+
+        weight = auto_cfg.get('weight', 1.0)
+        reg_type = auto_cfg.get('regressor', '1x1conv')
+        loss_type = auto_cfg.get('loss', 'mse')
+        activation = auto_cfg.get('activation', auto_cfg.get('regressor_activation', 'none'))
+        use_bn = auto_cfg.get('use_bn', True)
+
+        for idx in range(usable):
+            t_layer = teacher_layers[-usable + idx]
+            s_layer = student_layers[-usable + idx]
+            pairs.append({
+                'teacher': t_layer,
+                'student': s_layer,
+                'weight': weight,
+                'regressor': reg_type,
+                'loss': loss_type,
+                'activation': activation,
+                'use_bn': use_bn,
+            })
+        return pairs
+
+    def _auto_select_layers(self, model: nn.Module, strategy: str, count: int) -> List[str]:
+        candidates = self._collect_candidate_layers(model)
+        if not candidates:
+            return []
+
+        strategy = strategy.lower()
+        if strategy == 'uniform':
+            if count >= len(candidates):
+                return candidates
+            step = max(len(candidates) // count, 1)
+            selected = [candidates[i] for i in range(0, len(candidates), step)]
+            return selected[:count]
+        if strategy == 'mixed':
+            anchors = [0, len(candidates) // 2, len(candidates) - 1]
+            extra = max(count - len(anchors), 0)
+            if extra > 0:
+                step = max(len(candidates) // (extra + 1), 1)
+                anchors.extend(range(step, step * (extra + 1), step))
+            unique = []
+            for idx in anchors:
+                idx = max(0, min(idx, len(candidates) - 1))
+                layer_name = candidates[idx]
+                if layer_name not in unique:
+                    unique.append(layer_name)
+            return unique[:count]
+        if strategy == 'attn':
+            attn_layers = [name for name in candidates if 'attn' in name.lower() or 'attention' in name.lower()]
+            if attn_layers:
+                candidates = attn_layers
+        if strategy != 'last':
+            # Fallback to selecting last layers when strategy produced insufficient entries
+            candidates = candidates
+        return candidates[-count:]
+
+    @staticmethod
+    def _collect_candidate_layers(model: nn.Module) -> List[str]:
+        candidates: List[str] = []
+        for name, module in model.named_modules():
+            if not name:
+                continue
+            lower = name.lower()
+            if any(token in lower for token in ('layer', 'block', 'encoder', 'stage')):
+                candidates.append(name)
+            elif 'attn' in lower or 'attention' in lower:
+                candidates.append(name)
+        # Deduplicate while preserving order
+        seen = set()
+        ordered: List[str] = []
+        for item in candidates:
+            if item not in seen:
+                ordered.append(item)
+                seen.add(item)
+        return ordered
+
+    def _ensure_regressor(
+        self,
+        hint_key: str,
+        hint_cfg: Dict[str, Any],
+        student_feat: torch.Tensor,
+        teacher_feat: torch.Tensor
+    ) -> nn.Module:
+        if hint_key in self.hint_regressors:
+            return self.hint_regressors[hint_key]
+
+        regressor_type = hint_cfg.get('regressor', '1x1conv')
+        reg_cfg = hint_cfg.get('regressor_config', {})
+        use_bn = reg_cfg.get('use_bn', hint_cfg.get('use_bn', False))
+        activation = reg_cfg.get('activation', hint_cfg.get('activation', 'none'))
+
+        if student_feat.dim() == 4:
+            reg = HintRegressor(
+                student_dim=student_feat.shape[1],
+                teacher_dim=teacher_feat.shape[1],
+                regressor_type=regressor_type,
+                use_bn=use_bn,
+                activation=activation
+            )
+        else:
+            reg_type = 'linear' if regressor_type in ('1x1conv', 'conv1x1') else regressor_type
+            reg = HintRegressor(
+                student_dim=student_feat.shape[-1],
+                teacher_dim=teacher_feat.shape[-1],
+                regressor_type=reg_type,
+                use_bn=use_bn,
+                activation=activation
+            )
+
+        self.hint_regressors[hint_key] = reg.to(self.device)
+        return self.hint_regressors[hint_key]
     
     def _register_hooks(self):
         """Register hooks for hint layers."""
@@ -512,8 +649,20 @@ class KDHintonDistiller(BaseDistiller):
         # 1. Classical Hinton KD Loss
         student_soft = F.log_softmax(student_logits / current_temp, dim=1)
         teacher_soft = F.softmax(teacher_logits / current_temp, dim=1)
-        
-        kd_loss = F.kl_div(student_soft, teacher_soft, reduction='batchmean') * (current_temp ** 2)
+
+        kd_per_sample = F.kl_div(student_soft, teacher_soft, reduction='none').sum(dim=1)
+        kd_per_sample = kd_per_sample * (current_temp ** 2)
+
+        if self.confidence_scaling:
+            entropy = -(teacher_soft * teacher_soft.clamp_min(1e-8).log()).sum(dim=1)
+            max_entropy = math.log(teacher_soft.size(1)) if teacher_soft.size(1) > 1 else 1.0
+            confidence = 1.0 - (entropy / max_entropy)
+            confidence = confidence.clamp(min=self.min_confidence, max=1.0)
+            kd_loss = (kd_per_sample * confidence.detach()).mean()
+            loss_dict['teacher_confidence'] = confidence.mean().item()
+        else:
+            kd_loss = kd_per_sample.mean()
+
         total_loss += self.alpha * kd_loss
         loss_dict['kd_loss'] = kd_loss.item()
         
@@ -532,7 +681,7 @@ class KDHintonDistiller(BaseDistiller):
         
         # 3. Hint-Based Intermediate Layer Guidance
         if self.hint_enabled and teacher_features and student_features:
-            hint_loss_total = 0.0
+            hint_loss_total = torch.zeros((), device=self.device)
             current_hint_weight = self.hint_scheduler.step() if self.training else 1.0
             
             for i, hint_cfg in enumerate(self.hint_configs):
@@ -544,52 +693,69 @@ class KDHintonDistiller(BaseDistiller):
                 if t_layer in teacher_features and s_layer in student_features:
                     hint_t = teacher_features[t_layer]
                     hint_s = student_features[s_layer]
-                    
-                    # Apply regressor if available
-                    hint_key = f"hint_{i}_{s_layer}"
-                    if hint_key in self.hint_regressors:
-                        hint_s = self.hint_regressors[hint_key](hint_s)
-                    
-                    # Align spatial dimensions if needed
-                    if hint_t.shape[2:] != hint_s.shape[2:]:
+
+                    if hint_t.dim() >= 3 and hint_s.dim() >= 3 and hint_t.shape[2:] != hint_s.shape[2:]:
+                        mode = 'bilinear' if hint_t.dim() == 4 else 'linear'
+                        align_corners = hint_t.dim() == 4
                         hint_s = F.interpolate(
                             hint_s,
                             size=hint_t.shape[2:],
-                            mode='bilinear' if len(hint_t.shape) == 4 else 'linear',
-                            align_corners=False
+                            mode=mode,
+                            align_corners=align_corners
                         )
-                    
-                    # Align channel dimensions if needed (create adapter on-the-fly)
-                    if hint_t.shape[1] != hint_s.shape[1]:
-                        # Create temporary adapter for channel alignment
-                        adapter = nn.Conv2d(
-                            hint_s.shape[1],
-                            hint_t.shape[1],
-                            1,
-                            bias=False
-                        ).to(self.device)
-                        hint_s = adapter(hint_s)
-                    
-                    # Compute hint loss
+
+                    hint_key = f"hint_{i}_{s_layer}"
+                    regressor = self._ensure_regressor(hint_key, hint_cfg, hint_s, hint_t)
+                    hint_s = regressor(hint_s)
+
+                    if hint_t.shape != hint_s.shape:
+                        if hint_t.dim() == hint_s.dim() == 4:
+                            hint_s = F.interpolate(
+                                hint_s,
+                                size=hint_t.shape[2:],
+                                mode='bilinear',
+                                align_corners=False
+                            )
+                        elif hint_t.dim() == hint_s.dim() == 3:
+                            hint_s = F.interpolate(
+                                hint_s.transpose(1, 2),
+                                size=hint_t.shape[1],
+                                mode='linear',
+                                align_corners=False
+                            ).transpose(1, 2)
+                        elif hint_t.dim() == hint_s.dim() == 2:
+                            hint_s = F.adaptive_avg_pool1d(
+                                hint_s.unsqueeze(1),
+                                hint_t.shape[1]
+                            ).squeeze(1)
+
                     if loss_type in self.hint_loss_fns:
                         hint_loss = self.hint_loss_fns[loss_type](hint_t, hint_s)
                         weighted_hint_loss = hint_weight * current_hint_weight * hint_loss
                         hint_loss_total += weighted_hint_loss
-                        
                         loss_dict[f'hint_{i}_{loss_type}'] = hint_loss.item()
             
-            if hint_loss_total > 0:
+            if hint_loss_total.item() > 0:
                 total_loss += hint_loss_total
-                # Ensure hint_loss_total is tensor before calling .item()
-                if isinstance(hint_loss_total, torch.Tensor):
-                    loss_dict['hint_total'] = hint_loss_total.item()
-                else:
-                    loss_dict['hint_total'] = float(hint_loss_total)
+                loss_dict['hint_total'] = hint_loss_total.detach().item()
                 loss_dict['hint_weight'] = current_hint_weight
         
         loss_dict['temperature'] = current_temp
         loss_dict['total'] = total_loss.item()
         
+        if self.training:
+            self._loss_step += 1
+            if self._loss_step % self._loss_log_interval == 0:
+                self._loss_logger.info(
+                    "KD step %d | total=%.4f kd=%.4f ce=%s hint=%s T=%.2f",  # brief structured log
+                    self._loss_step,
+                    loss_dict.get('total', 0.0),
+                    loss_dict.get('kd_loss', 0.0),
+                    f"{loss_dict['ce_loss']:.4f}" if 'ce_loss' in loss_dict else 'N/A',
+                    f"{loss_dict['hint_total']:.4f}" if 'hint_total' in loss_dict else 'N/A',
+                    loss_dict.get('temperature', current_temp),
+                )
+
         return total_loss, loss_dict
     
     def _label_smoothed_cross_entropy(
@@ -667,6 +833,17 @@ class KDHintonDistiller(BaseDistiller):
             metrics['avg_hfa'] = np.mean(cos_scores) if cos_scores else 0.0
         
         return metrics
+
+    @classmethod
+    def from_config(
+        cls,
+        teacher: nn.Module,
+        student: nn.Module,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> "KDHintonDistiller":
+        """Factory helper aligning with the other distillers."""
+        return cls(teacher=teacher, student=student, config=config, **kwargs)
 
 
 # ============================================================================

@@ -19,7 +19,7 @@ Example:
     Stage 5: QAT Fine-Tuning -> int8
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Mapping
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -29,11 +29,13 @@ import json
 from datetime import datetime
 import warnings
 from collections import defaultdict
+from copy import deepcopy
 
 from .base_distiller import BaseDistiller
 from .kd_hinton import KDHintonDistiller
 from .feature_distiller import FeatureDistiller
 from .similarity_transfer import SimilarityTransfer
+from .presets import get_preset, list_presets
 
 # Optional imports
 try:
@@ -238,14 +240,29 @@ class MultiStageDistiller:
     - Preflight-aware automatic stage planning
     """
     
+    @staticmethod
+    def _deep_merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> Dict[str, Any]:
+        """Deep merge two dictionaries without mutating inputs."""
+        result: Dict[str, Any] = deepcopy(dict(base))
+        for key, value in overrides.items():
+            if (
+                key in result
+                and isinstance(result[key], Mapping)
+                and isinstance(value, Mapping)
+            ):
+                result[key] = MultiStageDistiller._deep_merge(result[key], value)
+            else:
+                result[key] = deepcopy(value)
+        return result
+
     def __init__(
         self,
         teacher: nn.Module,
         student: nn.Module,
-        config: Dict[str, Any],
+        config: Optional[Dict[str, Any]],
         train_loader: Optional[DataLoader] = None,
         val_loader: Optional[DataLoader] = None,
-        device: str = 'cuda',
+        device: Optional[str] = None,
         output_dir: str = 'experiments/multi_stage'
     ):
         """
@@ -260,6 +277,26 @@ class MultiStageDistiller:
             device: Device for training
             output_dir: Output directory for checkpoints and logs
         """
+        if config is None:
+            config = {}
+        else:
+            config = deepcopy(config)
+
+        preset_name = config.get('preset') or config.get('distillation', {}).get('preset')
+        if preset_name:
+            try:
+                preset_cfg = get_preset(preset_name)
+                config = self._deep_merge(preset_cfg, config)
+            except KeyError:
+                warnings.warn(
+                    f"Preset '{preset_name}' not found. Available presets: {list_presets()}"
+                )
+
+        if device is None:
+            device = config.get('device')
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
         self.teacher = teacher.to(device)
         self.student = student.to(device)
         self.config = config
@@ -267,6 +304,11 @@ class MultiStageDistiller:
         self.val_loader = val_loader
         self.device = device
         self.output_dir = Path(output_dir)
+
+        callbacks_cfg = self.config.get('callbacks', {})
+        self.progress_callback = callbacks_cfg.get('on_stage_end')
+        self.metrics_callback = callbacks_cfg.get('on_stage_metrics')
+        self.plan_metadata = deepcopy(self.config.get('metadata', {}))
         
         # Initialize components
         self.stages = self._parse_stages(config)
@@ -422,6 +464,12 @@ class MultiStageDistiller:
             # Log stage
             self.controller.log_stage(stage_idx, stage_cfg['name'], stage_metrics)
             self.stage_metrics.append(stage_metrics)
+
+            if callable(self.progress_callback):
+                try:
+                    self.progress_callback(stage_idx, stage_cfg, stage_metrics)
+                except Exception as callback_error:
+                    warnings.warn(f"Progress callback failed at stage {stage_idx}: {callback_error}")
             
             # Adaptive weight adjustment
             # Update loss scheduler weights based on stage metrics
@@ -444,6 +492,18 @@ class MultiStageDistiller:
         
         return report
     
+    def _instantiate_distiller(self, distiller_cls: type, distiller_config: Dict[str, Any]) -> BaseDistiller:
+        """Instantiate a distiller with graceful fallback for legacy signatures."""
+        try:
+            return distiller_cls(
+                self.teacher,
+                self.student,
+                config=distiller_config,
+                device=torch.device(self.device) if isinstance(self.device, str) else self.device,
+            )
+        except TypeError:
+            return distiller_cls(self.teacher, self.student, distiller_config)
+
     def _run_stage(self, stage_idx: int, stage_cfg: Dict) -> Dict[str, float]:
         """
         Run single distillation stage.
@@ -466,20 +526,26 @@ class MultiStageDistiller:
         if hasattr(self.loss_scheduler, 'update'):
             self.loss_scheduler.update(stage_idx, len(self.stages), {})
         loss_weights = self.loss_scheduler.get_weights()
-        print(f"Loss weights: α={loss_weights.get('alpha', 0):.2f}, "
-              f"β={loss_weights.get('beta', 0):.2f}, "
-              f"γ={loss_weights.get('gamma', 0):.2f}")
+        print(
+            f"Loss weights: α={loss_weights.get('alpha', 0):.2f}, "
+            f"β={loss_weights.get('beta', 0):.2f}, "
+            f"γ={loss_weights.get('gamma', 0):.2f}"
+        )
         
-        # Merge stage config with loss weights
-        distiller_config = {**stage_cfg.get('config', {}), **loss_weights}
+        # Merge stage config with loss weights without mutating presets
+        distiller_config = deepcopy(stage_cfg.get('config', {}))
+        for key, value in loss_weights.items():
+            distiller_config.setdefault(key, value)
+        metadata = distiller_config.get('metadata')
+        if not isinstance(metadata, dict):
+            metadata = {}
+            distiller_config['metadata'] = metadata
+        metadata['stage_name'] = stage_cfg.get('name')
+        metadata['stage_index'] = stage_idx
         
         # Initialize distiller
         print(f"Initializing {stage_cfg['type']} distiller...")
-        distiller = distiller_cls(
-            self.teacher,
-            self.student,
-            distiller_config
-        )
+        distiller = self._instantiate_distiller(distiller_cls, distiller_config)
         
         # Apply layer freezing if specified
         if stage_cfg.get('freeze_layers'):
@@ -755,8 +821,12 @@ class MultiStageDistiller:
             },
             'stages': [],
             'final_metrics': {},
-            'stage_controller_report': self.controller.generate_report()
+            'stage_controller_report': self.controller.generate_report(),
+            'metadata': self.plan_metadata,
         }
+
+        if self.plan_metadata and 'preset' in self.plan_metadata:
+            report['summary']['preset'] = self.plan_metadata['preset']
         
         # Add stage details
         for i, (stage_cfg, metrics) in enumerate(zip(self.stages, self.stage_metrics)):

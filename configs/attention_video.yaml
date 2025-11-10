@@ -1,0 +1,98 @@
+# ============================================================================
+# Temporal Attention Transfer Configuration (Video Models)
+# ============================================================================
+# 
+# Configuration for video models with temporal attention.
+# Handles time-axis attention in addition to spatial dimensions.
+#
+# Note: This is a TEMPLATE. Video model support is in development.
+# Use this as a reference for extending Zynthe to video transformers.
+# ============================================================================
+
+train:
+  epochs: 6
+  batch_size: 4  # Video models are memory-intensive
+  lr: 5e-6
+  grad_accum_steps: 4
+  mixed_precision: false
+  early_stop_patience: 2
+  save_best_only: true
+  log_interval: 10
+
+model:
+  # Example: TimeSformer teacher → smaller TimeSformer student
+  name: "facebook/timesformer-base-finetuned-k400"
+  student_name: "facebook/timesformer-base-finetuned-k400"  # Or a custom small variant
+  type: "video"
+  num_frames: 8
+  image_size: 224
+
+# ============================================================================
+# TEMPORAL ATTENTION TRANSFER
+# ============================================================================
+distillation:
+  method: "attention_transfer"
+  temperature: 2.0
+  alpha: 0.5
+
+attention_transfer:
+  enabled: true
+  
+  type: ["spatial", "self"]
+  
+  # Attention Rollout: Useful for video transformers
+  use_attention_rollout: true
+  
+  # Cross-layer Flow: Track attention through temporal layers
+  use_cross_layer_flow: true
+  
+  # Temporal Attention: Key feature for video models
+  use_temporal_attention: true
+  
+  # Layer configuration for video transformers
+  teacher_layers:
+    - "encoder.layer.6"
+    - "encoder.layer.11"
+  
+  student_layers:
+    - "encoder.layer.3"
+    - "encoder.layer.5"
+  
+  layer_mapping:
+    "encoder.layer.6": "encoder.layer.3"
+    "encoder.layer.11": "encoder.layer.5"
+  
+  normalization: "softmax"
+  
+  # Temporal models benefit from L2 + relational
+  loss_types: ["l2", "relational"]
+  loss_weights: [0.6, 0.4]
+  
+  weight: 0.3
+
+# ============================================================================
+# DATA (to be implemented for video models)
+# ============================================================================
+data:
+  train_path: "data/kinetics400_train.jsonl"
+  val_path: "data/kinetics400_val.jsonl"
+  video_root: "data/kinetics400/videos"
+  
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+output_root: "experiments"
+seed: 42
+
+quantization:
+  enable: false  # Video models are complex to quantize
+
+evaluate: true
+compare_models: true
+
+explainability:
+  visualize_attention: true
+  attention_visualization_path: "temporal_attention"
+  # Save temporal attention evolution across frames
+  save_temporal_evolution: true

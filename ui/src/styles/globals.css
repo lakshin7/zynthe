@@ -265,3 +265,30 @@ html {
 .animate-float {
   animation: float 3s ease-in-out infinite;
 }
+
+/* Custom Scrollbar Styles */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--muted);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+  transition: background var(--motion-duration-fast) var(--motion-ease);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+/* Firefox scrollbar support */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--muted);
+}

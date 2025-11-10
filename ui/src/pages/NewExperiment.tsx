@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Upload, Check, AlertCircle, Loader2, Database } from 'lucide-react';
 import { Card, Button } from '../components/base';
+import { ModelBrowser } from '../components/ModelBrowser';
 
 interface TeacherModel {
   id: string;
@@ -66,14 +67,14 @@ const STUDENT_MODELS: StudentModel[] = [
     compatibleWith: ['bert-base-uncased', 'roberta-base']
   },
   {
-    id: 'TinyBERT',
+    id: 'huawei-noah/TinyBERT_General_4L_312D',
     name: 'TinyBERT',
     size: '58MB',
     params: '14.5M',
     compatibleWith: ['bert-base-uncased', 'distilbert-base-uncased']
   },
   {
-    id: 'MobileBERT',
+    id: 'google/mobilebert-uncased',
     name: 'MobileBERT',
     size: '100MB',
     params: '25M',
@@ -87,20 +88,167 @@ const STUDENT_MODELS: StudentModel[] = [
     compatibleWith: ['roberta-base']
   },
   {
-    id: 'albert-tiny',
+    id: 'albert/albert-tiny-v2',
     name: 'ALBERT Tiny',
     size: '16MB',
     params: '4M',
     compatibleWith: ['albert-base-v2', 'distilbert-base-uncased']
   },
   {
-    id: 'MiniLM-L6',
+    id: 'microsoft/MiniLM-L6-H384-uncased',
     name: 'MiniLM-L6',
     size: '90MB',
     params: '22M',
     compatibleWith: ['microsoft/MiniLM-L12-H384-uncased']
   }
 ];
+
+// Debug Panel Component for Preflight Testing
+interface PreflightDebugPanelProps {
+  selectedTeacher: string;
+  selectedStudent: string;
+  selectedDataset: string;
+}
+
+function PreflightDebugPanel({ selectedTeacher, selectedStudent, selectedDataset }: PreflightDebugPanelProps) {
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [testing, setTesting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const testConnection = async () => {
+    setTesting(true);
+    try {
+      console.log('🔧 Testing backend connection...');
+      
+      // Test backend connectivity
+      const healthResponse = await fetch('http://localhost:8765/health');
+      const health = await healthResponse.json();
+      console.log('✓ Health check:', health);
+      
+      // Test device info
+      const deviceResponse = await fetch('http://localhost:8765/api/device/info');
+      const device = await deviceResponse.json();
+      console.log('✓ Device info:', device);
+      
+      // Test HF token
+      const tokenResponse = await fetch('http://localhost:8765/api/settings/hf-token');
+      const token = await tokenResponse.json();
+      console.log('✓ HF token status:', token);
+      
+      setDebugInfo({
+        backend_status: health.status,
+        backend_timestamp: health.timestamp,
+        device_info: device,
+        hf_token_configured: token.configured,
+        selected_models: {
+          teacher: selectedTeacher || 'Not selected',
+          student: selectedStudent || 'Not selected',
+          dataset: selectedDataset || 'Not selected'
+        }
+      });
+    } catch (error) {
+      console.error('✗ Connection test failed:', error);
+      setDebugInfo({
+        error: error instanceof Error ? error.message : 'Connection failed',
+        backend_reachable: false,
+        message: 'Could not connect to backend at http://localhost:8765'
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <Card padding="md" className="bg-bg-tertiary border-warning/20">
+      <div className="flex items-center justify-between mb-3">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 text-sm font-semibold text-text-primary hover:text-primary transition-colors"
+        >
+          <span className="text-lg">{expanded ? '▼' : '▶'}</span>
+          <span>🔧 Debug Info & Connection Test</span>
+        </button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={testConnection}
+          disabled={testing}
+        >
+          {testing ? (
+            <>
+              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+              Testing...
+            </>
+          ) : (
+            'Test Connection'
+          )}
+        </Button>
+      </div>
+      
+      {expanded && debugInfo && (
+        <div className="text-xs font-mono space-y-2 mt-3 p-3 bg-bg-primary rounded-lg">
+          {debugInfo.backend_status && (
+            <div className="flex items-center gap-2">
+              <span className="text-accent">✓</span>
+              <span className="text-text-primary">Backend: <span className="text-accent">{debugInfo.backend_status}</span></span>
+            </div>
+          )}
+          {debugInfo.backend_timestamp && (
+            <div className="flex items-center gap-2">
+              <span className="text-accent">✓</span>
+              <span className="text-text-secondary text-[10px]">Time: {new Date(debugInfo.backend_timestamp).toLocaleTimeString()}</span>
+            </div>
+          )}
+          {debugInfo.device_info && (
+            <div className="flex items-center gap-2">
+              <span className="text-accent">✓</span>
+              <span className="text-text-primary">
+                Device: <span className="text-primary font-bold">{debugInfo.device_info.current_device.toUpperCase()}</span>
+              </span>
+            </div>
+          )}
+          {debugInfo.hf_token_configured !== undefined && (
+            <div className="flex items-center gap-2">
+              <span className={debugInfo.hf_token_configured ? 'text-accent' : 'text-warning'}>
+                {debugInfo.hf_token_configured ? '✓' : '⚠'}
+              </span>
+              <span className="text-text-primary">
+                HF Token: <span className={debugInfo.hf_token_configured ? 'text-accent' : 'text-warning'}>
+                  {debugInfo.hf_token_configured ? 'Configured' : 'Not configured'}
+                </span>
+              </span>
+            </div>
+          )}
+          {debugInfo.error && (
+            <div className="flex items-start gap-2">
+              <span className="text-error">✗</span>
+              <div>
+                <div className="text-error font-semibold">Error: {debugInfo.error}</div>
+                {debugInfo.message && (
+                  <div className="text-text-muted text-[10px] mt-1">{debugInfo.message}</div>
+                )}
+              </div>
+            </div>
+          )}
+          {debugInfo.selected_models && (
+            <div className="mt-3 pt-3 border-t border-border-light space-y-1">
+              <div className="text-text-muted text-[10px] mb-2">Selected Models:</div>
+              <div className="text-text-secondary">Teacher: <span className="text-primary">{debugInfo.selected_models.teacher}</span></div>
+              <div className="text-text-secondary">Student: <span className="text-accent">{debugInfo.selected_models.student}</span></div>
+              <div className="text-text-secondary">Dataset: <span className="text-text-primary">{debugInfo.selected_models.dataset}</span></div>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {expanded && !debugInfo && (
+        <div className="text-xs text-text-muted text-center py-3">
+          Click "Test Connection" to check backend status
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export function NewExperiment() {
   const navigate = useNavigate();
@@ -110,6 +258,8 @@ export function NewExperiment() {
   // Form state
   const [experimentName, setExperimentName] = useState('');
   const [datasetFile, setDatasetFile] = useState<File | null>(null);
+  const [selectedBuiltInDataset, setSelectedBuiltInDataset] = useState<string>('');
+  const [builtInDatasets, setBuiltInDatasets] = useState<any[]>([]);
   const [datasetPreview, setDatasetPreview] = useState<any>(null);
   const [selectedTeacher, setSelectedTeacher] = useState<string>('');
   const [selectedStudent, setSelectedStudent] = useState<string>('');
@@ -120,6 +270,17 @@ export function NewExperiment() {
     learningRate: 2e-5,
     temperature: 4.0
   });
+
+  // Fetch built-in datasets on mount
+  useEffect(() => {
+    fetch('http://localhost:8765/api/datasets')
+      .then(res => res.json())
+      .then(data => {
+        const builtIn = data.filter((d: any) => d.type === 'built-in');
+        setBuiltInDatasets(builtIn);
+      })
+      .catch(err => console.error('Failed to fetch datasets:', err));
+  }, []);
 
   const compatibleStudents = STUDENT_MODELS.filter(
     student => student.compatibleWith.includes(selectedTeacher)
@@ -169,28 +330,90 @@ export function NewExperiment() {
 
   const handlePreflightCheck = async () => {
     setLoading(true);
+    setPreflightResult(null);
     
     try {
-      // Simulate preflight check
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      console.log('🔍 Starting preflight validation...');
+      console.log('Teacher:', selectedTeacher);
+      console.log('Student:', selectedStudent);
+      console.log('Dataset:', selectedBuiltInDataset || datasetFile?.name);
       
-      const teacher = TEACHER_MODELS.find(t => t.id === selectedTeacher);
-      const student = STUDENT_MODELS.find(s => s.id === selectedStudent);
+      // Call backend validation API with dataset info
+      const response = await fetch('http://localhost:8765/api/models/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teacher_model: selectedTeacher,
+          student_model: selectedStudent,
+          dataset: selectedBuiltInDataset || 'imdb_sample'
+        })
+      });
       
-      const isCompatible = student?.compatibleWith.includes(selectedTeacher) || false;
+      console.log('✓ Validation response status:', response.status);
       
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('✗ Validation failed:', errorData);
+        throw new Error(errorData.detail || 'Validation request failed');
+      }
+      
+      const validation = await response.json();
+      console.log('✓ Validation result:', validation);
+      
+      // Format for UI
+      const result = {
+        compatible: validation.valid || validation.can_proceed,
+        teacherSize: validation.teacher.size_mb 
+          ? `${(validation.teacher.size_mb / 1024).toFixed(1)}GB`
+          : 'Unknown',
+        studentSize: validation.student.size_mb
+          ? `${(validation.student.size_mb / 1024).toFixed(1)}GB`
+          : 'Unknown',
+        compressionRatio: validation.compression_ratio || 'N/A',
+        estimatedTime: (validation.valid || validation.can_proceed) ? '~45 minutes' : 'N/A',
+        warnings: [
+          ...validation.issues,
+          ...validation.warnings,
+          ...(validation.teacher.errors || []).map((e: string) => `Teacher: ${e}`),
+          ...(validation.student.errors || []).map((e: string) => `Student: ${e}`)
+        ].filter(Boolean),
+        recommendations: validation.recommendations || [],
+        alternatives: validation.alternatives || {
+          teacher: validation.teacher.alternatives || [],
+          student: validation.student.alternatives || []
+        },
+        deviceInfo: validation.device_info || null,
+        configValidation: validation.config_validation,
+        modelValidation: validation.model_validation
+      };
+      
+      console.log('✓ Formatted result:', result);
+      setPreflightResult(result);
+      
+    } catch (error) {
+      console.error('✗ Preflight check failed:', error);
+      
+      // Show detailed error
       setPreflightResult({
-        compatible: isCompatible,
-        teacherSize: teacher?.size,
-        studentSize: student?.size,
-        compressionRatio: isCompatible ? (
-          parseFloat(teacher?.params || '0') / parseFloat(student?.params || '1')
-        ).toFixed(1) : 'N/A',
-        estimatedTime: isCompatible ? '~45 minutes' : 'N/A',
-        warnings: isCompatible ? [] : [
-          `${student?.name} is not compatible with ${teacher?.name}`,
-          `Please select one of: ${compatibleStudents.map(s => s.name).join(', ')}`
-        ]
+        compatible: false,
+        warnings: [
+          '❌ Preflight validation failed.',
+          error instanceof Error ? error.message : 'Unknown error',
+          '',
+          'Please check:',
+          '• Backend server is running (http://localhost:8765)',
+          '• Network connectivity',
+          '• Model IDs are correct',
+          '• HuggingFace token is configured (if using private models)'
+        ],
+        recommendations: [
+          'Try clicking "Test Connection" in the debug panel below',
+          'Restart the backend server with: ./start-zynthe.sh',
+          'Check browser console for detailed errors',
+          'Verify model IDs exist on HuggingFace Hub'
+        ],
+        alternatives: { teacher: [], student: [] },
+        deviceInfo: null
       });
     } finally {
       setLoading(false);
@@ -198,32 +421,37 @@ export function NewExperiment() {
   };
 
   const handleStartTraining = async () => {
-    if (!datasetFile || !selectedTeacher || !selectedStudent) return;
+    if ((!datasetFile && !selectedBuiltInDataset) || !selectedTeacher || !selectedStudent) return;
     
     setLoading(true);
     
     try {
-      // Upload dataset first
-      const formData = new FormData();
-      formData.append('file', datasetFile);
+      let datasetId = selectedBuiltInDataset;
       
-      const uploadResponse = await fetch('http://localhost:8765/api/dataset/upload', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!uploadResponse.ok) {
-        throw new Error('Failed to upload dataset');
+      // Upload dataset only if file is provided (not using built-in)
+      if (datasetFile && !selectedBuiltInDataset) {
+        const formData = new FormData();
+        formData.append('file', datasetFile);
+        
+        const uploadResponse = await fetch('http://localhost:8765/api/dataset/upload', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!uploadResponse.ok) {
+          throw new Error('Failed to upload dataset');
+        }
+        
+        const uploadData = await uploadResponse.json();
+        datasetId = uploadData.dataset_id;
       }
-      
-      const uploadData = await uploadResponse.json();
       
       // Create training config
       const trainingConfig = {
         experiment_name: experimentName || `Experiment ${Date.now()}`,
         teacher_model: selectedTeacher,
         student_model: selectedStudent,
-        dataset: uploadData.dataset_id,
+        dataset: datasetId,
         epochs: config.epochs,
         batch_size: config.batchSize,
         learning_rate: config.learningRate,
@@ -323,7 +551,7 @@ export function NewExperiment() {
             <Card padding="lg" className="animate-fade-in">
               <h2 className="text-2xl font-bold text-text-primary mb-4">Upload Dataset</h2>
               <p className="text-text-secondary mb-6">
-                Upload your training dataset in CSV, JSONL, JSON, or Parquet format
+                Choose a built-in dataset or upload your own in CSV, JSONL, JSON, or Parquet format
               </p>
 
               {/* Experiment Name */}
@@ -340,20 +568,67 @@ export function NewExperiment() {
                 />
               </div>
 
+              {/* Built-in Datasets */}
+              {builtInDatasets.length > 0 && (
+                <div className="mb-6">
+                  <label className="block text-sm font-semibold text-text-primary mb-3">
+                    <Database className="inline w-4 h-4 mr-2" />
+                    Built-in Datasets
+                  </label>
+                  <div className="grid grid-cols-1 gap-3">
+                    {builtInDatasets.map((dataset) => (
+                      <div
+                        key={dataset.id}
+                        className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                          selectedBuiltInDataset === dataset.id
+                            ? 'border-primary bg-primary/5 shadow-sm'
+                            : 'border-border-medium hover:border-primary/50 hover:bg-bg-tertiary'
+                        }`}
+                        onClick={() => {
+                          setSelectedBuiltInDataset(dataset.id);
+                          setDatasetFile(null);
+                        }}
+                      >
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="font-semibold text-text-primary">{dataset.name}</p>
+                            <p className="text-sm text-text-secondary">{dataset.size}</p>
+                          </div>
+                          {selectedBuiltInDataset === dataset.id && (
+                            <Check className="w-5 h-5 text-primary" />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 text-center">
+                    <span className="text-sm text-text-secondary">or</span>
+                  </div>
+                </div>
+              )}
+
               {/* File Upload */}
               <div
                 className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
                   datasetFile
                     ? 'border-accent bg-accent/5'
+                    : selectedBuiltInDataset
+                    ? 'border-border-light bg-bg-secondary opacity-50'
                     : 'border-border-medium hover:border-primary hover:bg-bg-tertiary cursor-pointer'
                 }`}
                 onDrop={(e) => {
                   e.preventDefault();
-                  const file = e.dataTransfer.files[0];
-                  if (file) handleDatasetUpload(file);
+                  if (!selectedBuiltInDataset) {
+                    const file = e.dataTransfer.files[0];
+                    if (file) handleDatasetUpload(file);
+                  }
                 }}
                 onDragOver={(e) => e.preventDefault()}
-                onClick={() => document.getElementById('file-input')?.click()}
+                onClick={() => {
+                  if (!selectedBuiltInDataset) {
+                    document.getElementById('file-input')?.click();
+                  }
+                }}
               >
                 <input
                   id="file-input"
@@ -361,7 +636,10 @@ export function NewExperiment() {
                   accept=".csv,.jsonl,.json,.parquet,.tsv"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleDatasetUpload(file);
+                    if (file) {
+                      handleDatasetUpload(file);
+                      setSelectedBuiltInDataset('');
+                    }
                   }}
                   className="hidden"
                 />
@@ -375,7 +653,7 @@ export function NewExperiment() {
                 )}
                 
                 <p className="text-lg font-semibold text-text-primary mb-2">
-                  {datasetFile ? datasetFile.name : 'Drop your dataset here or click to browse'}
+                  {datasetFile ? datasetFile.name : selectedBuiltInDataset ? 'Using built-in dataset' : 'Drop your dataset here or click to browse'}
                 </p>
                 <p className="text-sm text-text-secondary">
                   Supported formats: CSV, JSONL, JSON, Parquet, TSV
@@ -411,7 +689,7 @@ export function NewExperiment() {
                 <Button
                   variant="primary"
                   size="lg"
-                  disabled={!datasetFile}
+                  disabled={!datasetFile && !selectedBuiltInDataset}
                   onClick={() => setCurrentStep(2)}
                 >
                   Next: Select Teacher
@@ -420,47 +698,59 @@ export function NewExperiment() {
             </Card>
           )}
 
-          {/* Step 2: Teacher Selection */}
+          {/* Step 2: Teacher Selection with Live Search */}
           {currentStep === 2 && (
-            <Card padding="lg" className="animate-fade-in">
-              <h2 className="text-2xl font-bold text-text-primary mb-4">Select Teacher Model</h2>
-              <p className="text-text-secondary mb-6">
-                Choose a teacher model compatible with Mac M2. The teacher model will be used to train the student.
-              </p>
-
-              <div className="space-y-3">
-                {TEACHER_MODELS.map((model) => (
-                  <div
-                    key={model.id}
-                    onClick={() => setSelectedTeacher(model.id)}
-                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                      selectedTeacher === model.id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border-light hover:border-primary/50 hover:bg-bg-tertiary'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-semibold text-text-primary">{model.name}</h3>
-                          <span className="px-2 py-0.5 bg-bg-tertiary rounded text-xs font-semibold text-text-secondary">
-                            {model.params}
-                          </span>
-                          <span className="px-2 py-0.5 bg-warning/20 rounded text-xs font-semibold text-warning-dark">
-                            {model.size}
-                          </span>
-                        </div>
-                        <p className="text-sm text-text-secondary">{model.description}</p>
-                      </div>
-                      {selectedTeacher === model.id && (
-                        <Check className="w-6 h-6 text-primary flex-shrink-0 ml-4" />
-                      )}
-                    </div>
-                  </div>
-                ))}
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h2 className="text-2xl font-bold text-text-primary mb-2">Select Teacher Model</h2>
+                <p className="text-text-secondary">
+                  Search and select a teacher model from HuggingFace Hub. The teacher model will guide the student's learning.
+                </p>
               </div>
 
-              <div className="flex justify-between mt-6">
+              <Card padding="lg">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-text-primary">Search Teacher Models</h3>
+                  {selectedTeacher && (
+                    <span className="text-sm text-accent flex items-center gap-1">
+                      <Check className="w-4 h-4" />
+                      Selected
+                    </span>
+                  )}
+                </div>
+                <ModelBrowser
+                  type="teacher"
+                  selectedModel={selectedTeacher}
+                  onSelect={(modelId) => setSelectedTeacher(modelId)}
+                />
+              </Card>
+
+              {/* Quick Recommendations */}
+              {!selectedTeacher && (
+                <Card padding="lg" className="bg-bg-tertiary border-border-light">
+                  <h4 className="font-semibold text-text-primary mb-3">💡 Popular Teacher Models</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {TEACHER_MODELS.map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => setSelectedTeacher(model.id)}
+                        className="text-left p-4 rounded-lg border-2 border-border-light hover:border-primary hover:bg-primary/5 transition-all"
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <h5 className="font-medium text-text-primary">{model.name}</h5>
+                          <span className="text-xs bg-bg-secondary px-2 py-0.5 rounded text-text-muted">
+                            {model.params}
+                          </span>
+                        </div>
+                        <p className="text-sm text-text-secondary mb-2">{model.description}</p>
+                        <p className="text-xs text-text-muted font-mono">{model.id}</p>
+                      </button>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              <div className="flex justify-between pt-4">
                 <Button variant="secondary" size="lg" onClick={() => setCurrentStep(1)}>
                   Back
                 </Button>
@@ -473,70 +763,92 @@ export function NewExperiment() {
                   Next: Select Student
                 </Button>
               </div>
-            </Card>
+            </div>
           )}
 
-          {/* Step 3: Student Selection */}
+          {/* Step 3: Student Selection with Live Search */}
           {currentStep === 3 && (
-            <Card padding="lg" className="animate-fade-in">
-              <h2 className="text-2xl font-bold text-text-primary mb-4">Select Student Model</h2>
-              <p className="text-text-secondary mb-6">
-                Choose a student model compatible with{' '}
-                <span className="font-semibold text-primary">
-                  {TEACHER_MODELS.find(t => t.id === selectedTeacher)?.name}
-                </span>
-              </p>
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h2 className="text-2xl font-bold text-text-primary mb-2">Select Student Model</h2>
+                <p className="text-text-secondary">
+                  Search and select a student model compatible with{' '}
+                  <span className="font-semibold text-primary">
+                    {TEACHER_MODELS.find(t => t.id === selectedTeacher)?.name || selectedTeacher}
+                  </span>
+                </p>
+              </div>
 
-              {compatibleStudents.length === 0 ? (
-                <div className="p-6 bg-error/10 border border-error rounded-lg text-center">
-                  <AlertCircle className="w-12 h-12 mx-auto text-error mb-3" />
-                  <p className="text-lg font-semibold text-error mb-2">No Compatible Students Found</p>
-                  <p className="text-sm text-text-secondary">
-                    Please go back and select a different teacher model.
+              <Card padding="lg">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-text-primary">Search Student Models</h3>
+                  {selectedStudent && (
+                    <span className="text-sm text-accent flex items-center gap-1">
+                      <Check className="w-4 h-4" />
+                      Selected
+                    </span>
+                  )}
+                </div>
+                <ModelBrowser
+                  type="student"
+                  selectedModel={selectedStudent}
+                  onSelect={(modelId) => setSelectedStudent(modelId)}
+                  teacherModel={selectedTeacher}
+                />
+              </Card>
+
+              {/* Quick Recommendations */}
+              {!selectedStudent && compatibleStudents.length > 0 && (
+                <Card padding="lg" className="bg-bg-tertiary border-border-light">
+                  <h4 className="font-semibold text-text-primary mb-3">💡 Recommended Student Models</h4>
+                  <p className="text-xs text-text-muted mb-4">
+                    These models are commonly paired with {TEACHER_MODELS.find(t => t.id === selectedTeacher)?.name}
                   </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {compatibleStudents.map((model) => {
-                    const teacher = TEACHER_MODELS.find(t => t.id === selectedTeacher);
-                    const compressionRatio = teacher
-                      ? (parseFloat(teacher.params) / parseFloat(model.params)).toFixed(1)
-                      : 'N/A';
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {compatibleStudents.slice(0, 4).map((model) => {
+                      const teacher = TEACHER_MODELS.find(t => t.id === selectedTeacher);
+                      const compressionRatio = teacher
+                        ? (parseFloat(teacher.params) / parseFloat(model.params)).toFixed(1)
+                        : 'N/A';
 
-                    return (
-                      <div
-                        key={model.id}
-                        onClick={() => setSelectedStudent(model.id)}
-                        className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                          selectedStudent === model.id
-                            ? 'border-accent bg-accent/5'
-                            : 'border-border-light hover:border-accent/50 hover:bg-bg-tertiary'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h3 className="font-semibold text-text-primary">{model.name}</h3>
-                              <span className="px-2 py-0.5 bg-bg-tertiary rounded text-xs font-semibold text-text-secondary">
-                                {model.params}
-                              </span>
-                              <span className="px-2 py-0.5 bg-accent/20 rounded text-xs font-semibold text-accent-dark">
-                                {compressionRatio}x smaller
-                              </span>
-                            </div>
-                            <p className="text-sm text-text-secondary">Size: {model.size}</p>
+                      return (
+                        <button
+                          key={model.id}
+                          onClick={() => setSelectedStudent(model.id)}
+                          className="text-left p-4 rounded-lg border-2 border-border-light hover:border-accent hover:bg-accent/5 transition-all"
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <h5 className="font-medium text-text-primary">{model.name}</h5>
+                            <span className="text-xs bg-accent/20 px-2 py-0.5 rounded text-accent-dark">
+                              {compressionRatio}x smaller
+                            </span>
                           </div>
-                          {selectedStudent === model.id && (
-                            <Check className="w-6 h-6 text-accent flex-shrink-0 ml-4" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                          <p className="text-sm text-text-secondary mb-2">
+                            {model.params} params • {model.size}
+                          </p>
+                          <p className="text-xs text-text-muted font-mono">{model.id}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Card>
               )}
 
-              <div className="flex justify-between mt-6">
+              {compatibleStudents.length === 0 && (
+                <Card padding="lg" className="bg-warning/10 border-warning/20">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-text-primary mb-1">No pre-configured compatible students</p>
+                      <p className="text-sm text-text-secondary">
+                        Use the search above to find any student model from HuggingFace Hub
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              <div className="flex justify-between pt-4">
                 <Button variant="secondary" size="lg" onClick={() => setCurrentStep(2)}>
                   Back
                 </Button>
@@ -552,78 +864,196 @@ export function NewExperiment() {
                   Next: Run Preflight
                 </Button>
               </div>
-            </Card>
+            </div>
           )}
 
-          {/* Step 4: Preflight Check */}
+          {/* Step 4: Enhanced Preflight Check */}
           {currentStep === 4 && (
-            <Card padding="lg" className="animate-fade-in">
-              <h2 className="text-2xl font-bold text-text-primary mb-4">Preflight Check</h2>
-              <p className="text-text-secondary mb-6">
-                Validating teacher-student compatibility and estimating training parameters
-              </p>
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h2 className="text-2xl font-bold text-text-primary mb-2">Preflight Validation</h2>
+                <p className="text-text-secondary">
+                  Validating models, checking device compatibility, and estimating resources
+                </p>
+              </div>
+
+              {/* Debug Panel */}
+              <PreflightDebugPanel
+                selectedTeacher={selectedTeacher}
+                selectedStudent={selectedStudent}
+                selectedDataset={selectedBuiltInDataset || datasetFile?.name || 'imdb_sample'}
+              />
 
               {loading ? (
-                <div className="py-12 text-center">
-                  <Loader2 className="w-16 h-16 mx-auto text-primary animate-spin mb-4" />
-                  <p className="text-lg text-text-secondary">Running compatibility checks...</p>
-                </div>
+                <Card padding="lg">
+                  <div className="py-12 text-center">
+                    <Loader2 className="w-16 h-16 mx-auto text-primary animate-spin mb-4" />
+                    <p className="text-lg text-text-secondary">Running comprehensive validation...</p>
+                    <p className="text-sm text-text-muted mt-2">
+                      Checking HuggingFace models, device compatibility, and architecture support
+                    </p>
+                  </div>
+                </Card>
               ) : preflightResult ? (
                 <div className="space-y-4">
-                  {/* Compatibility Status */}
-                  <div
-                    className={`p-6 rounded-lg border-2 ${
+                  {/* Main Status Card */}
+                  <Card
+                    padding="lg"
+                    className={
                       preflightResult.compatible
-                        ? 'bg-accent/10 border-accent'
-                        : 'bg-error/10 border-error'
-                    }`}
+                        ? 'bg-accent/10 border-2 border-accent'
+                        : 'bg-error/10 border-2 border-error'
+                    }
                   >
-                    <div className="flex items-center gap-3 mb-3">
+                    <div className="flex items-center gap-3 mb-4">
                       {preflightResult.compatible ? (
-                        <Check className="w-8 h-8 text-accent" />
+                        <Check className="w-10 h-10 text-accent" />
                       ) : (
-                        <AlertCircle className="w-8 h-8 text-error" />
+                        <AlertCircle className="w-10 h-10 text-error" />
                       )}
-                      <h3 className="text-xl font-bold">
-                        {preflightResult.compatible ? 'All Checks Passed ✓' : 'Compatibility Issues Found'}
-                      </h3>
+                      <div>
+                        <h3 className="text-xl font-bold text-text-primary">
+                          {preflightResult.compatible 
+                            ? '✓ All Validation Checks Passed' 
+                            : '✗ Validation Issues Detected'}
+                        </h3>
+                        <p className="text-sm text-text-secondary mt-1">
+                          {preflightResult.compatible
+                            ? 'Models are compatible and ready for training'
+                            : 'Please review the issues below and select alternative models'}
+                        </p>
+                      </div>
                     </div>
-                    {preflightResult.warnings.length > 0 && (
-                      <div className="space-y-2">
+
+                    {/* Issues/Warnings */}
+                    {preflightResult.warnings && preflightResult.warnings.length > 0 && (
+                      <div className="space-y-2 mb-4">
                         {preflightResult.warnings.map((warning: string, idx: number) => (
-                          <p key={idx} className="text-sm text-error font-medium">
-                            • {warning}
-                          </p>
+                          <div key={idx} className="flex items-start gap-2 text-sm">
+                            <AlertCircle className="w-4 h-4 text-error flex-shrink-0 mt-0.5" />
+                            <p className={preflightResult.compatible ? 'text-warning-dark' : 'text-error'}>
+                              {warning}
+                            </p>
+                          </div>
                         ))}
                       </div>
                     )}
-                  </div>
 
-                  {/* Metrics Grid */}
+                    {/* Recommendations */}
+                    {preflightResult.recommendations && preflightResult.recommendations.length > 0 && (
+                      <div className="space-y-2 pt-4 border-t border-accent/20">
+                        <p className="text-sm font-semibold text-text-primary">Recommendations:</p>
+                        {preflightResult.recommendations.map((rec: string, idx: number) => (
+                          <div key={idx} className="flex items-start gap-2 text-sm text-accent-dark">
+                            <Check className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                            <p>{rec}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* Metrics Grid (if compatible) */}
                   {preflightResult.compatible && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-4 bg-bg-tertiary rounded-lg">
-                        <p className="text-sm text-text-secondary mb-1">Teacher Size</p>
-                        <p className="text-2xl font-bold text-text-primary">{preflightResult.teacherSize}</p>
-                      </div>
-                      <div className="p-4 bg-bg-tertiary rounded-lg">
-                        <p className="text-sm text-text-secondary mb-1">Student Size</p>
-                        <p className="text-2xl font-bold text-accent">{preflightResult.studentSize}</p>
-                      </div>
-                      <div className="p-4 bg-bg-tertiary rounded-lg">
-                        <p className="text-sm text-text-secondary mb-1">Compression Ratio</p>
-                        <p className="text-2xl font-bold text-primary">{preflightResult.compressionRatio}x</p>
-                      </div>
-                      <div className="p-4 bg-bg-tertiary rounded-lg">
-                        <p className="text-sm text-text-secondary mb-1">Estimated Time</p>
-                        <p className="text-2xl font-bold text-warning">{preflightResult.estimatedTime}</p>
-                      </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <Card padding="md" className="bg-bg-tertiary">
+                        <p className="text-xs text-text-secondary mb-1">Teacher Size</p>
+                        <p className="text-xl font-bold text-text-primary">{preflightResult.teacherSize}</p>
+                      </Card>
+                      <Card padding="md" className="bg-bg-tertiary">
+                        <p className="text-xs text-text-secondary mb-1">Student Size</p>
+                        <p className="text-xl font-bold text-accent">{preflightResult.studentSize}</p>
+                      </Card>
+                      <Card padding="md" className="bg-bg-tertiary">
+                        <p className="text-xs text-text-secondary mb-1">Compression</p>
+                        <p className="text-xl font-bold text-primary">{preflightResult.compressionRatio}</p>
+                      </Card>
+                      <Card padding="md" className="bg-bg-tertiary">
+                        <p className="text-xs text-text-secondary mb-1">Est. Time</p>
+                        <p className="text-xl font-bold text-warning">{preflightResult.estimatedTime}</p>
+                      </Card>
                     </div>
+                  )}
+
+                  {/* Device Info */}
+                  {preflightResult.deviceInfo && (
+                    <Card padding="md" className="bg-primary/5">
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-2 h-2 rounded-full bg-accent animate-pulse"></div>
+                        <span className="font-medium text-text-primary">
+                          Training will run on: <span className="text-primary font-bold">
+                            {preflightResult.deviceInfo.current_device.toUpperCase()}
+                          </span>
+                        </span>
+                        {preflightResult.deviceInfo.cuda_capability && (
+                          <span className="text-text-muted ml-2">
+                            (Compute {preflightResult.deviceInfo.cuda_capability})
+                          </span>
+                        )}
+                        {preflightResult.deviceInfo.cuda_device_name && (
+                          <span className="text-text-muted ml-2">
+                            - {preflightResult.deviceInfo.cuda_device_name}
+                          </span>
+                        )}
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Alternative Suggestions (if incompatible) */}
+                  {!preflightResult.compatible && preflightResult.alternatives && (
+                    <>
+                      {preflightResult.alternatives.teacher?.length > 0 && (
+                        <Card padding="lg">
+                          <h4 className="font-semibold text-text-primary mb-3">
+                            💡 Alternative Teacher Models
+                          </h4>
+                          <div className="space-y-2">
+                            {preflightResult.alternatives.teacher.map((alt: any, idx: number) => (
+                              <button
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedTeacher(alt.model_id);
+                                  setCurrentStep(2);
+                                }}
+                                className="w-full text-left p-3 rounded-lg border border-border-light hover:border-primary hover:bg-primary/5 transition-all"
+                              >
+                                <p className="font-medium text-text-primary">{alt.model_id}</p>
+                                <p className="text-xs text-text-secondary mt-1">{alt.reason}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </Card>
+                      )}
+
+                      {preflightResult.alternatives.student?.length > 0 && (
+                        <Card padding="lg">
+                          <h4 className="font-semibold text-text-primary mb-3">
+                            💡 Alternative Student Models
+                          </h4>
+                          <div className="space-y-2">
+                            {preflightResult.alternatives.student.map((alt: any, idx: number) => (
+                              <button
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedStudent(alt.model_id);
+                                  setCurrentStep(3);
+                                }}
+                                className="w-full text-left p-3 rounded-lg border border-border-light hover:border-accent hover:bg-accent/5 transition-all"
+                              >
+                                <p className="font-medium text-text-primary">{alt.model_id}</p>
+                                <p className="text-xs text-text-secondary mt-1">{alt.reason}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </Card>
+                      )}
+                    </>
                   )}
                 </div>
               ) : null}
 
-              <div className="flex justify-between mt-6">
+              {/* Navigation */}
+              <div className="flex justify-between pt-4">
                 <Button variant="secondary" size="lg" onClick={() => setCurrentStep(3)}>
                   Back
                 </Button>
@@ -636,7 +1066,7 @@ export function NewExperiment() {
                   Next: Configure Training
                 </Button>
               </div>
-            </Card>
+            </div>
           )}
 
           {/* Step 5: Training Configuration */}
@@ -655,7 +1085,7 @@ export function NewExperiment() {
                   <input
                     type="number"
                     value={config.epochs}
-                    onChange={(e) => setConfig({ ...config, epochs: parseInt(e.target.value) })}
+                    onChange={(e) => setConfig({ ...config, epochs: parseInt(e.target.value) || 3 })}
                     className="w-full px-4 py-2 border border-border-medium rounded-lg focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                     min="1"
                     max="20"
@@ -670,7 +1100,7 @@ export function NewExperiment() {
                   <input
                     type="number"
                     value={config.batchSize}
-                    onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) })}
+                    onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) || 32 })}
                     className="w-full px-4 py-2 border border-border-medium rounded-lg focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                     min="8"
                     max="128"
@@ -686,7 +1116,7 @@ export function NewExperiment() {
                   <input
                     type="number"
                     value={config.learningRate}
-                    onChange={(e) => setConfig({ ...config, learningRate: parseFloat(e.target.value) })}
+                    onChange={(e) => setConfig({ ...config, learningRate: parseFloat(e.target.value) || 2e-5 })}
                     className="w-full px-4 py-2 border border-border-medium rounded-lg focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                     min="0.00001"
                     max="0.001"
@@ -702,7 +1132,7 @@ export function NewExperiment() {
                   <input
                     type="number"
                     value={config.temperature}
-                    onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+                    onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) || 4.0 })}
                     className="w-full px-4 py-2 border border-border-medium rounded-lg focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                     min="1"
                     max="10"

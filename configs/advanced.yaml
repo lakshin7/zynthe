@@ -39,13 +39,13 @@ train:
 
 model:
   # Teacher model (larger, state-of-the-art)
-  name: "roberta-base"                     # Teacher: RoBERTa-base (125M params)
-  # Student model (smaller, efficient)  
+  name: "textattack/roberta-base-imdb"      # Teacher: RoBERTa fine-tuned on IMDB
+  # Student model (smaller, efficient)
   student_name: "distilroberta-base"       # Student: DistilRoBERTa (82M params)
   type: "transformer"                      # Sequence classification transformers
   
   # Tokenizer configuration
-  tokenizer_name: "roberta-base"  # Use teacher's tokenizer
+  tokenizer_name: "roberta-base"  # Compatible tokenizer for both models
   
   # Model-specific settings
   max_length: 256              # Maximum sequence length
@@ -84,6 +84,15 @@ data:
     remove_special_chars: false
     max_examples: 10000        # Limit for faster training on Mac M2
 
+preprocessing:
+  text_field: text
+  label_field: label
+  merge_fields: []
+  task_prefix: null
+  lowercase: true
+  strip: true
+  cache_tokenized: false
+
 device:
   prefer_mps: true             # Use Apple Silicon GPU
   prefer_cuda: false           # Not available on Mac
@@ -120,6 +129,19 @@ similarity_transfer:
   layers: ["attention", "intermediate", "output"]  # Which layers to align
   similarity_metric: "cosine"  # cosine, mse, or kl_div
   weight: 0.5
+
+explainability:
+  enable_lime: true
+  enable_shap: true
+  methods: ["lime", "shap"]
+  num_samples: 4
+  lime_num_features: 8
+  shap_top_k: 10
+  shap_background_size: 8
+  class_names: ["negative", "positive"]
+
+evaluation:
+  label_names: ["negative", "positive"]
 
 # Evaluation settings
 evaluate:

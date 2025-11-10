@@ -1,0 +1,62 @@
+# Configuration for Testing Enhanced Visualizations
+# Uses regular Trainer (not MultiStageDistiller) to generate all visualization artifacts
+
+train:
+  epochs: 2                    # Distillation epochs
+  batch_size: 16
+  lr: 0.00003                  # 3e-5 as float
+  gradient_accumulation_steps: 1
+  use_amp: false
+  early_stop_patience: 5
+  # Detailed logging and comparisons
+  log_detail: true
+  batch_log_interval: 5
+  csv_logging: true
+  enable_comparison_plot: true
+  show_eta: true
+  
+  # Teacher training enabled
+  train_teacher: true          # ✅ Train teacher before distillation
+  teacher_epochs: 2            # Fine-tune teacher for 2 epochs
+  teacher_lr: 0.00002          # 2e-5 as float
+
+model:
+  name: "roberta-base"
+  student_name: "distilroberta-base"
+  type: "transformer"
+  tokenizer_name: "roberta-base"
+  max_length: 128
+
+distillation:
+  type: "kd"                   # Use base KD (triggers regular Trainer, not MultiStage)
+  method: "kd_hinton"
+  temperature: 2.0
+  alpha: 0.5
+  config:
+    temperature: 2.0
+    alpha: 0.5
+
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+  preprocessing:
+    max_examples: 500          # Quick test with 500 samples
+
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+output_root: "experiments"
+seed: 42
+
+quantization:
+  enable: false
+
+visualization:
+  enable: true
+  save_plots: true
+  plot_confusion_matrix: true
+
+live:
+  enabled: true
+  stream_url: "http://127.0.0.1:8000/api/stream"

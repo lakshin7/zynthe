@@ -9,30 +9,61 @@ An enterprise-grade, extensible framework for knowledge distillation and model c
 
 ## 🎯 Quick Start
 
+### Desktop App (Recommended)
+
+Launch the beautiful Electron desktop app with one command:
+
+```bash
+# First time setup
+pip install -r requirements.txt
+cd ui && npm install && cd ..
+
+# Launch Zynthe Desktop
+./start-zynthe.sh
+```
+
+This starts:
+- 🖥️ **Electron UI** on http://localhost:5173
+- 📡 **FastAPI Backend** on http://localhost:8765
+
+**Features:**
+- Glass morphism design with pastel colors
+- Auto-Student architecture generator
+- Real-time training monitoring
+- Dark/Light themes
+- WebSocket live updates
+
+For quick development (no setup checks):
+```bash
+./dev.sh
+```
+
+### Command Line Interface
+
 Get started with knowledge distillation in 3 simple steps:
 
-### 1. Install Dependencies
+#### 1. Install Dependencies
 ```bash
 git clone <repository-url>
 cd knowledge-distillation-toolkit
 pip install -r requirements.txt
 ```
 
-### 2. Run Your First Distillation
+#### 2. Run Your First Distillation
 ```bash
 python app/main.py --config configs/default.yaml
 ```
 
 This will distill **BERT-base** (110M params) → **DistilBERT** (66M params) on IMDB sentiment data.
 
-### 3. Check Results
+#### 3. Check Results
 ```bash
 # Results saved in experiments/TIMESTAMP_HASH/
 ls experiments/$(ls experiments/ | tail -1)/
 # config.yaml  student_model/  teacher_model/  training_metrics.json  evaluation_report.json
 ```
 
-### 4. Compare Teacher vs Student
+#### 4. Compare Teacher vs Student
 ```bash
 # Run comprehensive comparison
 python examples/compare_teacher_student.py

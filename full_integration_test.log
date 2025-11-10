@@ -1,0 +1,33 @@
+2025-11-07 14:15:39,071 INFO core.config.config_manager: Loaded default config from: /Users/lakshins/Documents/Zynthe/configs/default.yaml
+2025-11-07 14:15:39,074 INFO core.config.config_manager: Loaded user config from: configs/default.yaml
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Some weights of DistilBertForSequenceClassification were not initialized from the model checkpoint at distilbert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight', 'pre_classifier.bias', 'pre_classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+/Users/lakshins/Documents/Zynthe/core/distillers/multi_stage_distiller.py:53: UserWarning: QAT not available. Stage 'qat' will be skipped.
+  warnings.warn("QAT not available. Stage 'qat' will be skipped.")
+/Users/lakshins/Documents/Zynthe/training/trainer.py:41: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = GradScaler() if self.use_amp else None
+/Users/lakshins/Documents/Zynthe/.venv/lib/python3.13/site-packages/torch/cuda/amp/grad_scaler.py:31: UserWarning: torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.
+  super().__init__(
+2025-11-07 14:15:42,923 INFO training.optimizer: Creating adamw optimizer for distillation phase
+2025-11-07 14:15:42,923 INFO training.optimizer: Learning rate: 2e-05, Weight decay: 0.01
+2025-11-07 14:15:42,928 INFO training.trainer: ================================================================================
+2025-11-07 14:15:42,928 INFO training.trainer: PRE-TRAINING DATA VALIDATION
+2025-11-07 14:15:42,928 INFO training.trainer: ================================================================================
+2025-11-07 14:15:43,158 INFO core.utils.data_validator: ================================================================================
+2025-11-07 14:15:43,158 INFO core.utils.data_validator: DATA VALIDATION REPORT
+2025-11-07 14:15:43,158 INFO core.utils.data_validator: ================================================================================
+2025-11-07 14:15:43,158 INFO core.utils.data_validator: Checking for data leakage between train and validation sets...
+2025-11-07 14:15:43,159 INFO core.utils.data_validator: ✓ No exact overlap detected between train and val
+2025-11-07 14:15:43,159 INFO core.utils.data_validator: 
+Validation Summary:
+2025-11-07 14:15:43,159 INFO core.utils.data_validator:   Train: 500 samples, 2 classes
+2025-11-07 14:15:43,159 INFO core.utils.data_validator:   Val:   500 samples, 2 classes
+2025-11-07 14:15:43,159 INFO core.utils.data_validator:   Leakage: ✓ None
+2025-11-07 14:15:43,159 INFO core.utils.data_validator:   Status: ✓ PASSED
+2025-11-07 14:15:43,159 INFO core.utils.data_validator: ================================================================================
+2025-11-07 14:15:43,160 INFO core.utils.data_validator: Validation report saved to experiments/20251107T084539Z_cbb6612b/data_validation_report.json
+2025-11-07 14:15:43,160 INFO training.trainer: ================================================================================
+2025-11-07 14:15:43,160 INFO training.scheduler: Creating cosine scheduler
+2025-11-07 14:15:43,160 INFO training.scheduler: Warmup enabled: 50 steps

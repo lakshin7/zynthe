@@ -1,0 +1,244 @@
+# Similarity Transfer Configuration
+# Relational Knowledge Distillation via Structural Relationships
+# Captures the "geometric soul" of teacher's understanding
+
+experiment_name: "similarity_transfer_relational_kd"
+output_dir: "./experiments"
+
+# Model configuration
+model:
+  teacher: "distilbert-base-uncased"
+  student: "distilbert-base-uncased"
+  teacher_checkpoint: null  # Path to teacher checkpoint
+  student_checkpoint: null
+
+# Dataset configuration
+data:
+  dataset: "imdb"
+  train_file: "./data/imdb_train.jsonl"
+  val_file: "./data/imdb_val.jsonl"
+  batch_size: 16
+  max_length: 128
+  num_workers: 2
+
+# Training configuration
+training:
+  num_epochs: 3
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_steps: 100
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  seed: 42
+
+# ===================================================================
+# SIMILARITY TRANSFER DISTILLER CONFIGURATIONS
+# ===================================================================
+
+# --- Configuration 1: Cosine Similarity (Default) ---
+# Best for: General relational knowledge transfer
+# Use when: Standard distillation with relationship preservation
+distiller:
+  type: "similarity"
+  config:
+    # Layer configuration
+    layer: "transformer.layer.5"  # Single layer mode
+    # layers: []  # Multi-layer mode (if specified, overrides 'layer')
+    
+    # Similarity metric
+    similarity_metric: "cosine"  # Options: cosine, euclidean, graph
+    
+    # Loss weights
+    weight: 1.0          # Similarity loss weight
+    temperature: 4.0     # Temperature for KD loss
+    kd_weight: 0.5       # KD loss weight (combined with similarity)
+    
+    # Feature processing
+    normalize: true      # Normalize features before similarity
+    
+    # Advanced features (all disabled by default)
+    progressive: false   # Progressive layer transfer
+    cross_modality: false  # Cross-modality alignment
+    graph_mode: false    # Graph-based similarity
+
+# --- Configuration 2: Progressive Layer Transfer ---
+# Best for: Hierarchical learning (shallow → deep)
+# Use when: Want gradual complexity increase
+# Uncomment to use:
+# distiller:
+#   type: "similarity"
+#   config:
+#     layers: ["transformer.layer.2", "transformer.layer.4", "transformer.layer.6"]
+#     similarity_metric: "cosine"
+#     weight: 1.0
+#     temperature: 4.0
+#     kd_weight: 0.5
+#     normalize: true
+#     progressive: true      # Enable progressive transfer
+#     progressive_epochs: 3  # Add 1 layer every 3 epochs
+#     cross_modality: false
+#     graph_mode: false
+
+# --- Configuration 3: Cross-Modality Alignment ---
+# Best for: Multimodal models (vision + text)
+# Use when: Distilling CLIP-style models
+# Uncomment to use:
+# distiller:
+#   type: "similarity"
+#   config:
+#     layer: "vision_encoder.layer.5"
+#     text_layer: "text_encoder.layer.5"  # Cross-modality requires text_layer
+#     similarity_metric: "cosine"
+#     weight: 1.0
+#     temperature: 4.0
+#     kd_weight: 0.3
+#     normalize: true
+#     progressive: false
+#     cross_modality: true   # Enable cross-modality alignment
+#     cross_modality_weight: 0.7  # Weight for cross-modal loss
+#     graph_mode: false
+
+# --- Configuration 4: Graph-Based Similarity ---
+# Best for: Sparse relational structures
+# Use when: Want adaptive topology learning
+# Uncomment to use:
+# distiller:
+#   type: "similarity"
+#   config:
+#     layer: "transformer.layer.5"
+#     similarity_metric: "graph"  # Graph-based similarity
+#     weight: 1.0
+#     temperature: 4.0
+#     kd_weight: 0.5
+#     normalize: true
+#     progressive: false
+#     cross_modality: false
+#     graph_mode: true       # Enable graph-based similarity
+#     graph_threshold: 0.5   # Adaptive threshold for graph edges
+
+# --- Configuration 5: Full Feature Set ---
+# Best for: Research experiments
+# Use when: Exploring all capabilities simultaneously
+# Uncomment to use:
+# distiller:
+#   type: "similarity"
+#   config:
+#     layers: ["transformer.layer.2", "transformer.layer.4", "transformer.layer.6"]
+#     text_layer: "text_encoder.layer.5"  # For cross-modality
+#     similarity_metric: "graph"
+#     weight: 1.0
+#     temperature: 4.0
+#     kd_weight: 0.3
+#     normalize: true
+#     progressive: true      # Progressive layer transfer
+#     progressive_epochs: 2
+#     cross_modality: true   # Cross-modality alignment
+#     cross_modality_weight: 0.5
+#     graph_mode: true       # Graph-based similarity
+#     graph_threshold: 0.5
+
+# ===================================================================
+# EVALUATION & REPORTING
+# ===================================================================
+
+evaluation:
+  eval_steps: 500
+  save_steps: 1000
+  logging_steps: 100
+  save_total_limit: 3
+
+reporting:
+  track_sas: true        # Track Structural Alignment Score
+  log_similarity_matrices: false  # Log similarity matrices (large)
+  visualize_graphs: false  # Visualize graph structures
+  
+# ===================================================================
+# MULTI-STAGE PIPELINE INTEGRATION
+# ===================================================================
+# To use Similarity Transfer in multi-stage pipeline:
+# 
+# multi_stage:
+#   stages:
+#     - name: "logit_alignment"
+#       type: "kd"
+#       epochs: 2
+#       config:
+#         temperature: 4.0
+#         alpha: 0.9
+#     
+#     - name: "feature_distillation"
+#       type: "feature"
+#       epochs: 2
+#       config:
+#         layers: ["transformer.layer.3", "transformer.layer.5"]
+#         loss_type: "mse"
+#     
+#     - name: "similarity_transfer"  # Stage 3: Relational Knowledge
+#       type: "similarity"
+#       epochs: 3
+#       config:
+#         layer: "transformer.layer.5"
+#         similarity_metric: "cosine"
+#         weight: 1.0
+#         progressive: true
+#     
+#     - name: "attention_imitation"
+#       type: "attention"
+#       epochs: 2
+#       config:
+#         beta: 1000.0
+# ===================================================================
+
+# ===================================================================
+# MATHEMATICAL FOUNDATION
+# ===================================================================
+# Similarity Transfer Loss:
+#   L_sim = ||S_teacher - S_student||²_F
+# 
+# Where:
+#   S = normalize(F) @ normalize(F)^T  (pairwise similarity matrix)
+#   F = feature embeddings [batch_size, feature_dim]
+#   ||·||²_F = Frobenius norm (element-wise squared differences)
+#
+# Metrics:
+#   - cosine: S_ij = (f_i · f_j) / (||f_i|| ||f_j||)
+#   - euclidean: S_ij = -||f_i - f_j||²
+#   - graph: S_ij = A_ij where A is learned adjacency matrix
+#
+# Structural Alignment Score (SAS):
+#   SAS = 1 - (||S_t - S_s||_F / sqrt(batch_size²)) ∈ [0, 1]
+#   Higher is better (1.0 = perfect structural alignment)
+# ===================================================================
+
+# ===================================================================
+# USAGE NOTES
+# ===================================================================
+# 1. Single vs Multi-layer:
+#    - Use 'layer' for single layer (simpler, faster)
+#    - Use 'layers' for multiple layers (more comprehensive)
+#
+# 2. Similarity Metrics:
+#    - cosine: Angle-based, rotation invariant
+#    - euclidean: Distance-based, scale sensitive
+#    - graph: Sparse, adaptive topology
+#
+# 3. Progressive Mode:
+#    - Starts with shallow layers
+#    - Adds deeper layers each epoch
+#    - Gradual complexity increase
+#
+# 4. Cross-Modality:
+#    - Requires multimodal teacher/student
+#    - Aligns vision and text embeddings
+#    - Inspired by CLIP training
+#
+# 5. Graph Mode:
+#    - Sparse similarity matrices
+#    - Adaptive threshold (default 0.5)
+#    - Good for large batch sizes
+#
+# 6. SAS Metric:
+#    - Tracks relationship preservation
+#    - Range: [0, 1], higher is better
+#    - Logged every epoch
+# ===================================================================

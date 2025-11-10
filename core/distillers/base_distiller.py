@@ -160,6 +160,18 @@ class BaseDistiller(nn.Module):
         ```
         """
         pass  # Subclasses implement as needed
+
+    def _move_to_device(self, data: Any) -> Any:
+        """Recursively move tensors contained in `data` onto the distiller's device."""
+        if isinstance(data, torch.Tensor):
+            return data.to(self.device)
+        if isinstance(data, dict):
+            return {k: self._move_to_device(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._move_to_device(v) for v in data]
+        if isinstance(data, tuple):
+            return tuple(self._move_to_device(v) for v in data)
+        return data
     
     def _get_teacher_hook(self, name: str) -> Callable:
         """Create a forward hook for teacher features."""
@@ -296,6 +308,10 @@ class BaseDistiller(nn.Module):
         self.teacher_hooks.clear()
         self.student_hooks.clear()
         
+        # Ensure inputs/kwargs live on the desired device (important when tests bypass training_step)
+        inputs = self._move_to_device(inputs)
+        kwargs = {k: self._move_to_device(v) for k, v in kwargs.items()}
+
         # Teacher forward (no gradients)
         with torch.no_grad():
             if isinstance(inputs, dict):
@@ -396,19 +412,14 @@ class BaseDistiller(nn.Module):
         
         # Parse batch
         if isinstance(batch, dict):
-            inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                     for k, v in batch.items() if k != 'labels'}
+            inputs = {k: self._move_to_device(v) for k, v in batch.items() if k != 'labels'}
             targets = batch.get('labels', None)
             if targets is not None:
-                targets = targets.to(self.device)
+                targets = self._move_to_device(targets)
         else:
             inputs, targets = batch
-            if isinstance(inputs, dict):
-                inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                         for k, v in inputs.items()}
-            else:
-                inputs = inputs.to(self.device)
-            targets = targets.to(self.device) if targets is not None else None
+            inputs = self._move_to_device(inputs)
+            targets = self._move_to_device(targets) if targets is not None else None
         
         # Forward pass with feature extraction
         forward_result = self.forward(inputs, return_features=True)
@@ -476,19 +487,14 @@ class BaseDistiller(nn.Module):
         
         # Parse batch (same as training_step)
         if isinstance(batch, dict):
-            inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                     for k, v in batch.items() if k != 'labels'}
+            inputs = {k: self._move_to_device(v) for k, v in batch.items() if k != 'labels'}
             targets = batch.get('labels', None)
             if targets is not None:
-                targets = targets.to(self.device)
+                targets = self._move_to_device(targets)
         else:
             inputs, targets = batch
-            if isinstance(inputs, dict):
-                inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                         for k, v in inputs.items()}
-            else:
-                inputs = inputs.to(self.device)
-            targets = targets.to(self.device) if targets is not None else None
+            inputs = self._move_to_device(inputs)
+            targets = self._move_to_device(targets) if targets is not None else None
         
         # Forward pass
         forward_result = self.forward(inputs, return_features=True)

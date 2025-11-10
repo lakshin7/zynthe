@@ -18,10 +18,10 @@ Supports:
 - Video: TimeSformer, VideoMAE, ViViT
 """
 
-from typing import Dict, List, Tuple, Optional, Any, Set
+from typing import Dict, List, Tuple, Optional, Any
 import torch
 import torch.nn as nn
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 import numpy as np
 import warnings
 
@@ -61,20 +61,30 @@ class ModelInspector:
         """
         report = {}
         
+        signatures: Dict[str, Any] = {}
+
         if self.teacher is not None:
             self.teacher_info = self._inspect_model(self.teacher, "teacher")
             report['teacher'] = self.teacher_info
+            signatures['teacher'] = self.teacher_info.get('signature')
         
         if self.student is not None:
             self.student_info = self._inspect_model(self.student, "student")
             report['student'] = self.student_info
+            signatures['student'] = self.student_info.get('signature')
         
         if self.teacher is not None and self.student is not None:
             self.compatibility = self._check_compatibility()
             report['compatibility'] = self.compatibility
             report['compression_ratio'] = self._compute_compression_ratio()
             report['recommended_strategy'] = self._recommend_distillation_strategy()
-            report['layer_mapping'] = self._auto_map_layers()
+            layer_mapping = self._auto_map_layers()
+            report['layer_mapping'] = layer_mapping
+            report['distillation_difficulty'] = self._assess_distillation_difficulty(layer_mapping)
+            report['preset_alignment'] = self._derive_preset_alignment()
+
+        if signatures:
+            report['signatures'] = signatures
         
         return report
     
@@ -104,6 +114,10 @@ class ModelInspector:
             'depth': self._compute_model_depth(model),
             'width': self._compute_model_width(model),
         }
+
+        info['detection_confidence'] = self._compute_detection_confidence(info)
+        info['capabilities'] = self._derive_model_capabilities(model)
+        info['signature'] = self._build_model_signature(info)
         
         return info
     
@@ -325,6 +339,96 @@ class ModelInspector:
                 dimensions.append(module.out_channels)
         
         return int(np.median(dimensions)) if dimensions else 0
+
+    def _compute_detection_confidence(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """Estimate confidence levels for detected attributes."""
+        confidence_scale = {'low': 1, 'medium': 2, 'high': 3}
+
+        def _level(has_high: bool, has_low: bool) -> str:
+            if has_high:
+                return 'high'
+            if has_low:
+                return 'low'
+            return 'medium'
+
+        layer_stats = info.get('layer_structure', {})
+        total_named = layer_stats.get('total_named_layers', 0) or 0
+        module_counts = layer_stats.get('module_counts', {}) or {}
+
+        type_level = _level(info.get('type') not in {'unknown', None}, total_named < 3)
+        arch_count = module_counts.get('attention', 0) + module_counts.get('conv', 0)
+        arch_level = _level(info.get('architecture_family') not in {'unknown', None}, arch_count == 0)
+        output_level = _level(bool(info.get('output_shape')), info.get('output_shape') is None)
+        depth_level = _level(bool(info.get('depth')), info.get('depth', 0) == 0)
+
+        overall_numeric = sum(
+            confidence_scale[level]
+            for level in [type_level, arch_level, output_level, depth_level]
+        ) / 4
+
+        if overall_numeric >= 2.5:
+            overall = 'high'
+        elif overall_numeric >= 1.75:
+            overall = 'medium'
+        else:
+            overall = 'low'
+
+        return {
+            'type': type_level,
+            'architecture': arch_level,
+            'output_shape': output_level,
+            'depth': depth_level,
+            'overall': overall,
+        }
+
+    def _derive_model_capabilities(self, model: nn.Module) -> Dict[str, Any]:
+        """Infer optional capabilities from module structure and config."""
+        module_names = {name.lower() for name, _ in model.named_modules() if name}
+        config = getattr(model, 'config', None)
+
+        supports_adapters = any('adapter' in name for name in module_names) or hasattr(model, 'add_adapter')
+        supports_lora = any('lora' in name for name in module_names) or hasattr(model, 'lora_layers')
+        supports_prefix_tuning = any('prefix' in name for name in module_names)
+        gradient_checkpointing = hasattr(model, 'gradient_checkpointing_enable')
+        quantization_ready = bool(
+            hasattr(model, 'quantization_config') or any('quant' in name for name in module_names)
+        )
+        sequence_limit = None
+        if config is not None:
+            sequence_limit = getattr(config, 'max_position_embeddings', None)
+
+        notes: List[str] = []
+        if supports_adapters:
+            notes.append('Adapter-friendly modules detected.')
+        if supports_lora:
+            notes.append('LoRA hooks present or supported.')
+        if quantization_ready:
+            notes.append('Quantization-specific attributes observed.')
+        if gradient_checkpointing:
+            notes.append('Gradient checkpointing API available.')
+
+        return {
+            'supports_adapters': supports_adapters,
+            'supports_lora': supports_lora,
+            'supports_prefix_tuning': supports_prefix_tuning,
+            'gradient_checkpointing': gradient_checkpointing,
+            'quantization_ready': quantization_ready,
+            'sequence_limit': sequence_limit,
+            'notes': notes,
+        }
+
+    def _build_model_signature(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a compact signature for change tracking."""
+        return {
+            'name': info.get('name'),
+            'type': info.get('type'),
+            'architecture': info.get('architecture_family'),
+            'total_params': info.get('total_params'),
+            'trainable_params': info.get('trainable_params'),
+            'depth': info.get('depth'),
+            'width': info.get('width'),
+            'attention_layers': info.get('attention_layers'),
+        }
     
     def _check_compatibility(self) -> Dict[str, Any]:
         """
@@ -462,6 +566,168 @@ class ModelInspector:
                 strategy['additional_methods'].append('attention')
         
         return strategy
+
+    def _assess_distillation_difficulty(
+        self,
+        layer_mapping: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Generate a heuristic complexity score for the distillation plan."""
+        if not self.teacher_info or not self.student_info:
+            return {
+                'score': None,
+                'level': 'unknown',
+                'drivers': ['Insufficient information to assess difficulty.'],
+                'recommended_actions': []
+            }
+
+        score = 100
+        drivers: List[str] = []
+        actions: List[str] = []
+
+        ratio = self._compute_compression_ratio()
+        if ratio > 12:
+            score -= 30
+            drivers.append(f'Extreme compression target detected ({ratio:.1f}x).')
+            actions.append('Consider multi-stage distillation or intermediate students.')
+        elif ratio > 8:
+            score -= 18
+            drivers.append(f'High compression target ({ratio:.1f}x).')
+        elif ratio < 1.5:
+            score -= 5
+            drivers.append('Compression ratio is low; efficiency gains may be limited.')
+
+        teacher_depth = max(self.teacher_info.get('depth') or 0, 1)
+        student_depth = max(self.student_info.get('depth') or 0, 1)
+        depth_gap = teacher_depth / max(student_depth, 1)
+        if depth_gap > 2.5:
+            score -= 15
+            drivers.append('Teacher depth significantly exceeds student depth.')
+            actions.append('Add adapter layers or intermediate feature heads for deep teachers.')
+        elif depth_gap < 0.7:
+            score -= 5
+            drivers.append('Student deeper than teacher; verify architecture alignment.')
+
+        teacher_type = self.teacher_info.get('type')
+        student_type = self.student_info.get('type')
+        if teacher_type and student_type and teacher_type != student_type:
+            score -= 12
+            drivers.append(f'Type mismatch (teacher={teacher_type}, student={student_type}).')
+            actions.append('Enable cross-domain feature adapters or revisit student selection.')
+
+        t_attention = self.teacher_info.get('attention_layers', 0) or 0
+        s_attention = self.student_info.get('attention_layers', 0) or 0
+        if t_attention > 0 and s_attention == 0:
+            score -= 12
+            drivers.append('Teacher uses attention blocks but student does not.')
+            actions.append('Add attention heads or rely on feature distillation only.')
+
+        compat = self.compatibility or {}
+        errors = compat.get('errors', [])
+        warnings_list = compat.get('warnings', [])
+        if errors:
+            score -= 35
+            drivers.append('Compatibility errors present. Immediate mitigation required.')
+            actions.extend(compat.get('recommendations', []))
+        if warnings_list:
+            warning_penalty = min(len(warnings_list), 5) * 4
+            score -= warning_penalty
+            drivers.append(f'{len(warnings_list)} compatibility warnings detected.')
+
+        if layer_mapping:
+            quality = layer_mapping.get('quality')
+            if quality == 'low':
+                score -= 12
+                drivers.append('Layer mapping coverage is low.')
+                actions.append('Manually map key transformer blocks or attention heads.')
+            elif quality == 'medium':
+                score -= 6
+                drivers.append('Layer mapping coverage is partial.')
+
+        score = max(0, min(100, score))
+
+        if score >= 70:
+            level = 'manageable'
+        elif score >= 40:
+            level = 'challenging'
+        else:
+            level = 'high_risk'
+
+        # Deduplicate actions while preserving order
+        seen = set()
+        unique_actions = []
+        for action in actions:
+            if action and action not in seen:
+                seen.add(action)
+                unique_actions.append(action)
+
+        metrics = {
+            'compression_ratio': ratio,
+            'depth_ratio': round(depth_gap, 3),
+            'attention_gap': max(t_attention - s_attention, 0)
+        }
+
+        return {
+            'score': score,
+            'level': level,
+            'drivers': drivers,
+            'recommended_actions': unique_actions,
+            'metrics': metrics
+        }
+
+    def _derive_preset_alignment(self) -> Dict[str, Any]:
+        """Suggest distillation presets informed by model pairing."""
+        if not self.teacher_info or not self.student_info:
+            return {
+                'primary': None,
+                'alternatives': [],
+                'signals': ['Preset selection requires both teacher and student models.']
+            }
+
+        ratio = self._compute_compression_ratio()
+        teacher_type = self.teacher_info.get('type', 'unknown')
+        teacher_arch = self.teacher_info.get('architecture_family', 'unknown')
+        student_arch = self.student_info.get('architecture_family', 'unknown')
+
+        signals: List[str] = []
+        candidate = 'quick_start'
+        confidence = 'medium'
+
+        if ratio > 8:
+            candidate = 'compression_max'
+            confidence = 'high'
+            signals.append('High compression ratio suggests aggressive compression preset.')
+        elif teacher_arch == 'transformer' and teacher_type == 'nlp':
+            candidate = 'balanced'
+            confidence = 'high'
+            signals.append('Transformer NLP pairing detected; balanced preset recommended.')
+        elif teacher_type in {'vision', 'video'}:
+            candidate = 'vision_transformer'
+            signals.append('Vision architecture detected; use vision-tuned preset.')
+        elif teacher_type == 'audio':
+            candidate = 'audio_specialized'
+            signals.append('Audio model detected; prefer audio-focused preset.')
+        elif ratio < 2:
+            candidate = 'quick_start'
+            signals.append('Low compression target; quick start preset is sufficient.')
+
+        if teacher_arch != student_arch:
+            signals.append('Architecture mismatch; ensure preset enables adaptive features.')
+
+        alternatives: List[Dict[str, Any]] = []
+        if candidate != 'balanced':
+            alternatives.append({'name': 'balanced', 'confidence': 'medium'})
+        if candidate != 'quick_start':
+            alternatives.append({'name': 'quick_start', 'confidence': 'medium'})
+
+        return {
+            'primary': {
+                'name': candidate,
+                'confidence': confidence,
+                'signals': signals
+            },
+            'alternatives': alternatives,
+            'signals': signals,
+        }
     
     def _auto_map_layers(self) -> Dict[str, Any]:
         """
@@ -498,11 +764,31 @@ class ModelInspector:
                     'confidence': 'high' if abs(i / n_student - t_idx / n_teacher) < 0.2 else 'medium'
                 })
         
+        teacher_mapped = {m['teacher'] for m in mappings}
+        student_mapped = {m['student'] for m in mappings}
+        teacher_coverage = len(teacher_mapped) / max(n_teacher, 1)
+        student_coverage = len(student_mapped) / max(n_student, 1)
+
+        min_coverage = min(teacher_coverage, student_coverage)
+        if min_coverage >= 0.75:
+            quality = 'high'
+        elif min_coverage >= 0.45:
+            quality = 'medium'
+        else:
+            quality = 'low'
+
         return {
             'mappings': mappings,
             'teacher_depth': n_teacher,
             'student_depth': n_student,
-            'total_mappings': len(mappings)
+            'total_mappings': len(mappings),
+            'coverage': {
+                'teacher': round(teacher_coverage, 3),
+                'student': round(student_coverage, 3)
+            },
+            'quality': quality,
+            'unmapped_teacher_layers': max(n_teacher - len(teacher_mapped), 0),
+            'unmapped_student_layers': max(n_student - len(student_mapped), 0)
         }
     
     def _filter_key_layers(self, layer_names: List[str]) -> List[str]:
@@ -564,6 +850,9 @@ class ModelInspector:
                 f"Width: {t['width']} dimensions",
                 f"Attention Layers: {t['attention_layers']}",
                 f"Has Embeddings: {t['has_embeddings']}",
+                f"Detection Confidence: {t['detection_confidence']['overall']}",
+                f"Supports Adapters: {'Yes' if t['capabilities']['supports_adapters'] else 'No'}",
+                f"Supports LoRA: {'Yes' if t['capabilities']['supports_lora'] else 'No'}",
                 ""
             ])
         
@@ -582,6 +871,9 @@ class ModelInspector:
                 f"Width: {s['width']} dimensions",
                 f"Attention Layers: {s['attention_layers']}",
                 f"Has Embeddings: {s['has_embeddings']}",
+                f"Detection Confidence: {s['detection_confidence']['overall']}",
+                f"Supports Adapters: {'Yes' if s['capabilities']['supports_adapters'] else 'No'}",
+                f"Supports LoRA: {'Yes' if s['capabilities']['supports_lora'] else 'No'}",
                 ""
             ])
         
@@ -613,6 +905,43 @@ class ModelInspector:
                 for r in compat['recommendations']:
                     lines.append(f"  → {r}")
                 lines.append("")
+
+        if 'distillation_difficulty' in report:
+            difficulty = report['distillation_difficulty']
+            lines.extend([
+                "DISTILLATION DIFFICULTY",
+                "-" * 70,
+                f"Score: {difficulty['score'] if difficulty['score'] is not None else 'n/a'}",
+                f"Level: {difficulty['level'].replace('_', ' ').title()}",
+                "Drivers:"
+            ])
+            for driver in difficulty.get('drivers', [])[:5]:
+                lines.append(f"  • {driver}")
+            if difficulty.get('recommended_actions'):
+                lines.append("Recommended Actions:")
+                for action in difficulty['recommended_actions'][:5]:
+                    lines.append(f"  → {action}")
+            metrics = difficulty.get('metrics', {})
+            if metrics:
+                lines.append("Key Metrics:")
+                for key, value in metrics.items():
+                    lines.append(f"  - {key}: {value}")
+            lines.append("")
+
+        if 'preset_alignment' in report:
+            preset = report['preset_alignment']
+            primary = preset.get('primary') or {}
+            lines.extend([
+                "PRESET ALIGNMENT",
+                "-" * 70,
+                f"Primary Recommendation: {primary.get('name', 'n/a')} (confidence: {primary.get('confidence', 'n/a')})"
+            ])
+            for signal in primary.get('signals', [])[:4]:
+                lines.append(f"  • {signal}")
+            if preset.get('alternatives'):
+                alt_names = ', '.join(a['name'] for a in preset['alternatives'])
+                lines.append(f"Alternatives: {alt_names}")
+            lines.append("")
         
         # Recommended strategy
         if 'recommended_strategy' in report:
@@ -638,6 +967,9 @@ class ModelInspector:
                 f"Teacher Depth: {mapping['teacher_depth']}",
                 f"Student Depth: {mapping['student_depth']}",
                 f"Total Mappings: {mapping['total_mappings']}",
+                f"Quality: {mapping.get('quality', 'unknown').title()}",
+                f"Teacher Coverage: {mapping.get('coverage', {}).get('teacher', 0):.2f}",
+                f"Student Coverage: {mapping.get('coverage', {}).get('student', 0):.2f}",
                 ""
             ])
             

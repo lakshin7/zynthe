@@ -1,0 +1,65 @@
+# =============================================================================
+# High Compression Configuration - BERT → TinyBERT
+# =============================================================================
+# Optimized for Mac M2 8GB RAM
+# Expected: 7.5x compression, 2-4% accuracy drop
+# =============================================================================
+
+# Training Configuration
+train:
+  epochs: 3
+  batch_size: 4                  # Reduced for memory efficiency
+  lr: 2e-5
+  grad_accum_steps: 2            # Compensate for small batch size
+  mixed_precision: false
+  early_stop_patience: 2
+  save_best_only: true
+  log_interval: 10
+
+# Model Configuration
+model:
+  # Teacher: BERT-base (110M parameters)
+  name: "bert-base-uncased"
+  
+  # Student: TinyBERT (14.5M parameters - 7.5x smaller!)
+  student_name: "huawei-noah/TinyBERT_General_4L_312D"
+  
+  type: "transformer"
+  tokenizer_name: "bert-base-uncased"
+  max_length: 128
+  num_labels: 2
+
+# Knowledge Distillation Configuration
+distillation:
+  method: "kd_hinton"
+  temperature: 3.0               # Higher temperature for larger model gap
+  alpha: 0.3                     # More weight on soft labels (70% soft, 30% hard)
+
+# Data Configuration
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+
+# Device Configuration
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+# Output Configuration
+output_root: "experiments"
+seed: 42
+
+# Quantization
+quantization:
+  enable: true
+  mode: ptq
+
+# Advanced Features
+similarity_transfer: true
+evaluate: true
+compare_models: true
+
+# Explainability (optional - disable for faster training)
+explainability:
+  enable_shap: false
+  enable_lime: false

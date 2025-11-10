@@ -1,0 +1,49 @@
+# Configuration with Teacher Training Enabled
+# This config demonstrates training the teacher model first before distillation
+
+train:
+  epochs: 2                    # Distillation epochs
+  batch_size: 16
+  lr: 3e-5
+  grad_accum_steps: 1
+  mixed_precision: false
+  early_stop_patience: 2
+  
+  # Teacher training enabled
+  train_teacher: true          # ✅ Train teacher before distillation
+  teacher_epochs: 2            # Fine-tune teacher for 2 epochs
+  teacher_lr: 2e-5             # Lower LR for teacher fine-tuning
+
+model:
+  name: "roberta-base"
+  student_name: "distilroberta-base"
+  type: "transformer"
+  tokenizer_name: "roberta-base"
+  max_length: 128
+
+distillation:
+  method: "kd_hinton"
+  temperature: 2.0
+  alpha: 0.5
+
+data:
+  train_path: "data/imdb_train.jsonl"
+  val_path: "data/imdb_val.jsonl"
+  preprocessing:
+    max_examples: 1000         # Quick test with 1000 samples
+
+device:
+  prefer_mps: true
+  prefer_cuda: false
+
+output_root: "experiments"
+seed: 42
+
+quantization:
+  enable: true
+  mode: "float16"
+
+visualization:
+  enable: true
+  save_plots: true
+  plot_confusion_matrix: true

@@ -1,110 +1,359 @@
+"""Post-training quantization utilities."""
+
+from __future__ import annotations
+
+import copy
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Type
+
 import torch
-import torch.quantization
+from torch import nn
+
+from core.models.model_loader import ModelLoader
+from core.quant.calibration import CalibrationConfig, CalibrationRunner, build_calibration_loader
+
+LOG = logging.getLogger(__name__)
+
+
+def _resolve_device(device: Any | None) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+    if isinstance(device, str) and device:
+        try:
+            return torch.device(device)
+        except (RuntimeError, TypeError):
+            LOG.warning("Unknown device '%s'; falling back to CPU.", device)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def _resolve_dtype(dtype: Any) -> torch.dtype:
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    if isinstance(dtype, str):
+        mapping = {
+            "qint8": torch.qint8,
+            "quint8": torch.quint8,
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "float32": torch.float32,
+            "fp32": torch.float32,
+        }
+        found = mapping.get(dtype.lower())
+        if found is not None:
+            return found
+    return torch.qint8
+
+
+def _resolve_target_modules(modules: Optional[Sequence[Any]]) -> Tuple[Type[nn.Module], ...]:
+    if not modules:
+        return (nn.Linear,)
+    resolved: list[Type[nn.Module]] = []
+    candidates = modules if isinstance(modules, Sequence) else [modules]
+    for candidate in candidates:
+        if isinstance(candidate, type) and issubclass(candidate, nn.Module):
+            resolved.append(candidate)
+        elif isinstance(candidate, str):
+            attr = getattr(nn, candidate, None)
+            if isinstance(attr, type) and issubclass(attr, nn.Module):
+                resolved.append(attr)
+            else:
+                LOG.warning("Unknown module '%s' requested for PTQ; skipping.", candidate)
+    return tuple(resolved) or (nn.Linear,)
+
+
+def _default_backend(device: torch.device) -> str:
+    current = torch.backends.quantized.engine
+    if current:
+        return current
+    if device.type == "cpu":
+        return "fbgemm"
+    return "qnnpack"
+
+
+def _estimate_model_size(model: nn.Module) -> int:
+    size = 0
+    for tensor in model.state_dict().values():
+        if torch.is_tensor(tensor):
+            size += tensor.numel() * tensor.element_size()
+    return int(size)
+
+
+def _bytes_to_megabytes(value: int) -> float:
+    return round(value / (1024 ** 2), 4)
+
 
 class PTQRunner:
-    def __init__(self, model, device, dtype=torch.qint8):
-        self.model = model
-        self.device = device
-        self.dtype = dtype
+    """High-level orchestrator that applies PTQ using a config dictionary."""
 
-    def run(self):
-        print(f"Starting dynamic PTQ with dtype={self.dtype} on linear layers.")
-        try:
-            # Ensure quantization backend is available
-            if not torch.backends.quantized.engine:
-                torch.backends.quantized.engine = 'qnnpack'  # Use QNNPACK backend for CPU
-            quantized_model = torch.quantization.quantize_dynamic(
-                self.model, {torch.nn.Linear}, dtype=self.dtype
-            )
-            quantized_model.to(self.device)
-            print(f"Applied dynamic PTQ (dtype={self.dtype}) to linear layers.")
-            return quantized_model
-        except Exception as e:
-            print(f"[WARNING] Dynamic quantization failed: {e}")
-            print("[INFO] Falling back to Float16 quantization")
-            # Fallback to float16
-            model_fp16 = self.model.to(torch.float16)
-            model_fp16.to(self.device)
-            return model_fp16
+    def __init__(self, cfg: Dict[str, Any]):
+        self.cfg = cfg
+        self.quant_cfg = cfg.get("quantization", {}) or {}
+        self.strategy = (
+            self.quant_cfg.get("strategy")
+            or self.quant_cfg.get("method")
+            or self.quant_cfg.get("mode")
+            or "dynamic"
+        ).lower()
+        self.fallback = (self.quant_cfg.get("fallback_strategy") or "float16").lower()
+        self.dtype = _resolve_dtype(self.quant_cfg.get("dtype", torch.qint8))
+        self.device = _resolve_device(self.quant_cfg.get("device") or cfg.get("runtime", {}).get("device"))
+        self.backend = (self.quant_cfg.get("backend") or _default_backend(self.device)).lower()
+        self.target_modules = _resolve_target_modules(self.quant_cfg.get("modules"))
+        self.calibration_cfg = self._build_calibration_cfg()
+        self.export_dir = self._prepare_output_dir()
+        self.summary: Dict[str, Any] = {}
 
-def apply_ptq(model, device, dtype=torch.qint8, mode=None):
-    """
-    Applies post-training quantization to linear layers of the model based on selected mode.
-    Handles MPS device limitations.
-    Args:
-        model: The PyTorch model to quantize.
-        device: The device to move the quantized model to.
-        dtype: The quantized dtype to use (default: torch.qint8).
-        mode: Optional; PTQ mode - '1' or 'dynamic' for Dynamic Quantization [default],
-              '2' or 'float16' for Float16 Quantization,
-              '3' or 'static' for Static Quantization.
-              If None, prompts the user for input.
-    Returns:
-        The quantized model.
-    """
-    # Handle device as string or torch.device object
-    device_str = str(device).lower() if isinstance(device, torch.device) else device.lower()
-    is_mps = device_str == "mps" and getattr(torch.backends, "mps", None) is not None
-
-    if mode is None:
-        print("Select quantization mode:")
-        print("1: Dynamic Quantization (default)")
-        print("2: Float16 Quantization")
-        print("3: Static Quantization")
-        user_input = input("Enter mode (1/2/3): ").strip()
-        mode = user_input if user_input else '1'
-
-    # Normalize mode string for easier comparisons
-    mode_str = str(mode).lower()
-
-    if is_mps and (mode_str == '1' or mode_str == 'dynamic'):
-        print("[WARNING] Dynamic int8 quantization is not fully supported on MPS.")
-        print("Options:")
-        print("1: Fallback to CPU for int8 quantization (slower)")
-        print("2: Only perform CPU-based quantization")
-        print("3: Switch to Float16 quantization (fast on MPS)")
-        choice = input("Enter your choice (1/2/3, default=3): ").strip() or "3"
-        if choice in ["1", "2"]:
-            print(f"[INFO] Quantizing on CPU as fallback from MPS. Choice {choice}")
-            # Set environment variable for MPS fallback
-            import os
-            os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
-            device = "cpu"
-            # Move model to CPU for quantization
-            model_cpu = model.cpu()
-            # Proceed with dynamic quantization on CPU
-            runner = PTQRunner(model_cpu, device, dtype)
-            quantized_model = runner.run()
-            # Move back to original device
-            quantized_model = quantized_model.to(device)
-            return quantized_model
-        elif choice == "3":
-            print("[INFO] Applying Float16 quantization on MPS")
-            model = model.to(torch.float16)
-            model = model.to(device)
-            print("Applied Float16 Quantization.")
-            return model
+    def _build_calibration_cfg(self) -> CalibrationConfig:
+        cal_cfg = self.quant_cfg.get("calibration", {}) or {}
+        raw_max_samples = cal_cfg.get("max_samples")
+        max_samples: Optional[int]
+        if raw_max_samples in (None, "auto"):
+            max_samples = None
         else:
-            print("[INFO] Invalid choice, defaulting to Float16 on MPS")
-            model = model.to(torch.float16)
-            model = model.to(device)
-            print("Applied Float16 Quantization.")
-            return model
+            try:
+                max_samples = int(raw_max_samples)
+            except (TypeError, ValueError):
+                LOG.warning("Invalid calibration.max_samples=%s; using default", raw_max_samples)
+                max_samples = None
 
-    if mode_str == '2' or mode_str == 'float16':
-        print("Applying Float16 Quantization.")
-        model = model.to(torch.float16)
-        model = model.to(device)
-        print("Applied Float16 Quantization.")
-        return model
-    elif mode_str == '3' or mode_str == 'static':
-        print("Static Quantization selected. Note: Calibration data is required for static quantization.")
-        print("Static Quantization is not implemented in this function yet.")
-        model = model.to(device)
-        return model
-    else:
-        print("Applying Dynamic Quantization.")
-        runner = PTQRunner(model, device, dtype)
-        quantized_model = runner.run()
-        quantized_model.to(device)
-        return quantized_model
+        return CalibrationConfig(
+            num_batches=int(cal_cfg.get("num_batches", 32)),
+            max_samples=max_samples,
+            use_training_split=bool(cal_cfg.get("use_training_split", False)),
+            shuffle=bool(cal_cfg.get("shuffle", False)),
+        )
+
+    def _prepare_output_dir(self) -> Path:
+        root = Path(self.quant_cfg.get("output_dir") or self.cfg.get("output_root", "experiments"))
+        root = root.expanduser().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+        final_dir = root / f"quantized_{timestamp}"
+        final_dir.mkdir(parents=True, exist_ok=True)
+        return final_dir
+
+    def run(self) -> Dict[str, Any]:
+        LOG.info("Starting PTQ runner with strategy '%s'", self.strategy)
+        loader = ModelLoader(self.cfg, device=self.device)
+        bundle = loader.load(use_agent=False, return_bundle=True)
+        if isinstance(bundle, tuple):
+            _, student, tokenizer = bundle
+        else:
+            student = bundle.student
+            tokenizer = bundle.tokenizer
+
+        baseline_size = _estimate_model_size(student)
+
+        calibration_loader = None
+        if self.strategy in {"static", "int8_static", "per_tensor"}:
+            try:
+                calibration_loader = build_calibration_loader(self.cfg, tokenizer, self.calibration_cfg)
+            except Exception as exc:
+                LOG.warning("Failed to build calibration loader: %s", exc)
+
+        quantized_model, used_strategy = self.quantize_model(
+            model=student,
+            strategy=self.strategy,
+            device=self.device,
+            dtype=self.dtype,
+            backend=self.backend,
+            target_modules=self.target_modules,
+            fallback=self.fallback,
+            calibration_loader=calibration_loader,
+            calibration_cfg=self.calibration_cfg,
+        )
+
+        quant_size = _estimate_model_size(quantized_model)
+
+        self.summary = {
+            "strategy_requested": self.strategy,
+            "strategy_used": used_strategy,
+            "dtype": str(self.dtype),
+            "backend": self.backend,
+            "size_before_bytes": baseline_size,
+            "size_after_bytes": quant_size,
+            "size_before_mb": _bytes_to_megabytes(baseline_size),
+            "size_after_mb": _bytes_to_megabytes(quant_size),
+            "size_delta_mb": _bytes_to_megabytes(baseline_size - quant_size),
+            "export_dir": str(self.export_dir),
+        }
+
+        LOG.info(
+            "PTQ completed: %s → %s MB (Δ %.2f MB) using strategy '%s'",
+            self.summary["size_before_mb"],
+            self.summary["size_after_mb"],
+            self.summary["size_delta_mb"],
+            used_strategy,
+        )
+
+        self._export_artifacts(quantized_model, tokenizer)
+        self._write_summary()
+
+        return self.summary
+
+    def _export_artifacts(self, model: nn.Module, tokenizer) -> None:
+        exported = False
+        try:
+            if hasattr(model, "save_pretrained"):
+                model.save_pretrained(self.export_dir)  # type: ignore[attr-defined]
+                exported = True
+            if tokenizer is not None and hasattr(tokenizer, "save_pretrained"):
+                tokenizer.save_pretrained(self.export_dir)  # type: ignore[attr-defined]
+        except Exception as exc:
+            LOG.warning("save_pretrained export failed: %s", exc)
+
+        if not exported:
+            torch.save(model.state_dict(), self.export_dir / "pytorch_model_quantized.bin")
+
+    def _write_summary(self) -> None:
+        summary_path = self.export_dir / "quantization_summary.json"
+        try:
+            with summary_path.open("w", encoding="utf-8") as handle:
+                json.dump(self.summary, handle, indent=2)
+        except Exception as exc:
+            LOG.warning("Failed to write quantization summary: %s", exc)
+
+    @staticmethod
+    def quantize_model(
+        model: nn.Module,
+        strategy: str,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | str = torch.qint8,
+        backend: Optional[str] = None,
+        target_modules: Optional[Sequence[Any]] = None,
+        fallback: Optional[str] = "float16",
+        calibration_loader: Optional[Iterable[Dict[str, Any]]] = None,
+        calibration_cfg: Optional[CalibrationConfig] = None,
+    ) -> Tuple[nn.Module, str]:
+        device_obj = _resolve_device(device)
+        dtype_obj = _resolve_dtype(dtype)
+        modules = _resolve_target_modules(target_modules)
+        backend_name = (backend or _default_backend(device_obj)).lower()
+        calibration_cfg = calibration_cfg or CalibrationConfig()
+        requested_strategy = (strategy or "dynamic").lower()
+        fallback_strategy = (fallback or "").lower()
+
+        def _execute(name: str, allow_fallback: bool = True) -> Tuple[nn.Module, str]:
+            normalized = name.lower()
+            if normalized in {"dynamic", "ptq", "int8"}:
+                quantized = PTQRunner._apply_dynamic(model, dtype_obj, modules)
+                return quantized, "dynamic"
+            if normalized in {"float16", "fp16"}:
+                quantized = PTQRunner._apply_float16(model, device_obj)
+                return quantized, "float16"
+            if normalized in {"static", "int8_static", "per_tensor"}:
+                if calibration_loader is None:
+                    raise RuntimeError("Static PTQ requires calibration data.")
+                quantized = PTQRunner._apply_static(
+                    model,
+                    backend_name,
+                    calibration_loader,
+                    calibration_cfg,
+                )
+                return quantized, "static"
+            raise ValueError(f"Unknown PTQ strategy '{name}'")
+
+        try:
+            return _execute(requested_strategy, allow_fallback=True)
+        except Exception as exc:
+            LOG.warning("Quantization strategy '%s' failed: %s", requested_strategy, exc)
+            if fallback_strategy and fallback_strategy != requested_strategy:
+                LOG.info("Falling back to strategy '%s'", fallback_strategy)
+                return _execute(fallback_strategy, allow_fallback=False)
+            raise
+
+    @staticmethod
+    def _apply_dynamic(
+        model: nn.Module,
+        dtype: torch.dtype,
+        modules: Tuple[Type[nn.Module], ...],
+    ) -> nn.Module:
+        torch.backends.quantized.engine = torch.backends.quantized.engine or "qnnpack"
+        clone = copy.deepcopy(model)
+        clone.eval()
+        clone_cpu = clone.to(torch.device("cpu"))
+        quantized = torch.quantization.quantize_dynamic(
+            clone_cpu,
+            {module for module in modules},
+            dtype=dtype,
+        )
+        if hasattr(quantized, "to"):
+            try:
+                return quantized.to(torch.device("cpu"))
+            except Exception:
+                return quantized
+        return quantized
+
+    @staticmethod
+    def _apply_float16(model: nn.Module, device: torch.device) -> nn.Module:
+        clone = copy.deepcopy(model)
+        clone.eval()
+        fp16_model = clone.to(torch.float16)
+        try:
+            return fp16_model.to(device)
+        except Exception:
+            LOG.warning("Device %s does not support float16 natively; staying on CPU.", device)
+            return fp16_model.to(torch.device("cpu"))
+
+    @staticmethod
+    def _apply_static(
+        model: nn.Module,
+        backend: str,
+        calibration_loader: Iterable[Dict[str, Any]],
+        calibration_cfg: CalibrationConfig,
+    ) -> nn.Module:
+        torch.backends.quantized.engine = backend
+        clone = copy.deepcopy(model)
+        clone.eval()
+        clone_cpu = clone.to(torch.device("cpu"))
+        setattr(clone_cpu, "qconfig", torch.quantization.get_default_qconfig(backend))
+        prepared = torch.quantization.prepare(clone_cpu, inplace=False)
+        runner = CalibrationRunner(prepared, calibration_loader, torch.device("cpu"), calibration_cfg)
+        used = runner.collect()
+        LOG.info("Calibrated static PTQ with %d samples", used)
+        quantized = torch.quantization.convert(prepared, inplace=False)
+        return quantized
+
+
+def apply_ptq(
+    model: nn.Module,
+    device: torch.device | str,
+    dtype: torch.dtype = torch.qint8,
+    mode: Optional[str] = None,
+) -> nn.Module:
+    """Lightweight helper to quantize an in-memory model (used by training pipeline)."""
+
+    target_device = _resolve_device(device)
+    strategy = (mode or "dynamic").lower()
+    if strategy in {"dynamic", "ptq", "int8"} and target_device.type != "cpu":
+        LOG.info(
+            "Dynamic int8 PTQ is CPU-only; switching to float16 for device %s",
+            target_device,
+        )
+        strategy = "float16"
+
+    quantized, used_strategy = PTQRunner.quantize_model(
+        model=model,
+        strategy=strategy,
+        device=target_device,
+        dtype=dtype,
+        backend=None,
+        target_modules=(nn.Linear,),
+        fallback="float16",
+        calibration_loader=None,
+        calibration_cfg=None,
+    )
+    LOG.debug("apply_ptq used strategy '%s'", used_strategy)
+    try:
+        return quantized.to(target_device)
+    except Exception as exc:
+        LOG.debug("Leaving quantized model on CPU (move to %s failed: %s)", target_device, exc)
+        return quantized
+    return quantized

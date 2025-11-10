@@ -35,13 +35,34 @@ def main():
 
 	# Forward pass
 	with torch.no_grad():
-		teacher_logits = teacher(input_ids).logits
-	student_logits = student_wrapper.forward(input_ids).logits
+		teacher_outputs = teacher(input_ids)
+	student_outputs = student_wrapper.forward(input_ids)
 
-	# Distillation loss
-	distiller = KDHintonDistiller(temperature=2.0, alpha=0.5)
-	loss = distiller.compute_loss(student_logits, teacher_logits, labels)
-	logger.info(f"Distillation loss: {loss.item():.4f}")
+	# Distillation loss (instantiate modern distiller with explicit models)
+	distiller = KDHintonDistiller(
+		teacher=teacher,
+		student=student,
+		config={
+			'kd_hinton': {
+				'temperature': 2.0,
+				'alpha': 0.5,
+				'hint_enabled': False,
+			},
+		},
+		device=device,
+	)
+	loss, loss_details = distiller.compute_loss(
+		student_outputs=student_outputs,
+		teacher_outputs=teacher_outputs,
+		targets=labels,
+	)
+	loss_msg = "Distillation loss: {:.4f} (KD={:.4f}, CE={:.4f})".format(
+		loss.item(),
+		loss_details.get('kd_loss', 0.0),
+		loss_details.get('ce_loss', 0.0),
+	)
+	logger.info(loss_msg)
+	print(loss_msg)
 
 	# Save student model
 	student_wrapper.save("/tmp/minimal_student_model")

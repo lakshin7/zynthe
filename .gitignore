@@ -1,0 +1,57 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environments
+venv/
+env/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Experiments and model outputs
+experiments/*/
+!experiments/.gitkeep
+
+# Large data files
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.h5
+*.pkl
+*.pickle
+
+# Logs
+*.log
+training.log
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated data
+data/generated_students/
+data/sst2_test/
+data/test_hf_dataset/
+data/*.backup
+
+# Reports
+*_test_report.json
+*.json.backup_*
