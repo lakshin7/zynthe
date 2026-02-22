@@ -1,9 +1,9 @@
 train:
-  epochs: 5                   # extended epochs for deeper evaluation
-  batch_size: 8               # fits Mac M2 memory
+  epochs: 3                   # stable baseline for free-tier T4 sessions
+  batch_size: 32              # optimistic T4 baseline
   lr: 2e-5                   # reduced learning rate for better convergence
   grad_accum_steps: 1
-  mixed_precision: false       # MPS prefers float32
+  mixed_precision: true        # CUDA AMP for T4
   early_stop_patience: 2       # stops if val_loss doesn't improve for 2 epochs
   
   # Optimizer configuration (NEW - Advanced Optimizer System)
@@ -39,8 +39,9 @@ model:
 
 distillation:
   method: "kd_hinton"
-  temperature: 1.5            # reduced temperature for sharper predictions
-  alpha: 0.4                  # slightly more weight on ground truth labels
+  temperature: 2.0
+  alpha: 0.6
+  multi_stage: false
 
 data:
   train_path: "data/sst2_test/train.jsonl"       # SST-2 from HuggingFace
@@ -60,21 +61,28 @@ preprocessing:
   cache_tokenized: false      # future: enable disk caching of tokenized dataset
 
 device:
-  prefer_mps: true
-  prefer_cuda: false
+  prefer_mps: false
+  prefer_cuda: true
+
+agentic:
+  enable_teacher_agent: false
+  enable_auto_student: false
+
+auto_student:
+  enable: false
 
 output_root: "experiments"
 seed: 42
 
 quantization:
-  enable: true
+  enable: false
   mode: ptq       # Post-Training Quantization; can switch to QAT later
 
-similarity_transfer: true
+similarity_transfer: false
 
 explainability:
-  enable_lime: true
-  enable_shap: true
+  enable_lime: false
+  enable_shap: false
   num_samples: 4
   lime_num_features: 8
   shap_top_k: 10

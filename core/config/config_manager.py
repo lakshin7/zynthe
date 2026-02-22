@@ -162,6 +162,80 @@ class ConfigManager:
     # -------------------------
     # Loading & merging
     # -------------------------
+    def _normalize_legacy_aliases(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize legacy/new key aliases so downstream modules read a stable schema."""
+        normalized = cfg.copy()
+
+        # Distillation key normalization
+        distill_cfg = normalized.setdefault("distillation", {})
+        if not isinstance(distill_cfg, dict):
+            distill_cfg = {}
+            normalized["distillation"] = distill_cfg
+
+        method = distill_cfg.get("method") or distill_cfg.get("type") or "kd_hinton"
+        distill_cfg["method"] = method
+        distill_cfg.setdefault("type", method)
+
+        nested_cfg = distill_cfg.get("config")
+        if not isinstance(nested_cfg, dict):
+            nested_cfg = {}
+
+        for key in (
+            "temperature",
+            "alpha",
+            "label_smoothing",
+            "hint_enabled",
+            "confidence_scaling",
+            "min_confidence",
+        ):
+            if key in distill_cfg and key not in nested_cfg:
+                nested_cfg[key] = distill_cfg[key]
+
+        kd_hinton_cfg = distill_cfg.get("kd_hinton")
+        if isinstance(kd_hinton_cfg, dict) and "kd_hinton" not in nested_cfg:
+            nested_cfg["kd_hinton"] = kd_hinton_cfg.copy()
+
+        distill_cfg["config"] = nested_cfg
+
+        # Train key normalization
+        train_cfg = normalized.setdefault("train", {})
+        if not isinstance(train_cfg, dict):
+            train_cfg = {}
+            normalized["train"] = train_cfg
+
+        if "gradient_accumulation_steps" not in train_cfg and "grad_accum_steps" in train_cfg:
+            train_cfg["gradient_accumulation_steps"] = train_cfg["grad_accum_steps"]
+
+        if "use_amp" not in train_cfg and "mixed_precision" in train_cfg:
+            train_cfg["use_amp"] = bool(train_cfg["mixed_precision"])
+
+        if "num_epochs" not in train_cfg and "epochs" in train_cfg:
+            train_cfg["num_epochs"] = int(train_cfg["epochs"])
+
+        # Manual mode defaults (temporarily disable agentic pathways)
+        agentic_cfg = normalized.setdefault("agentic", {})
+        if not isinstance(agentic_cfg, dict):
+            agentic_cfg = {}
+            normalized["agentic"] = agentic_cfg
+
+        if bool(agentic_cfg.get("enable_teacher_agent", False)):
+            logger.warning("teacher_agent is temporarily disabled in manual mode; forcing enable_teacher_agent=false")
+        if bool(agentic_cfg.get("enable_auto_student", False)):
+            logger.warning("auto_student is temporarily disabled in manual mode; forcing enable_auto_student=false")
+
+        agentic_cfg["enable_teacher_agent"] = False
+        agentic_cfg["enable_auto_student"] = False
+
+        auto_student_cfg = normalized.setdefault("auto_student", {})
+        if not isinstance(auto_student_cfg, dict):
+            auto_student_cfg = {}
+            normalized["auto_student"] = auto_student_cfg
+        if bool(auto_student_cfg.get("enable", False)):
+            logger.warning("auto_student.enable=true requested but auto_student is disabled in manual mode")
+        auto_student_cfg["enable"] = False
+
+        return normalized
+
     def _load_and_resolve(self):
         defaults = {}
         if os.path.exists(self.defaults_path):
@@ -185,7 +259,7 @@ class ConfigManager:
 
         merged = _deep_update(defaults.copy(), user_cfg)
         merged = _deep_update(merged, self.overrides or {})
-        self.raw_config = merged
+        self.raw_config = self._normalize_legacy_aliases(merged)
 
         self._validate_minimal()
         self._resolve_runtime()
@@ -198,7 +272,7 @@ class ConfigManager:
     def _resolve_runtime(self):
         # device detection: prefer MPS on Mac M1/M2, then CUDA, else CPU
         prefer_cuda = bool(self.raw_config.get("device", {}).get("prefer_cuda", True))
-        prefer_mps = bool(self.raw_config.get("device", {}).get("prefer_mps", True))
+        prefer_mps = bool(self.raw_config.get("device", {}).get("prefer_mps", False))
 
         mps_available = getattr(torch.backends, "mps", None) is not None and getattr(torch.backends.mps, "is_available", lambda: False)()
         cuda_available = torch.cuda.is_available()
@@ -260,6 +334,8 @@ class ConfigManager:
         self.resolved_config["similarity_transfer"] = similarity_transfer
         self.resolved_config.setdefault("runtime", {})
         self.resolved_config["runtime"]["device"] = resolved_device
+        self.resolved_config["runtime"]["execution_mode"] = "manual_non_agentic"
+        self.resolved_config["runtime"]["distiller_default"] = "kd_hinton"
 
         # seed handling
         seed = int(self.raw_config.get("seed", 42))

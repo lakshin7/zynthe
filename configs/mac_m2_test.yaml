@@ -32,6 +32,7 @@ distillation:
   method: "kd_hinton"          # Start with classic knowledge distillation
   temperature: 2.0             # Softmax temperature for soft targets
   alpha: 0.5                  # Balance: 50% hard labels, 50% soft targets
+  multi_stage: false
 
 data:
   train_path: "data/imdb_train.jsonl"
@@ -58,9 +59,16 @@ device:
 output_root: "experiments"
 seed: 42                       # Reproducible results
 
+agentic:
+  enable_teacher_agent: false
+  enable_auto_student: false
+
+auto_student:
+  enable: false
+
 # Quantization (post-training)
 quantization:
-  enable: true
+  enable: false
   mode: "float16"              # MPS-compatible (better than int8 on MPS)
   
   # Post-training quantization settings
@@ -69,7 +77,7 @@ quantization:
 
 # Similarity transfer (lightweight additional technique)
 similarity_transfer: 
-  enable: true
+  enable: false
   weight: 0.1                  # Light weight to avoid overwhelming main loss
 
 # Evaluation settings

@@ -73,15 +73,16 @@ class Trainer:
         # ========== END TEACHER MODEL VALIDATION ==========
         
         # ========== PERFORMANCE OPTIMIZATIONS ==========
+        train_cfg = self.config.get('train', {})
         
         # 1. Mixed Precision Training (AMP) - 2-3x speedup
-        self.use_amp = self.config['train'].get('use_amp', True)
+        self.use_amp = bool(train_cfg.get('use_amp', train_cfg.get('mixed_precision', True)))
         self.scaler = GradScaler() if self.use_amp else None
         if self.use_amp:
             print("[OPTIMIZATION] Mixed Precision Training (AMP) enabled - expect 2-3x speedup")
         
         # 2. Gradient Accumulation - simulate larger batch sizes
-        self.gradient_accumulation_steps = self.config['train'].get('gradient_accumulation_steps', 1)
+        self.gradient_accumulation_steps = int(train_cfg.get('gradient_accumulation_steps', train_cfg.get('grad_accum_steps', 1)))
         if self.gradient_accumulation_steps > 1:
             print(f"[OPTIMIZATION] Gradient Accumulation enabled ({self.gradient_accumulation_steps} steps) - effective batch size x{self.gradient_accumulation_steps}")
         
@@ -115,7 +116,7 @@ class Trainer:
         )
         
         # Create learning rate scheduler
-        num_epochs = self.config['train'].get('num_epochs', 10)
+        num_epochs = int(train_cfg.get('num_epochs', train_cfg.get('epochs', 10)))
         # Estimate steps per epoch (will be updated in train())
         self.scheduler = None  # Will be initialized in train() with actual steps_per_epoch
         
@@ -133,9 +134,17 @@ class Trainer:
             self.teacher_optimizer = AdamW(self.teacher.parameters(), lr=self.config['train'].get('teacher_lr', 2e-5))
         
         # Initialize distiller from registry
-        distil_cfg = self.config['distillation']
+        distil_cfg = self.config.get('distillation', {}) or {}
         registry = DistillerRegistry()
-        distiller_type = distil_cfg.get('type', 'kd')
+        distiller_type = distil_cfg.get('method') or distil_cfg.get('type') or 'kd_hinton'
+
+        # Stabilization mode: keep kd_hinton as the canonical distiller unless explicitly using kd alias.
+        if distiller_type not in {'kd', 'kd_hinton'}:
+            LOG.warning(
+                "Distiller '%s' requested, but stabilization mode is active. Falling back to 'kd_hinton'.",
+                distiller_type,
+            )
+            distiller_type = 'kd_hinton'
         
         # Get distiller class and instantiate with proper parameters
         distiller_class = registry.get(distiller_type)
@@ -144,14 +153,27 @@ class Trainer:
         if distiller_class is None:
             raise ValueError(f"Unknown distiller type: {distiller_type}")
         
-        distiller_config = distil_cfg.get('config', {})
-        
-        self.distiller = distiller_class(
-            teacher=self.teacher,
-            student=self.student,
-            device=self.device,
-            **distiller_config
-        )
+        distiller_config = copy.deepcopy(distil_cfg.get('config', {}))
+        for key in ('temperature', 'alpha', 'label_smoothing', 'hint_enabled', 'confidence_scaling', 'min_confidence'):
+            if key in distil_cfg and key not in distiller_config:
+                distiller_config[key] = distil_cfg[key]
+        if isinstance(distil_cfg.get('kd_hinton'), dict) and 'kd_hinton' not in distiller_config:
+            distiller_config['kd_hinton'] = copy.deepcopy(distil_cfg['kd_hinton'])
+
+        try:
+            self.distiller = distiller_class(
+                teacher=self.teacher,
+                student=self.student,
+                config=distiller_config,
+                device=self.device,
+            )
+        except TypeError:
+            self.distiller = distiller_class(
+                teacher=self.teacher,
+                student=self.student,
+                device=self.device,
+                **distiller_config,
+            )
         
         self.train_losses = []
         self.val_losses = []

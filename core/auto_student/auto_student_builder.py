@@ -20,6 +20,7 @@ Usage:
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import json
@@ -50,6 +51,12 @@ class AutoStudentBuilder:
             teacher_config: Optional teacher config dict (if not using known models)
             output_dir: Directory to save generated configs
         """
+        if os.environ.get("ZYNTHE_ENABLE_AUTO_STUDENT", "0") != "1":
+            raise RuntimeError(
+                "AutoStudentBuilder is temporarily disabled in manual stabilization mode. "
+                "Set ZYNTHE_ENABLE_AUTO_STUDENT=1 to re-enable explicitly."
+            )
+
         self.teacher_name = teacher_name
         self.output_dir = Path(output_dir) if output_dir else Path("data/generated_students")
         self.output_dir.mkdir(parents=True, exist_ok=True)

@@ -4,10 +4,10 @@
 
 train:
   epochs: 2  # Quick test
-  batch_size: 16
+  batch_size: 32
   lr: 3e-5
   grad_accum_steps: 1
-  mixed_precision: false
+  mixed_precision: true
   early_stop_patience: 2
   warmup_steps: 50
 
@@ -26,7 +26,8 @@ model:
 distillation:
   method: "kd_hinton"
   temperature: 2.0
-  alpha: 0.5
+  alpha: 0.6
+  multi_stage: false
 
 data:
   train_path: "data/imdb_train.jsonl"  # Using existing IMDB data
@@ -36,8 +37,8 @@ data:
     cache_tokenization: true
 
 device:
-  prefer_mps: true
-  prefer_cuda: false
+  prefer_mps: false
+  prefer_cuda: true
   fallback_cpu: true
   
   memory_management:
@@ -49,13 +50,20 @@ device:
 output_root: "experiments"
 seed: 42
 
+agentic:
+  enable_teacher_agent: false
+  enable_auto_student: false
+
+auto_student:
+  enable: false
+
 quantization:
-  enable: true
+  enable: false
   mode: "float16"
   ptq:
     calibration_samples: 32
 
-similarity_transfer: true
+similarity_transfer: false
 
 evaluate:
   enable: true

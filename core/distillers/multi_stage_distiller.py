@@ -336,14 +336,17 @@ class MultiStageDistiller:
             List of stage configurations
         """
         distill_cfg = config.get('distillation', {})
+        method = distill_cfg.get('method') or distill_cfg.get('type') or 'kd_hinton'
+        if method == 'multi_stage':
+            method = 'kd_hinton'
         
         # Check if multi-stage is enabled
         if not distill_cfg.get('multi_stage', False):
             # Single stage fallback
             return [{
                 'name': 'Single Stage Distillation',
-                'type': distill_cfg.get('method', 'kd'),
-                'epochs': config.get('training', {}).get('epochs', 10),
+                'type': method,
+                'epochs': config.get('train', {}).get('epochs', config.get('training', {}).get('epochs', 10)),
                 'config': distill_cfg
             }]
         
@@ -547,6 +550,15 @@ class MultiStageDistiller:
         print(f"Initializing {stage_cfg['type']} distiller...")
         distiller = self._instantiate_distiller(distiller_cls, distiller_config)
         
+        # Initialize optimizer and scheduler
+        learning_rate = distiller_config.get('lr', distiller_config.get('learning_rate', 2e-5))
+        weight_decay = distiller_config.get('weight_decay', 0.01)
+        distiller.optimizer, distiller.scheduler = distiller._init_optimizers(
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            total_steps=max(1, len(self.train_loader) * stage_cfg.get('epochs', 3)) if self.train_loader else 1000
+        )
+        
         # Apply layer freezing if specified
         if stage_cfg.get('freeze_layers'):
             self._freeze_layers(stage_cfg['freeze_layers'])
@@ -561,7 +573,7 @@ class MultiStageDistiller:
             'val_accuracy': 0.0
         }
         
-        # Simple training loop (can be expanded)
+        # Training loop
         if self.train_loader is not None:
             for epoch in range(epochs):
                 epoch_loss = self._train_epoch(distiller, epoch + 1, epochs)
@@ -609,52 +621,30 @@ class MultiStageDistiller:
             warnings.warn("train_loader is None, returning 0.0 loss")
             return 0.0
         
-        self.student.train()
-        self.teacher.eval()
-        
+        # Ensure distiller mode is correct (training_step handles model.train())
         total_loss = 0.0
         num_batches = 0
         
         for batch_idx, batch in enumerate(self.train_loader):
-            # Move to device
-            if isinstance(batch, (list, tuple)):
-                inputs, labels = batch[0].to(self.device), batch[1].to(self.device)
-            elif isinstance(batch, dict):
-                inputs = {k: v.to(self.device) for k, v in batch.items() if k != 'labels'}
-                labels = batch.get('labels', None)
-                if labels is not None:
-                    labels = labels.to(self.device)
-            else:
-                inputs = batch.to(self.device)
-                labels = None
-            
-            # Forward pass
             try:
-                # Get outputs from both models
-                with torch.no_grad():
-                    teacher_outputs = self.teacher(inputs) if not isinstance(inputs, dict) else self.teacher(**inputs)
-                
-                student_outputs = self.student(inputs) if not isinstance(inputs, dict) else self.student(**inputs)
-                
-                # Compute loss
-                loss_result = distiller.compute_loss(
-                    student_outputs=student_outputs,
-                    teacher_outputs=teacher_outputs,
-                    targets=labels
+                # Perform training step (forward + backward + optimizer)
+                loss_dict = distiller.training_step(
+                    batch=batch,
+                    optimizer=None, # Use distiller.optimizer
+                    grad_clip=1.0   # Default gradient clipping
                 )
                 
-                # Handle loss result (could be tensor or tuple)
-                if isinstance(loss_result, tuple):
-                    loss = loss_result[0]
-                else:
-                    loss = loss_result
-                
                 # Accumulate loss
-                if hasattr(loss, 'item'):
-                    total_loss += loss.item()
+                if isinstance(loss_dict, dict):
+                    loss = loss_dict.get('total', 0.0)
+                    if isinstance(loss, (float, int)):
+                        total_loss += loss
+                    else:
+                        total_loss += loss.item() # Should be float, but being safe
                 else:
-                    total_loss += float(loss)
-                
+                    # Fallback if return format implies direct loss
+                     total_loss += float(loss_dict)
+
                 num_batches += 1
                 
             except Exception as e:

@@ -17,7 +17,8 @@ lsof -ti:5173 | xargs kill -9 2>/dev/null || true
 # Detect and activate Python environment
 echo ""
 echo -e "${BLUE}Setting up Python environment...${NC}"
-cd /Users/lakshins/Documents/Zynthe/knowledge-distillation-toolkit
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 
 # Check for virtual environment
 if [ -d ".venv" ]; then

@@ -1390,25 +1390,40 @@ async def validate_model_pair(request: dict):
 @app.get("/api/device/info")
 async def get_device_info():
     """Get current device capabilities"""
-    import torch
-    
-    device_info = {
-        "cuda_available": torch.cuda.is_available(),
-        "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-        "mps_available": hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(),
-        "current_device": "cpu"
-    }
-    
-    if torch.cuda.is_available():
-        device_info["current_device"] = "cuda"
-        device_info["cuda_version"] = torch.version.cuda
-        device_info["cuda_device_name"] = torch.cuda.get_device_name(0)
-        major, minor = torch.cuda.get_device_capability()
-        device_info["cuda_capability"] = f"{major}.{minor}"
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        device_info["current_device"] = "mps"
-    
-    return device_info
+    try:
+        import torch
+        
+        info = {
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            "mps_available": False,
+            "current_device": "cpu"
+        }
+        
+        # Check for MPS (Apple Silicon)
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            info["mps_available"] = True
+            info["current_device"] = "mps"
+        # Check for CUDA
+        elif torch.cuda.is_available():
+            info["current_device"] = "cuda"
+            info["cuda_version"] = torch.version.cuda
+            try:
+                info["cuda_device_name"] = torch.cuda.get_device_name(0)
+                major, minor = torch.cuda.get_device_capability()
+                info["cuda_capability"] = f"{major}.{minor}"
+            except:
+                pass
+                
+        return info
+    except ImportError:
+        return {
+            "cuda_available": False,
+            "cuda_device_count": 0,
+            "mps_available": False,
+            "current_device": "cpu",
+            "error": "PyTorch not installed"
+        }
 
 # ===== ASYNC EVALUATION TASK ENDPOINTS =====
 

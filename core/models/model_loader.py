@@ -145,7 +145,7 @@ class ModelLoader:
 
     def load(
         self,
-        use_agent: bool = True,
+        use_agent: bool = False,
         data_samples: Optional[List[Dict[str, Any]]] = None,
         return_bundle: bool = False,
     ) -> Union[Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizerBase], ModelBundle]:
@@ -460,7 +460,7 @@ def get_device(device_str: Optional[Union[str, torch.device]] = None) -> torch.d
 def load_models(
     cfg: Union["ConfigManager", Dict[str, Any]],
     device: Optional[Union[str, torch.device]] = None,
-    use_agent: bool = True,
+    use_agent: bool = False,
     data_samples: Optional[List[Dict[str, Any]]] = None,
     return_bundle: bool = False,
 ):

@@ -131,6 +131,12 @@ def load_config(path: str | Path, overrides: dict | None = None):
     return cm, cm.resolved_config
 
 
+def _use_teacher_agent(config: Dict[str, Any]) -> bool:
+    """Resolve whether teacher-agent based selection should be used."""
+    agentic_cfg = config.get('agentic', {}) if isinstance(config, dict) else {}
+    return bool(agentic_cfg.get('enable_teacher_agent', False))
+
+
 def resolve_label_names(config: Dict[str, Any], dataset: Any | None = None) -> List[str]:
     """Best-effort resolution of label names for visualization artifacts."""
 
@@ -501,7 +507,7 @@ def distill(
         rprint("[bold blue]📥 Downloading/Loading Models...[/bold blue]")
         print("[PROGRESS] stage=downloading_teacher progress=0.0 message=Starting model downloads")
         
-        teacher, student, tokenizer = load_models(cm, cm.device())
+        teacher, student, tokenizer = load_models(cm, cm.device(), use_agent=_use_teacher_agent(cfg))
         
         print("[PROGRESS] stage=downloading_student progress=1.0 message=All models loaded successfully")
         rprint(f"[green]✓ Teacher loaded: {model_summary(teacher)['name']}[/green]")
@@ -674,7 +680,11 @@ def main():
 
         # 1.2 Load models and tokenizer
         print("📋 Step 1.2: Loading models...")
-        teacher, student, tokenizer = load_models(cfg_manager, cfg_manager.device())
+        teacher, student, tokenizer = load_models(
+            cfg_manager,
+            cfg_manager.device(),
+            use_agent=_use_teacher_agent(cfg_manager.resolved_config),
+        )
         print("[Model Summary] Teacher model:")
         print(model_summary(teacher))
         print("[Model Summary] Student model:")
