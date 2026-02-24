@@ -137,14 +137,15 @@ class Trainer:
         distil_cfg = self.config.get('distillation', {}) or {}
         registry = DistillerRegistry()
         distiller_type = distil_cfg.get('method') or distil_cfg.get('type') or 'kd_hinton'
-
-        # Stabilization mode: keep kd_hinton as the canonical distiller unless explicitly using kd alias.
-        if distiller_type not in {'kd', 'kd_hinton'}:
-            LOG.warning(
-                "Distiller '%s' requested, but stabilization mode is active. Falling back to 'kd_hinton'.",
-                distiller_type,
-            )
-            distiller_type = 'kd_hinton'
+        distiller_aliases = {
+            'hinton': 'kd_hinton',
+            'kdhinton': 'kd_hinton',
+            'feature_distillation': 'feature',
+            'similarity_transfer': 'similarity',
+            'attention_transfer': 'attention',
+        }
+        distiller_type = distiller_aliases.get(str(distiller_type).lower(), str(distiller_type).lower())
+        self.distiller_type = distiller_type
         
         # Get distiller class and instantiate with proper parameters
         distiller_class = registry.get(distiller_type)
@@ -174,6 +175,7 @@ class Trainer:
                 device=self.device,
                 **distiller_config,
             )
+        self._requires_attention_outputs = self._distiller_needs_attention_outputs()
         
         self.train_losses = []
         self.val_losses = []
@@ -619,6 +621,84 @@ class Trainer:
                     self._param_warnings.add(key)
         return filtered_batch
 
+    def _distiller_needs_attention_outputs(self) -> bool:
+        """Determine whether model forwards should request attentions/hidden states."""
+        if self.distiller_type == 'attention':
+            return True
+
+        # Explicit opt-in from config for custom distillers.
+        distil_cfg = self.config.get('distillation', {}) or {}
+        if bool(distil_cfg.get('force_attention_outputs', False)):
+            return True
+
+        # Heuristic: distiller exposes attention-specific control knobs.
+        attention_flags = (
+            'use_attention_rollout',
+            'use_cross_layer_flow',
+            'use_dual_matching',
+            'use_temporal_attention',
+        )
+        return any(hasattr(self.distiller, flag) for flag in attention_flags)
+
+    def _build_forward_runtime_kwargs(self, model_params) -> Dict[str, Any]:
+        """Build runtime kwargs compatible with the model forward signature."""
+        kwargs: Dict[str, Any] = {}
+        if not self._requires_attention_outputs:
+            return kwargs
+
+        if 'output_attentions' in model_params:
+            kwargs['output_attentions'] = True
+        if 'output_hidden_states' in model_params:
+            kwargs['output_hidden_states'] = True
+        if 'return_dict' in model_params:
+            kwargs['return_dict'] = True
+        return kwargs
+
+    def _prepare_distiller_batch(self) -> None:
+        """Allow distillers to clear transient caches before a new forward pass."""
+        prepare_fn = getattr(self.distiller, 'prepare_for_forward_pass', None)
+        if callable(prepare_fn):
+            try:
+                prepare_fn()
+            except Exception:
+                LOG.debug("Distiller prepare_for_forward_pass() failed", exc_info=True)
+
+    def _collect_distiller_features(self) -> Dict[str, Dict[str, Any]]:
+        """Collect optional hook/extractor features from the active distiller."""
+        teacher_features: Dict[str, Any] = {}
+        student_features: Dict[str, Any] = {}
+
+        teacher_hooks = getattr(self.distiller, 'teacher_hooks', None)
+        if isinstance(teacher_hooks, dict) and teacher_hooks:
+            teacher_features.update(teacher_hooks)
+
+        student_hooks = getattr(self.distiller, 'student_hooks', None)
+        if isinstance(student_hooks, dict) and student_hooks:
+            student_features.update(student_hooks)
+
+        teacher_extractor = getattr(self.distiller, 'teacher_extractor', None)
+        if teacher_extractor is not None and hasattr(teacher_extractor, 'extract_attention_maps'):
+            try:
+                maps = teacher_extractor.extract_attention_maps()
+                if isinstance(maps, dict) and maps:
+                    teacher_features.update(maps)
+            except Exception:
+                LOG.debug("Failed collecting teacher extractor attention maps", exc_info=True)
+
+        student_extractor = getattr(self.distiller, 'student_extractor', None)
+        if student_extractor is not None and hasattr(student_extractor, 'extract_attention_maps'):
+            try:
+                maps = student_extractor.extract_attention_maps()
+                if isinstance(maps, dict) and maps:
+                    student_features.update(maps)
+            except Exception:
+                LOG.debug("Failed collecting student extractor attention maps", exc_info=True)
+
+        return {
+            'teacher_features': teacher_features,
+            'student_features': student_features,
+        }
+
     def train_epoch(self, dataloader):
         self.student.train()
         self.teacher.eval()
@@ -645,6 +725,9 @@ class Trainer:
             # Filter batch for each model's specific requirements
             teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
             student_batch = self._filter_batch_for_model(batch, self._student_forward_params)
+            teacher_runtime_kwargs = self._build_forward_runtime_kwargs(self._teacher_forward_params)
+            student_runtime_kwargs = self._build_forward_runtime_kwargs(self._student_forward_params)
+            self._prepare_distiller_batch()
             
             # ========== MIXED PRECISION TRAINING (AMP) ==========
             # Wrap forward pass in autocast for automatic mixed precision
@@ -654,13 +737,13 @@ class Trainer:
                 if self.use_amp and self.device.type != 'mps':
                     with autocast(dtype=amp_dtype):
                         try:
-                            teacher_outputs = self.teacher(**teacher_batch)
+                            teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                         except Exception as e:
                             print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
                             continue
                 else:
                     try:
-                        teacher_outputs = self.teacher(**teacher_batch)
+                        teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                     except Exception as e:
                         print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
                         continue
@@ -668,17 +751,20 @@ class Trainer:
             if self.use_amp and self.device.type != 'mps':
                 with autocast(dtype=amp_dtype):
                     try:
-                        student_outputs = self.student(**student_batch)
+                        student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                     except Exception as e:
                         print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
                         continue
                         
                     labels = batch.get('labels', None)
+                    feature_payload = self._collect_distiller_features()
                     try:
                         result = self.distiller.compute_loss(
                             student_outputs=student_outputs,
                             teacher_outputs=teacher_outputs,
-                            targets=labels
+                            targets=labels,
+                            student_features=feature_payload.get('student_features'),
+                            teacher_features=feature_payload.get('teacher_features'),
                         )
                         
                         # Handle tuple return (loss, metrics_dict)
@@ -697,20 +783,22 @@ class Trainer:
                         loss = torch.tensor(0.0, device=self.device)
             else:
                 try:
-                    student_outputs = self.student(**student_batch)
+                    student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                 except Exception as e:
                     print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
                     continue
                     
                 labels = batch.get('labels', None)
+                feature_payload = self._collect_distiller_features()
                 try:
                     result = self.distiller.compute_loss(
                         student_outputs=student_outputs,
                         teacher_outputs=teacher_outputs,
-                        targets=labels
+                        targets=labels,
+                        student_features=feature_payload.get('student_features'),
+                        teacher_features=feature_payload.get('teacher_features'),
                     )
-                    
-                    # Handle tuple return (loss, metrics_dict)
+
                     if isinstance(result, tuple):
                         loss, metrics_dict = result
                     else:
@@ -720,7 +808,6 @@ class Trainer:
                     
                     # Scale loss for gradient accumulation
                     loss = loss / self.gradient_accumulation_steps
-                        
                 except Exception as e:
                     print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
                     loss = torch.tensor(0.0, device=self.device)
@@ -875,6 +962,10 @@ class Trainer:
         confidence_samples: List[float] = []
         latency_ms: List[float] = []
         peak_memory_bytes: List[int] = []
+        is_token_task = False
+        token_correct = 0
+        token_total = 0
+        lm_ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
         device_str = str(self.device)
         if isinstance(self.device, torch.device):
             device_str = self.device.type if self.device.index is None else f"{self.device.type}:{self.device.index}"
@@ -906,16 +997,19 @@ class Trainer:
                 # Filter batch for each model's specific requirements
                 teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
                 student_batch = self._filter_batch_for_model(batch, self._student_forward_params)
+                teacher_runtime_kwargs = self._build_forward_runtime_kwargs(self._teacher_forward_params)
+                student_runtime_kwargs = self._build_forward_runtime_kwargs(self._student_forward_params)
+                self._prepare_distiller_batch()
                 
                 try:
-                    teacher_outputs = self.teacher(**teacher_batch)
+                    teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                 except Exception as e:
                     print(f"[WARNING] Teacher forward pass failed at batch {batch_idx} during evaluation: {e}")
                     failed_batches += 1
                     continue
                 forward_start = time.perf_counter()
                 try:
-                    student_outputs = self.student(**student_batch)
+                    student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                 except Exception as e:
                     print(f"[WARNING] Student forward pass failed at batch {batch_idx} during evaluation: {e}")
                     failed_batches += 1
@@ -928,11 +1022,14 @@ class Trainer:
                     except Exception:
                         LOG.debug("Unable to read CUDA memory stats during evaluation", exc_info=True)
                 labels = batch.get('labels', None)
+                feature_payload = self._collect_distiller_features()
                 try:
                     result = self.distiller.compute_loss(
                         student_outputs=student_outputs,
                         teacher_outputs=teacher_outputs,
-                        targets=labels
+                        targets=labels,
+                        student_features=feature_payload.get('student_features'),
+                        teacher_features=feature_payload.get('teacher_features'),
                     )
                     
                     # Handle tuple return (loss, metrics_dict)
@@ -990,17 +1087,44 @@ class Trainer:
                         all_student_logits.append(student_logits.cpu())
                     
                     if student_logits is not None and hasattr(student_logits, 'dim'):
-                        if student_logits.dim() >= 2:
+                        if student_logits.dim() == 3 and hasattr(labels, 'dim') and labels.dim() >= 2:
+                            is_token_task = True
+                            token_preds = torch.argmax(student_logits, dim=-1)
+                            token_labels = labels
+                            if token_preds.size(1) > 1 and token_labels.size(1) > 1:
+                                token_preds = token_preds[:, :-1]
+                                token_labels = token_labels[:, 1:]
+
+                            valid_mask = token_labels != lm_ignore_index
+                            if valid_mask.any():
+                                valid_preds = token_preds[valid_mask]
+                                valid_labels = token_labels[valid_mask]
+                                preds_list = valid_preds.detach().cpu().tolist()
+                                labels_list = valid_labels.detach().cpu().tolist()
+                                all_preds.extend(preds_list)
+                                all_labels.extend(labels_list)
+                                token_correct += int((valid_preds == valid_labels).sum().item())
+                                token_total += int(valid_labels.numel())
+                                running_acc = token_correct / max(token_total, 1)
+                                running_acc_series.append(float(running_acc))
+                        elif student_logits.dim() >= 2:
                             preds = torch.argmax(student_logits, dim=-1)
+                            preds_list = preds.cpu().numpy().tolist()
+                            labels_list = labels.cpu().numpy().tolist()
+                            all_preds.extend(preds_list)
+                            all_labels.extend(labels_list)
                         else:
                             preds = (student_logits > 0).long()
-                        preds_list = preds.cpu().numpy().tolist()
-                        labels_list = labels.cpu().numpy().tolist()
-                        all_preds.extend(preds_list)
-                        all_labels.extend(labels_list)
+                            preds_list = preds.cpu().numpy().tolist()
+                            labels_list = labels.cpu().numpy().tolist()
+                            all_preds.extend(preds_list)
+                            all_labels.extend(labels_list)
 
                         prob_tensor = None
-                        if student_logits.dim() >= 2:
+                        if student_logits.dim() == 3:
+                            # Token-level confidence snapshot for diagnostics.
+                            prob_tensor = torch.softmax(student_logits, dim=-1)
+                        elif student_logits.dim() >= 2:
                             prob_tensor = torch.softmax(student_logits, dim=-1)
                         else:
                             prob_tensor = torch.sigmoid(student_logits).unsqueeze(-1)
@@ -1016,16 +1140,17 @@ class Trainer:
                             except Exception:
                                 pass
 
-                        # Update running accuracy
-                        try:
-                            batch_correct = int((preds.cpu() == labels.cpu()).sum().item())
-                            batch_total = int(labels.numel())
-                            running_correct += batch_correct
-                            running_total += batch_total
-                            running_acc = running_correct / max(running_total, 1)
-                            running_acc_series.append(float(running_acc))
-                        except Exception:
-                            pass
+                        # Update running accuracy (classification path only)
+                        if not is_token_task:
+                            try:
+                                batch_correct = int((preds.cpu() == labels.cpu()).sum().item())
+                                batch_total = int(labels.numel())
+                                running_correct += batch_correct
+                                running_total += batch_total
+                                running_acc = running_correct / max(running_total, 1)
+                                running_acc_series.append(float(running_acc))
+                            except Exception:
+                                pass
                 
                 # Log progress every 10 batches
                 if (batch_idx + 1) % 10 == 0:
@@ -1082,7 +1207,29 @@ class Trainer:
         runtime_snapshot: Dict[str, Any] = {}
         calibration_payload: Optional[Dict[str, Any]] = None
 
-        if all_labels and all_preds and len(all_labels) == len(all_preds):
+        if is_token_task and token_total > 0:
+            token_accuracy = token_correct / max(token_total, 1)
+            perplexity = float(np.exp(min(avg_loss, 20.0)))
+            lm_metrics = {
+                'accuracy': token_accuracy,
+                'token_accuracy': token_accuracy,
+                'f1': 0.0,
+                'precision': 0.0,
+                'recall': 0.0,
+                'perplexity': perplexity,
+            }
+            for key in self.metrics_history.keys():
+                self.metrics_history[key].append(lm_metrics.get(key, 0.0))
+            metrics = [lm_metrics]
+            self.metrics_detail_history.append(lm_metrics)
+            diagnostics = self._build_eval_diagnostics(
+                lm_metrics,
+                avg_loss,
+                epoch_val_losses,
+                confidence_samples,
+                pred_probs_np,
+            )
+        elif all_labels and all_preds and len(all_labels) == len(all_preds):
             try:
                 computed_metrics = compute_all_metrics(all_preds, all_labels, pred_probs=pred_probs_np)
                 LOG.info(f"Computed metrics: {computed_metrics}")

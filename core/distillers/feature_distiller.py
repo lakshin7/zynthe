@@ -591,14 +591,26 @@ class FeatureDistiller(BaseDistiller):
 
         # Supervised loss - handle dict, object with logits attr, or tensor
         if targets is not None:
-            if isinstance(student_outputs, dict):
-                logits = student_outputs['logits']
-            elif hasattr(student_outputs, 'logits'):
-                logits = student_outputs.logits
-            else:
-                logits = student_outputs
+            logits = self._extract_logits_tensor(student_outputs)
+            task_type = self._resolve_task_type(logits)
 
-            loss_ce = F.cross_entropy(logits, targets)
+            if task_type == 'causal_lm' and logits.dim() == 3:
+                ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
+                shift_labels = bool(self.config.get('distillation', {}).get('shift_labels', True))
+                flat_logits, flat_targets = self._flatten_lm_logits_and_targets(
+                    logits,
+                    targets,
+                    ignore_index=ignore_index,
+                    shift_labels=shift_labels,
+                )
+                if flat_logits.numel() == 0:
+                    loss_ce = torch.zeros((), device=self.device)
+                else:
+                    loss_ce = F.cross_entropy(flat_logits, flat_targets)
+                loss_dict['task_type'] = 'causal_lm'
+            else:
+                loss_ce = F.cross_entropy(logits, targets)
+                loss_dict['task_type'] = 'classification'
             total_loss = total_loss + loss_ce
             loss_dict['supervised'] = loss_ce.item()
 

@@ -629,46 +629,81 @@ class KDHintonDistiller(BaseDistiller):
         
         L_total = α * L_KD + (1-α) * L_CE + β * L_hint
         """
-        total_loss = 0.0
+        total_loss = torch.zeros((), device=self.device)
         loss_dict = {}
         
-        # Extract logits - handle dict, object with logits attr, or tensor
-        if isinstance(student_outputs, dict):
-            student_logits = student_outputs['logits']
-            teacher_logits = teacher_outputs['logits']
-        elif hasattr(student_outputs, 'logits'):
-            student_logits = student_outputs.logits
-            teacher_logits = teacher_outputs.logits
-        else:
-            student_logits = student_outputs
-            teacher_logits = teacher_outputs
+        # Extract logits and infer task type
+        student_logits = self._extract_logits_tensor(student_outputs)
+        teacher_logits = self._extract_logits_tensor(teacher_outputs)
+        task_type = self._resolve_task_type(student_logits)
+        ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
+        shift_labels = bool(self.config.get('distillation', {}).get('shift_labels', True))
         
         # Get current temperature
         current_temp = self.temp_scheduler.step() if self.training else self.temperature
         
-        # 1. Classical Hinton KD Loss
-        student_soft = F.log_softmax(student_logits / current_temp, dim=1)
-        teacher_soft = F.softmax(teacher_logits / current_temp, dim=1)
+        # 1. Classical Hinton KD Loss (task-aware)
+        if task_type == 'causal_lm' and student_logits.dim() == 3 and teacher_logits.dim() == 3 and targets is not None:
+            flat_student, flat_targets = self._flatten_lm_logits_and_targets(
+                student_logits,
+                targets,
+                ignore_index=ignore_index,
+                shift_labels=shift_labels,
+            )
+            flat_teacher, _ = self._flatten_lm_logits_and_targets(
+                teacher_logits,
+                targets,
+                ignore_index=ignore_index,
+                shift_labels=shift_labels,
+            )
 
-        kd_per_sample = F.kl_div(student_soft, teacher_soft, reduction='none').sum(dim=1)
-        kd_per_sample = kd_per_sample * (current_temp ** 2)
-
-        if self.confidence_scaling:
-            entropy = -(teacher_soft * teacher_soft.clamp_min(1e-8).log()).sum(dim=1)
-            max_entropy = math.log(teacher_soft.size(1)) if teacher_soft.size(1) > 1 else 1.0
-            confidence = 1.0 - (entropy / max_entropy)
-            confidence = confidence.clamp(min=self.min_confidence, max=1.0)
-            kd_loss = (kd_per_sample * confidence.detach()).mean()
-            loss_dict['teacher_confidence'] = confidence.mean().item()
+            if flat_student.numel() == 0:
+                kd_loss = torch.zeros((), device=self.device)
+            else:
+                student_soft = F.log_softmax(flat_student / current_temp, dim=-1)
+                teacher_soft = F.softmax(flat_teacher / current_temp, dim=-1)
+                kd_loss = F.kl_div(student_soft, teacher_soft, reduction='batchmean') * (current_temp ** 2)
         else:
-            kd_loss = kd_per_sample.mean()
+            student_soft = F.log_softmax(student_logits / current_temp, dim=1)
+            teacher_soft = F.softmax(teacher_logits / current_temp, dim=1)
+
+            kd_per_sample = F.kl_div(student_soft, teacher_soft, reduction='none').sum(dim=1)
+            kd_per_sample = kd_per_sample * (current_temp ** 2)
+
+            if self.confidence_scaling:
+                entropy = -(teacher_soft * teacher_soft.clamp_min(1e-8).log()).sum(dim=1)
+                max_entropy = math.log(teacher_soft.size(1)) if teacher_soft.size(1) > 1 else 1.0
+                confidence = 1.0 - (entropy / max_entropy)
+                confidence = confidence.clamp(min=self.min_confidence, max=1.0)
+                kd_loss = (kd_per_sample * confidence.detach()).mean()
+                loss_dict['teacher_confidence'] = confidence.mean().item()
+            else:
+                kd_loss = kd_per_sample.mean()
 
         total_loss += self.alpha * kd_loss
         loss_dict['kd_loss'] = kd_loss.item()
         
         # 2. Supervised Cross-Entropy Loss
         if targets is not None:
-            if self.label_smoothing > 0:
+            if task_type == 'causal_lm' and student_logits.dim() == 3:
+                flat_logits, flat_targets = self._flatten_lm_logits_and_targets(
+                    student_logits,
+                    targets,
+                    ignore_index=ignore_index,
+                    shift_labels=shift_labels,
+                )
+                if flat_logits.numel() == 0:
+                    ce_loss = torch.zeros((), device=self.device)
+                elif self.label_smoothing > 0:
+                    ce_loss = F.cross_entropy(
+                        flat_logits,
+                        flat_targets,
+                        label_smoothing=self.label_smoothing,
+                    )
+                else:
+                    ce_loss = F.cross_entropy(flat_logits, flat_targets)
+                loss_dict['task_type'] = 'causal_lm'
+            elif self.label_smoothing > 0:
                 ce_loss = self._label_smoothed_cross_entropy(student_logits, targets)
             else:
                 if self.class_weights is not None:
@@ -678,6 +713,8 @@ class KDHintonDistiller(BaseDistiller):
             
             total_loss += (1 - self.alpha) * ce_loss
             loss_dict['ce_loss'] = ce_loss.item()
+        else:
+            loss_dict['task_type'] = task_type
         
         # 3. Hint-Based Intermediate Layer Guidance
         if self.hint_enabled and teacher_features and student_features:

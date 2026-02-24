@@ -77,6 +77,83 @@ def parse_args():
         default=[],
         help="Config overrides in KEY=VALUE format, e.g. train.lr=0.001"
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="auto",
+        choices=["auto", "train", "infer"],
+        help="Run mode. auto => infer when --load-model-dir is set, otherwise train"
+    )
+    parser.add_argument(
+        "--load-model-dir",
+        type=str,
+        default=None,
+        help="Path to saved student model directory for reuse/inference"
+    )
+    parser.add_argument(
+        "--load-checkpoint-path",
+        type=str,
+        default=None,
+        help="Path to training checkpoint (.pt) to resume from"
+    )
+    parser.add_argument(
+        "--checkpoint-non-strict",
+        action="store_true",
+        help="Load checkpoint with strict=False (safer compatibility fallback)"
+    )
+    parser.add_argument(
+        "--save-model",
+        action="store_true",
+        help="Save final model artifacts for future reuse"
+    )
+    parser.add_argument(
+        "--no-save-model",
+        action="store_false",
+        dest="save_model",
+        help="Disable final model artifact saving"
+    )
+    parser.add_argument(
+        "--save-model-dir",
+        type=str,
+        default=None,
+        help="Optional output directory for saved model artifacts"
+    )
+    parser.add_argument(
+        "--save-checkpoint",
+        action="store_true",
+        help="Save trainer checkpoint after run"
+    )
+    parser.add_argument(
+        "--checkpoint-path",
+        type=str,
+        default=None,
+        help="Optional checkpoint output path (default: experiment_dir/checkpoints/latest.pt)"
+    )
+    parser.add_argument(
+        "--infer-text",
+        nargs="*",
+        default=[],
+        help="One or more texts for inference"
+    )
+    parser.add_argument(
+        "--infer-file",
+        type=str,
+        default=None,
+        help="Text file path (one input per line) for inference"
+    )
+    parser.add_argument(
+        "--infer-batch-size",
+        type=int,
+        default=8,
+        help="Batch size for inference"
+    )
+    parser.add_argument(
+        "--infer-output",
+        type=str,
+        default=None,
+        help="Optional JSON output path for inference predictions"
+    )
+    parser.set_defaults(save_model=True)
     return parser.parse_args()
 
 def parse_overrides(override_list):
@@ -647,6 +724,77 @@ def main():
             config_path=args.config,
             overrides=overrides_dict
         )
+
+        resolved_mode = (args.mode or "auto").lower()
+        if resolved_mode == "auto":
+            resolved_mode = "infer" if args.load_model_dir else "train"
+
+        def _collect_inference_texts() -> List[str]:
+            texts: List[str] = []
+            if args.infer_text:
+                texts.extend([str(t) for t in args.infer_text if str(t).strip()])
+            if args.infer_file:
+                file_path = Path(args.infer_file)
+                if file_path.exists():
+                    with file_path.open("r", encoding="utf-8") as handle:
+                        for line in handle:
+                            line = line.strip()
+                            if line:
+                                texts.append(line)
+                else:
+                    print(f"[WARN] Inference file not found: {file_path}")
+            return texts
+
+        if resolved_mode == "infer":
+            print("\n" + "="*70)
+            print("INFERENCE MODE")
+            print("="*70 + "\n")
+            from core.inference.predict import StudentInference
+            from core.models.model_saver import load_model
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            import json
+
+            if args.load_model_dir:
+                student, tokenizer, _ = load_model(
+                    AutoModelForSequenceClassification,
+                    args.load_model_dir,
+                    AutoTokenizer,
+                    map_location=str(cfg_manager.device()),
+                )
+                print(f"✅ Loaded model from artifacts: {args.load_model_dir}")
+            else:
+                print("ℹ️  No --load-model-dir provided; loading from config model settings")
+                _, student, tokenizer = load_models(
+                    cfg_manager,
+                    cfg_manager.device(),
+                    use_agent=False,
+                )
+
+            predictor = StudentInference(
+                model=student,
+                tokenizer=tokenizer,
+                config=cfg_manager.resolved_config,
+                device=cfg_manager.device(),
+            )
+
+            infer_texts = _collect_inference_texts()
+            if not infer_texts:
+                print("[WARN] No inference inputs provided (--infer-text/--infer-file). Exiting.")
+                return
+
+            preds = predictor.predict(infer_texts, batch_size=max(1, int(args.infer_batch_size)))
+            print(f"✅ Inference completed for {len(preds)} samples")
+            for idx, row in enumerate(preds[:5], 1):
+                print(f"  [{idx}] label={row.get('label')} prob={row.get('prob'):.4f} text={row.get('text')[:80]}")
+
+            infer_output = args.infer_output or str(Path(cfg_manager.experiment_dir) / "inference_predictions.json")
+            out_path = Path(infer_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with out_path.open("w", encoding="utf-8") as handle:
+                json.dump(convert_to_serializable(preds), handle, indent=2, ensure_ascii=False)
+            print(f"✅ Inference results saved to: {out_path}")
+            return
+
         print("✅ Config loaded successfully")
         print("Experiment ID:", cfg_manager.experiment_id)
         print("Paths:", cfg_manager.paths)
@@ -685,6 +833,26 @@ def main():
             cfg_manager.device(),
             use_agent=_use_teacher_agent(cfg_manager.resolved_config),
         )
+
+        if args.load_model_dir:
+            from core.models.model_saver import load_model
+            from transformers import AutoModelForSequenceClassification, AutoModelForCausalLM, AutoTokenizer
+            train_engine_preview = str(cfg_manager.resolved_config.get("train", {}).get("engine", "legacy")).lower()
+            task_type_preview = str(cfg_manager.resolved_config.get("distillation", {}).get("task_type", "")).lower()
+            is_causal_lm_preview = train_engine_preview in {"causal_lm_core", "causal_lm", "gpt_core"} or task_type_preview in {"causal_lm", "gpt", "language_modeling"}
+            model_class = AutoModelForCausalLM if is_causal_lm_preview else AutoModelForSequenceClassification
+            loaded_student, loaded_tokenizer, loaded_meta = load_model(
+                model_class,
+                args.load_model_dir,
+                AutoTokenizer,
+                map_location=str(cfg_manager.device()),
+            )
+            student = loaded_student
+            tokenizer = loaded_tokenizer or tokenizer
+            print(f"✅ Reused student model from: {args.load_model_dir}")
+            if loaded_meta:
+                print(f"ℹ️  Loaded metadata keys: {list(loaded_meta.keys())}")
+
         print("[Model Summary] Teacher model:")
         print(model_summary(teacher))
         print("[Model Summary] Student model:")
@@ -726,17 +894,131 @@ def main():
         print("PHASE 3-4: Distillation Engine & Training")
         print("="*70 + "\n")
         
-        from training.trainer import Trainer
-        trainer = Trainer(
-            teacher=teacher,
-            student=student,
-            tokenizer=tokenizer,
-            config=cfg_manager.resolved_config,
-            device=cfg_manager.device(),
-            experiment_dir=cfg_manager.experiment_dir
-        )
+        train_engine = str(cfg_manager.resolved_config.get("train", {}).get("engine", "legacy")).lower()
+        stable_candidate_mode = train_engine == "causal_lm_core_stable"
+        use_causal_lm_core = train_engine in {"causal_lm_core", "causal_lm", "gpt_core", "causal_lm_core_stable"}
+
+        if use_causal_lm_core:
+            from core.distillers.causal_lm import RegressionGate, SafeCausalLMTrainer
+
+            if stable_candidate_mode:
+                print("🛡️  Running RegressionGate for causal_lm_core_stable...")
+                gate = RegressionGate.from_mapping(cfg_manager.resolved_config.get("train", {}))
+                gate_report = gate.run(
+                    teacher=teacher,
+                    student=student,
+                    tokenizer=tokenizer,
+                    config=cfg_manager.resolved_config,
+                    device=cfg_manager.device(),
+                    experiment_dir=cfg_manager.experiment_dir,
+                    train_loader=train_loader,
+                )
+                if not gate_report.passed:
+                    raise RuntimeError(
+                        "RegressionGate failed for causal_lm_core_stable: "
+                        f"reasons={gate_report.reasons}, "
+                        f"max_token_loss_diff={gate_report.max_token_loss_diff:.6f}, "
+                        f"max_grad_norm_diff={gate_report.max_grad_norm_diff:.6f}"
+                    )
+                print("✅ RegressionGate passed")
+
+            trainer = SafeCausalLMTrainer(
+                teacher=teacher,
+                student=student,
+                tokenizer=tokenizer,
+                config=cfg_manager.resolved_config,
+                device=cfg_manager.device(),
+                experiment_dir=cfg_manager.experiment_dir,
+            )
+            print("✅ Using stable Causal-LM core trainer")
+        else:
+            from training.trainer import Trainer
+            trainer = Trainer(
+                teacher=teacher,
+                student=student,
+                tokenizer=tokenizer,
+                config=cfg_manager.resolved_config,
+                device=cfg_manager.device(),
+                experiment_dir=cfg_manager.experiment_dir
+            )
+
+        if args.load_checkpoint_path:
+            if use_causal_lm_core and hasattr(trainer, "resume_from_checkpoint"):
+                resume_report = trainer.resume_from_checkpoint(args.load_checkpoint_path)
+                print(f"✅ Loaded checkpoint from: {args.load_checkpoint_path}")
+                if resume_report.get("warning"):
+                    print(f"⚠️  {resume_report['warning']}")
+            else:
+                from core.models.model_saver import load_checkpoint
+                _, checkpoint_meta = load_checkpoint(
+                    model=trainer.student,
+                    optimizer=trainer.optimizer,
+                    path=args.load_checkpoint_path,
+                    scheduler=trainer.scheduler,
+                    scaler=trainer.scaler,
+                    map_location=str(cfg_manager.device()),
+                    strict=not args.checkpoint_non_strict,
+                )
+                print(f"✅ Loaded checkpoint from: {args.load_checkpoint_path}")
+                if checkpoint_meta is not None:
+                    print(f"ℹ️  Checkpoint epoch={checkpoint_meta.epoch}, step={checkpoint_meta.global_step}")
+        elif use_causal_lm_core and hasattr(trainer, "resume_from_latest"):
+            latest_resume = trainer.resume_from_latest()
+            if latest_resume is not None:
+                print("✅ Auto-resumed from latest valid checkpoint")
+                if latest_resume.get("warning"):
+                    print(f"⚠️  {latest_resume['warning']}")
+
         print("[INFO] Starting training...")
         trainer.fit(train_loader, val_loader)
+
+        if args.save_model:
+            from core.models.model_saver import save_model
+            model_output_dir = args.save_model_dir or str(Path(cfg_manager.experiment_dir) / "student_model")
+            metadata = {
+                "experiment_id": cfg_manager.experiment_id,
+                "device": str(cfg_manager.device()),
+                "mode": resolved_mode,
+                "source_config": args.config,
+            }
+            save_model(
+                model=trainer.student,
+                path=model_output_dir,
+                tokenizer=tokenizer,
+                metadata=metadata,
+                use_safetensors=True,
+            )
+            print(f"✅ Saved reusable student model to: {model_output_dir}")
+
+        if args.save_checkpoint:
+            checkpoint_out = args.checkpoint_path or str(Path(cfg_manager.experiment_dir) / "checkpoints" / "latest.pt")
+            if use_causal_lm_core and hasattr(trainer, "save_explicit_checkpoint"):
+                out_path = trainer.save_explicit_checkpoint(checkpoint_out)
+                print(f"✅ Saved checkpoint to: {out_path}")
+            else:
+                from core.models.model_saver import save_checkpoint, CheckpointMetadata
+                ckpt_meta = CheckpointMetadata(
+                    stage="training_complete",
+                    epoch=len(getattr(trainer, 'train_losses', [])),
+                    global_step=0,
+                    best_metric=float(max(getattr(trainer, 'metrics_history', {}).get('accuracy', [0.0]) or [0.0])),
+                    metrics={
+                        "best_val_loss": float(getattr(trainer, 'best_val_loss', 0.0)),
+                    },
+                    extras={
+                        "experiment_id": cfg_manager.experiment_id,
+                        "config_path": args.config,
+                    },
+                )
+                save_checkpoint(
+                    model=trainer.student,
+                    optimizer=trainer.optimizer,
+                    path=checkpoint_out,
+                    scheduler=trainer.scheduler,
+                    scaler=trainer.scaler,
+                    metadata=ckpt_meta,
+                )
+                print(f"✅ Saved checkpoint to: {checkpoint_out}")
 
         # ========================================================================
         # PHASE 6: Quantization

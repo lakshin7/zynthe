@@ -42,10 +42,14 @@ class ModelLoadSpec:
     gradient_checkpointing: bool = False
     torch_dtype: Optional[str] = None
     quantization: Optional[str] = None  # e.g. "int8", "bnb-4bit"
+    quantization_target: str = "both"  # teacher|student|both
+    quantization_safe_fallback: bool = True
     adapter_path: Optional[str] = None
     extra_model_kwargs: Dict[str, Any] = field(default_factory=dict)
     extra_tokenizer_kwargs: Dict[str, Any] = field(default_factory=dict)
     return_wrapped: bool = False
+    compile_mode: str = "inference"  # inference|training
+    compile_roles: Tuple[str, ...] = ("student",)
 
 
 @dataclass
@@ -182,6 +186,16 @@ class ModelLoader:
 
         quant_cfg = self.model_cfg.get("quantization", {}) or {}
         runtime = self.runtime_cfg.get("distillation", {}) or {}
+        compile_roles_cfg = self.model_cfg.get(
+            "compile_roles",
+            runtime.get("compile_roles", ["student"]),
+        )
+        if isinstance(compile_roles_cfg, str):
+            compile_roles = (compile_roles_cfg.lower(),)
+        elif isinstance(compile_roles_cfg, Iterable):
+            compile_roles = tuple(str(role).lower() for role in compile_roles_cfg)
+        else:
+            compile_roles = ("student",)
 
         spec = ModelLoadSpec(
             teacher_name=teacher_name,
@@ -196,10 +210,16 @@ class ModelLoader:
             gradient_checkpointing=self.model_cfg.get("gradient_checkpointing", False),
             torch_dtype=self.model_cfg.get("torch_dtype"),
             quantization=quant_cfg.get("type"),
+            quantization_target=str(quant_cfg.get("target", quant_cfg.get("apply_to", "both"))).lower(),
+            quantization_safe_fallback=bool(quant_cfg.get("safe_fallback", True)),
             adapter_path=quant_cfg.get("adapter"),
             extra_model_kwargs=self.model_cfg.get("model_kwargs", {}) or {},
             extra_tokenizer_kwargs=self.model_cfg.get("tokenizer_kwargs", {}) or {},
             return_wrapped=self.model_cfg.get("return_bundle", False),
+            compile_mode=str(
+                runtime.get("compile_mode", self.model_cfg.get("compile_mode", "inference"))
+            ).lower(),
+            compile_roles=compile_roles,
         )
 
         return spec
@@ -240,6 +260,7 @@ class ModelLoader:
             "device": str(self.device),
             "used_agent": bool(use_agent and self.model_cfg.get("name") is None),
             "quantization": spec.quantization,
+            "quantization_target": spec.quantization_target,
         }
 
         if spec.gradient_checkpointing:
@@ -251,12 +272,33 @@ class ModelLoader:
                     logger.warning("Gradient checkpointing requested but model does not support it")
 
         if spec.compile_graph:
-            metadata.setdefault("features", []).append("torch.compile")
-            teacher = _maybe_compile(teacher)
-            student = _maybe_compile(student)
+            compiled_roles = []
+            if "teacher" in spec.compile_roles:
+                maybe_teacher = _maybe_compile(
+                    teacher,
+                    compile_mode=spec.compile_mode,
+                    quantization=spec.quantization,
+                    role="teacher",
+                )
+                if maybe_teacher is not teacher:
+                    compiled_roles.append("teacher")
+                teacher = maybe_teacher
+            if "student" in spec.compile_roles:
+                maybe_student = _maybe_compile(
+                    student,
+                    compile_mode=spec.compile_mode,
+                    quantization=spec.quantization,
+                    role="student",
+                )
+                if maybe_student is not student:
+                    compiled_roles.append("student")
+                student = maybe_student
+            if compiled_roles:
+                metadata.setdefault("features", []).append("torch.compile")
+                metadata["compiled_roles"] = compiled_roles
 
         if spec.adapter_path:
-            _maybe_attach_adapter(student, spec.adapter_path)
+            student = _maybe_attach_adapter(student, spec.adapter_path)
 
         bundle = ModelBundle(
             teacher=teacher,
@@ -280,24 +322,37 @@ class ModelLoader:
         if dtype is not None:
             model_kwargs.setdefault("torch_dtype", dtype)
 
-        if spec.quantization:
-            if spec.quantization.lower() in {"int8", "dynamic"}:
-                model_kwargs.setdefault("torch_dtype", torch.float32)
-                model_kwargs.setdefault("load_in_8bit", True)
-            elif spec.quantization.lower() in {"bnb-4bit", "4bit"}:
-                model_kwargs.setdefault("load_in_4bit", True)
+        resolved_model_type = spec.model_type
+        if resolved_model_type in {"", "auto", "transformer"}:
+            try:
+                cfg = AutoConfig.from_pretrained(
+                    spec.teacher_name,
+                    trust_remote_code=spec.trust_remote_code,
+                    local_files_only=spec.local_files_only,
+                    token=spec.hf_token,
+                )
+                architectures = [arch.lower() for arch in (getattr(cfg, 'architectures', None) or [])]
+                if getattr(cfg, "is_decoder", False) or any("causal" in arch for arch in architectures):
+                    resolved_model_type = "causallm"
+                else:
+                    resolved_model_type = "sequenceclassification"
+            except Exception as exc:
+                logger.warning("Auto model type resolution failed (%s); falling back to sequence classification", exc)
+                resolved_model_type = "sequenceclassification"
 
-        if spec.model_type in {"causallm", "decoder", "gpt", "lm"}:
+        if resolved_model_type in {"causallm", "decoder", "gpt", "lm"}:
             model_class = AutoModelForCausalLM
-        elif spec.model_type in {"sequenceclassification", "classification", "transformer"}:
+        elif resolved_model_type in {"sequenceclassification", "classification", "transformer"}:
             model_class = AutoModelForSequenceClassification
-            model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels", 2))
-            label_map = self.model_cfg.get("label2id", {"negative": 0, "positive": 1})
-            model_kwargs.setdefault("label2id", label_map)
-            model_kwargs.setdefault(
-                "id2label",
-                {idx: name for name, idx in label_map.items()},
-            )
+            if "num_labels" in self.model_cfg:
+                model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels", 2))
+            if "label2id" in self.model_cfg:
+                label_map = self.model_cfg.get("label2id", {"negative": 0, "positive": 1})
+                model_kwargs.setdefault("label2id", label_map)
+                model_kwargs.setdefault(
+                    "id2label",
+                    {idx: name for name, idx in label_map.items()},
+                )
         else:
             model_class = AutoModel
 
@@ -324,7 +379,13 @@ class ModelLoader:
 
         # Ensure padding token for decoder-only models
         if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+            if tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+            elif tokenizer.unk_token is not None:
+                tokenizer.pad_token = tokenizer.unk_token
+            else:
+                tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+        tokenizer.padding_side = self.model_cfg.get("padding_side", tokenizer.padding_side)
 
         return tokenizer
 
@@ -336,6 +397,36 @@ class ModelLoader:
         role: str,
         **model_kwargs: Any,
     ) -> PreTrainedModel:
+        role_kwargs = dict(model_kwargs)
+        quant_target = spec.quantization_target.lower()
+        quant_enabled_for_role = quant_target in {"both", role}
+
+        if spec.quantization and quant_enabled_for_role:
+            q = spec.quantization.lower()
+            if q in {"int8", "dynamic"}:
+                role_kwargs.setdefault("torch_dtype", torch.float32)
+                role_kwargs.setdefault("load_in_8bit", True)
+            elif q in {"bnb-4bit", "4bit"}:
+                role_kwargs.setdefault("load_in_4bit", True)
+
+            # Safety: quantized loading is most stable on CUDA backends.
+            if (
+                (role_kwargs.get("load_in_8bit") or role_kwargs.get("load_in_4bit"))
+                and self.device.type != "cuda"
+            ):
+                if spec.quantization_safe_fallback:
+                    logger.warning(
+                        "Quantization requested for %s on device '%s'; disabling quantization for safety.",
+                        role,
+                        self.device,
+                    )
+                    role_kwargs.pop("load_in_8bit", None)
+                    role_kwargs.pop("load_in_4bit", None)
+                else:
+                    raise RuntimeError(
+                        f"Quantization requested for role={role} requires CUDA. device={self.device}"
+                    )
+
         logger.info(
             "Loading %s model '%s' (type=%s) on %s",
             role,
@@ -343,9 +434,18 @@ class ModelLoader:
             spec.model_type,
             self.device,
         )
-        model = model_class.from_pretrained(name, **model_kwargs)
-        model.to(self.device)
-        model.eval()
+        model = model_class.from_pretrained(name, **role_kwargs)
+
+        # With quantized loaders the dispatch is often handled by backend/device_map.
+        is_quantized = bool(role_kwargs.get("load_in_8bit") or role_kwargs.get("load_in_4bit"))
+        if not is_quantized:
+            model.to(self.device)
+
+        if role == "teacher":
+            model.eval()
+        else:
+            default_train_mode = bool(self.model_cfg.get("student_train_mode", True))
+            model.train(default_train_mode)
         return model
 
     def _resolve_hf_token(self) -> Optional[str]:
@@ -413,38 +513,56 @@ class ModelLoader:
             return []
 
 
-def _maybe_compile(model: PreTrainedModel) -> PreTrainedModel:
+def _maybe_compile(
+    model: PreTrainedModel,
+    *,
+    compile_mode: str = "inference",
+    quantization: Optional[str] = None,
+    role: str = "student",
+) -> PreTrainedModel:
     if not hasattr(torch, "compile"):
         logger.warning("torch.compile not available in this PyTorch installation")
         return model
+    if quantization:
+        logger.warning("Skipping torch.compile for quantized %s model", role)
+        return model
+
+    compile_args: Dict[str, Any] = {"dynamic": True}
+    if compile_mode == "training":
+        compile_args["mode"] = "max-autotune"
+    else:
+        compile_args["mode"] = "reduce-overhead"
+
     try:
-        compiled = torch.compile(model, dynamic=True)  # type: ignore[arg-type]
-        logger.info("Model compiled with torch.compile")
+        compiled = torch.compile(model, **compile_args)  # type: ignore[arg-type]
+        logger.info("Model compiled with torch.compile (role=%s, mode=%s)", role, compile_mode)
         return compiled  # type: ignore[return-value]
     except Exception as exc:  # pragma: no cover - depends on version
         logger.warning("torch.compile failed: %s", exc)
         return model
 
 
-def _maybe_attach_adapter(model: PreTrainedModel, adapter_path: str) -> None:
+def _maybe_attach_adapter(model: PreTrainedModel, adapter_path: str) -> PreTrainedModel:
     if not adapter_path:
-        return
+        return model
     adapter_path_obj = Path(adapter_path)
     if not adapter_path_obj.exists():
         logger.warning("Adapter path %s does not exist", adapter_path)
-        return
+        return model
 
     try:
         from peft import PeftModel  # type: ignore[import]
     except ImportError:
         logger.warning("PEFT not installed; skipping adapter load")
-        return
+        return model
 
     try:
-        PeftModel.from_pretrained(model, str(adapter_path_obj))
+        wrapped = PeftModel.from_pretrained(model, str(adapter_path_obj))
         logger.info("Loaded PEFT adapter from %s", adapter_path)
+        return cast(PreTrainedModel, wrapped)
     except Exception as exc:
         logger.warning("Failed to load adapter %s: %s", adapter_path, exc)
+        return model
 
 
 # ---------------------------------------------------------------------------

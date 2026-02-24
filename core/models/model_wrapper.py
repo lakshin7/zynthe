@@ -142,6 +142,16 @@ class ModelWrapper:
 		managers = []
 		if not ctx.use_grad:
 			managers.append(torch.no_grad())
-		if ctx.autocast and torch.cuda.is_available():
-			managers.append(torch.cuda.amp.autocast(dtype=ctx.autocast_dtype))
+		if ctx.autocast:
+			device_type = self.device.type
+			if device_type == "cuda" and torch.cuda.is_available():
+				managers.append(torch.amp.autocast(device_type="cuda", dtype=ctx.autocast_dtype))
+			elif device_type == "cpu":
+				managers.append(torch.amp.autocast(device_type="cpu", dtype=ctx.autocast_dtype))
+			elif device_type == "mps":
+				# MPS autocast support can vary by runtime; fallback silently if unavailable.
+				try:
+					managers.append(torch.amp.autocast(device_type="mps", dtype=ctx.autocast_dtype))
+				except Exception:
+					logger.debug("MPS autocast unavailable, continuing without autocast", exc_info=True)
 		return managers

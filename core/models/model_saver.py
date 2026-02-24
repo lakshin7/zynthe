@@ -60,6 +60,7 @@ def save_checkpoint(
     """Persist a full training checkpoint with safety guards."""
 
     checkpoint = {
+        "checkpoint_version": 2,
         "model_state_dict": model.state_dict(),
     }
     if optimizer is not None:
@@ -85,11 +86,22 @@ def load_checkpoint(
     scheduler: Optional[Any] = None,
     scaler: Optional[Any] = None,
     map_location: Optional[Any] = None,
+    strict: bool = True,
 ) -> Tuple[Dict[str, Any], Optional[CheckpointMetadata]]:
     """Load checkpoint and restore model/optimizer/scheduler states."""
 
-    checkpoint = torch.load(path, map_location=map_location)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    safe_map_location = map_location if map_location is not None else "cpu"
+    checkpoint = torch.load(path, map_location=safe_map_location)
+    load_result = model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
+    if not strict:
+        missing = getattr(load_result, "missing_keys", [])
+        unexpected = getattr(load_result, "unexpected_keys", [])
+        if missing or unexpected:
+            logger.warning(
+                "Non-strict checkpoint load: missing_keys=%d unexpected_keys=%d",
+                len(missing),
+                len(unexpected),
+            )
 
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -153,7 +165,9 @@ def load_model(
 ):
     """Reload a saved model directory with optional tokenizer."""
 
-    model = model_class.from_pretrained(path, map_location=map_location)
+    model = model_class.from_pretrained(path)
+    if map_location:
+        model = model.to(map_location)
     tokenizer = None
     if tokenizer_class is not None:
         tokenizer = tokenizer_class.from_pretrained(path)

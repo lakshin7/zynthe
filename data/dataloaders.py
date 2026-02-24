@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from collections import OrderedDict
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
@@ -18,6 +20,14 @@ from .preprocess import PreprocessConfig, apply_preprocess_pipeline, build_prepr
 
 LOG = logging.getLogger(__name__)
 DEFAULT_CACHE_SIZE = 2048
+
+
+def _seed_worker(worker_id: int) -> None:
+    """Seed dataloader workers deterministically from PyTorch worker seed."""
+
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def _safe_label(value: Any) -> int:
@@ -295,6 +305,12 @@ def create_dataloaders(cfg: Mapping[str, Any], tokenizer) -> Tuple[DataLoader, D
     num_workers = int(train_cfg.get("num_workers", 0))
     pin_memory = bool(train_cfg.get("pin_memory", False))
     balance_train = bool(data_cfg.get("balance_train_classes", False))
+    seed = int(
+        train_cfg.get(
+            "seed",
+            cfg.get("seed", cfg.get("runtime", {}).get("seed", 42)),
+        )
+    )
 
     augmenter = build_text_augmenter(cfg, split="train")
 
@@ -320,6 +336,8 @@ def create_dataloaders(cfg: Mapping[str, Any], tokenizer) -> Tuple[DataLoader, D
     )
 
     sampler = _build_sampler(train_dataset, balance_train)
+    train_generator = torch.Generator()
+    train_generator.manual_seed(seed)
 
     train_loader = DataLoader(
         train_dataset,
@@ -329,6 +347,8 @@ def create_dataloaders(cfg: Mapping[str, Any], tokenizer) -> Tuple[DataLoader, D
         num_workers=num_workers,
         pin_memory=pin_memory,
         collate_fn=_default_collate,
+        worker_init_fn=_seed_worker,
+        generator=train_generator,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -337,6 +357,7 @@ def create_dataloaders(cfg: Mapping[str, Any], tokenizer) -> Tuple[DataLoader, D
         num_workers=num_workers,
         pin_memory=pin_memory,
         collate_fn=_default_collate,
+        worker_init_fn=_seed_worker,
     )
 
     return train_loader, val_loader

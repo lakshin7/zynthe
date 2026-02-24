@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 import json
+import torch
 
 from .multi_stage_distiller import MultiStageDistiller
 from .presets import get_preset, list_presets, describe_preset
@@ -34,6 +35,15 @@ class DistillationToolkit:
         "baseline": "quick_start",
         "balanced": "balanced",
         "default": "balanced",
+        "all": "all_distillers_t4",
+        "all_distillers": "all_distillers_t4",
+        "full": "all_distillers_t4",
+        "complete": "all_distillers_t4",
+        "smoke": "all_distillers_classification_smoke",
+        "classification_smoke": "all_distillers_classification_smoke",
+        "gpt": "all_distillers_causal_lm_smoke",
+        "causal_lm": "all_distillers_causal_lm_smoke",
+        "gpt_smoke": "all_distillers_causal_lm_smoke",
         "transformer": "vision_transformer",
         "vision": "vision_transformer",
         "interpretability": "vision_transformer",
@@ -130,7 +140,7 @@ class DistillationToolkit:
             config=plan,
             train_loader=train_loader,
             val_loader=val_loader,
-            device=self.device or "cuda" if hasattr(self.teacher, "to") else "cpu",
+            device=self._resolve_device(),
             output_dir=output_dir,
         )
         return orchestrator.run()
@@ -146,6 +156,15 @@ class DistillationToolkit:
     # ------------------------------------------------------------------
     # Internal utilities
     # ------------------------------------------------------------------
+    def _resolve_device(self) -> str:
+        if self.device:
+            return self.device
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
     def _deep_merge(self, base: Dict[str, Any], overrides: Mapping[str, Any]) -> Dict[str, Any]:
         merged = deepcopy(base)
         for key, value in overrides.items():

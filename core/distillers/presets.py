@@ -150,6 +150,261 @@ PRESET_LIBRARY: OrderedDictType[str, PresetConfig] = OrderedDict(
             },
             "training": {"epochs": 8},
         },
+        "all_distillers_t4": {
+            "description": "T4-safe full pipeline using KD + Feature + Similarity + Attention.",
+            "distillation": {
+                "multi_stage": True,
+                "loss_schedule": {"alpha": 0.85, "beta": 0.5, "gamma": 0.35},
+                "stages": [
+                    {
+                        "name": "Stage 1 - KD Foundation",
+                        "type": "kd",
+                        "epochs": 2,
+                        "config": {
+                            "learning_rate": 2e-5,
+                            "weight_decay": 0.01,
+                            "scheduler_type": "cosine",
+                            "kd_hinton": {
+                                "temperature": 4.0,
+                                "alpha": 0.85,
+                                "hint_enabled": True,
+                                "auto_hints": {
+                                    "strategy": "last",
+                                    "count": 2,
+                                    "regressor": "1x1conv",
+                                },
+                                "confidence_scaling": True,
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 2 - Feature Alignment",
+                        "type": "feature",
+                        "epochs": 2,
+                        "depends_on": [1],
+                        "config": {
+                            "learning_rate": 1.5e-5,
+                            "feature_distillation": {
+                                "metrics": ["l2", "cka"],
+                                "metric_weights": {"l2": 1.0, "cka": 0.6},
+                                "auto_align": True,
+                                "auto_layers": "last",
+                                "auto_layer_count": 2,
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 3 - Structural Similarity",
+                        "type": "similarity",
+                        "epochs": 1,
+                        "depends_on": [2],
+                        "config": {
+                            "learning_rate": 1.5e-5,
+                            "similarity_transfer": {
+                                "similarity_metric": "cosine",
+                                "weight": 0.4,
+                                "kd_weight": 0.35,
+                                "progressive": False,
+                                "layers": ["hidden:-1", "hidden:-2"],
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 4 - Attention Refinement",
+                        "type": "attention",
+                        "epochs": 1,
+                        "depends_on": [3],
+                        "config": {
+                            "learning_rate": 1e-5,
+                            "attention_transfer": {
+                                "type": ["self", "relational"],
+                                "weight": 0.3,
+                                "temperature": 1.2,
+                                "auto_detect_layers": True,
+                                "use_attention_rollout": True,
+                                "use_dual_matching": False,
+                                "use_cross_layer_flow": False,
+                                "entropy_regularizer": 0.02,
+                            },
+                        },
+                    },
+                ],
+            },
+            "quality_gate": {
+                "stop_on_regression": True,
+                "max_accuracy_drop": 2.0,
+                "min_stage_accuracy": 50.0,
+            },
+            "train": {"epochs": 6, "batch_size": 16, "mixed_precision": True},
+        },
+        "all_distillers_classification_smoke": {
+            "description": "Fast classification smoke test running all four distillers.",
+            "distillation": {
+                "multi_stage": True,
+                "task_type": "classification",
+                "ignore_index": -100,
+                "loss_schedule": {"alpha": 0.85, "beta": 0.5, "gamma": 0.35},
+                "stages": [
+                    {
+                        "name": "Stage 1 - KD Warmup",
+                        "type": "kd_hinton",
+                        "epochs": 1,
+                        "config": {
+                            "learning_rate": 2e-5,
+                            "kd_hinton": {
+                                "temperature": 4.0,
+                                "alpha": 0.85,
+                                "hint_enabled": True,
+                                "auto_hints": {
+                                    "strategy": "last",
+                                    "count": 1,
+                                    "regressor": "1x1conv",
+                                },
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 2 - Feature Alignment",
+                        "type": "feature",
+                        "epochs": 1,
+                        "depends_on": [1],
+                        "config": {
+                            "learning_rate": 1.5e-5,
+                            "feature_distillation": {
+                                "metrics": ["l2", "cka"],
+                                "metric_weights": {"l2": 1.0, "cka": 0.6},
+                                "auto_align": True,
+                                "auto_layers": "last",
+                                "auto_layer_count": 2,
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 3 - Similarity Transfer",
+                        "type": "similarity",
+                        "epochs": 1,
+                        "depends_on": [2],
+                        "config": {
+                            "learning_rate": 1.5e-5,
+                            "similarity_transfer": {
+                                "similarity_metric": "cosine",
+                                "weight": 0.45,
+                                "kd_weight": 0.3,
+                                "progressive": False,
+                                "layers": ["hidden:-1", "hidden:-2"],
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 4 - Attention Refinement",
+                        "type": "attention",
+                        "epochs": 1,
+                        "depends_on": [3],
+                        "config": {
+                            "learning_rate": 1e-5,
+                            "attention_transfer": {
+                                "type": ["self", "relational"],
+                                "weight": 0.3,
+                                "temperature": 1.2,
+                                "auto_detect_layers": True,
+                                "use_attention_rollout": True,
+                                "use_dual_matching": False,
+                            },
+                        },
+                    },
+                ],
+            },
+            "train": {
+                "epochs": 4,
+                "batch_size": 16,
+                "mixed_precision": True,
+                "gradient_accumulation_steps": 1,
+            },
+        },
+        "all_distillers_causal_lm_smoke": {
+            "description": "Fast GPT/causal-LM smoke test running all four distillers.",
+            "distillation": {
+                "multi_stage": True,
+                "task_type": "causal_lm",
+                "loss_mode": "auto",
+                "ignore_index": -100,
+                "shift_labels": True,
+                "loss_schedule": {"alpha": 0.8, "beta": 0.45, "gamma": 0.35},
+                "stages": [
+                    {
+                        "name": "Stage 1 - Token KD",
+                        "type": "kd_hinton",
+                        "epochs": 1,
+                        "config": {
+                            "learning_rate": 2e-5,
+                            "kd_hinton": {
+                                "temperature": 2.0,
+                                "alpha": 0.8,
+                                "hint_enabled": False,
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 2 - Similarity Structure",
+                        "type": "similarity",
+                        "epochs": 1,
+                        "depends_on": [1],
+                        "config": {
+                            "learning_rate": 1.5e-5,
+                            "similarity_transfer": {
+                                "similarity_metric": "cosine",
+                                "weight": 0.4,
+                                "kd_weight": 0.35,
+                                "progressive": False,
+                                "layers": ["hidden:-1", "hidden:-2"],
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 3 - Attention Transfer",
+                        "type": "attention",
+                        "epochs": 1,
+                        "depends_on": [2],
+                        "config": {
+                            "learning_rate": 1e-5,
+                            "attention_transfer": {
+                                "type": ["self", "relational"],
+                                "weight": 0.25,
+                                "temperature": 1.0,
+                                "auto_detect_layers": True,
+                                "use_attention_rollout": True,
+                                "use_dual_matching": False,
+                            },
+                        },
+                    },
+                    {
+                        "name": "Stage 4 - Feature Polishing",
+                        "type": "feature",
+                        "epochs": 1,
+                        "depends_on": [3],
+                        "config": {
+                            "learning_rate": 1e-5,
+                            "feature_distillation": {
+                                "metrics": ["l2"],
+                                "auto_align": True,
+                                "auto_layers": "last",
+                                "auto_layer_count": 1,
+                            },
+                        },
+                    },
+                ],
+            },
+            "train": {
+                "epochs": 4,
+                "batch_size": 2,
+                "mixed_precision": True,
+                "gradient_accumulation_steps": 8,
+            },
+            "model": {
+                "type": "causallm",
+                "max_length": 512,
+            },
+        },
         "compression_max": {
             "description": "Aggressive compression with similarity, attention, and optional QAT.",
             "distillation": {

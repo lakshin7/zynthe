@@ -42,12 +42,19 @@ class AttentionExtractor:
     def _detect_model_type(self, model: nn.Module) -> str:
         """Auto-detect model architecture type."""
         model_class = model.__class__.__name__.lower()
+        model_conf = getattr(model, 'config', None)
+        model_type = str(getattr(model_conf, 'model_type', '')).lower() if model_conf is not None else ''
+
+        if model_type in {'bert', 'roberta', 'distilbert', 'gpt2', 'llama', 'vit', 'deit'}:
+            return "transformer"
         if "vit" in model_class or "bert" in model_class or "gpt" in model_class or "transformer" in model_class:
             return "transformer"
         elif "resnet" in model_class or "efficientnet" in model_class or "mobilenet" in model_class:
             return "cnn"
         elif "clip" in model_class or "blip" in model_class:
             return "multimodal"
+        elif hasattr(model, 'encoder') and hasattr(model, 'get_input_embeddings'):
+            return "transformer"
         else:
             warnings.warn(f"Unknown model type: {model_class}, defaulting to 'transformer'")
             return "transformer"
@@ -439,6 +446,8 @@ class AttentionTransferDistiller(BaseDistiller):
             loss_types = parsed_config.get('loss_types', loss_types)
             loss_weights = parsed_config.get('loss_weights', loss_weights)
 
+        parsed_config = self._validate_attention_config(parsed_config)
+
         self.config = parsed_config
 
         super().__init__(teacher, student, parsed_config or None)
@@ -455,6 +464,22 @@ class AttentionTransferDistiller(BaseDistiller):
         # Initialize extractors
         self.teacher_layers = teacher_layers or []
         self.student_layers = student_layers or []
+
+        auto_detect_layers = parsed_config.get('auto_detect_layers', True)
+        if auto_detect_layers:
+            if not self.teacher_layers:
+                self.teacher_layers = self._auto_detect_attention_layers(self.teacher)
+            if not self.student_layers:
+                self.student_layers = self._auto_detect_attention_layers(self.student)
+
+        if not layer_mapping and self.teacher_layers and self.student_layers:
+            layer_mapping = self._build_relative_layer_mapping(self.teacher_layers, self.student_layers)
+
+        if not self.teacher_layers or not self.student_layers:
+            warnings.warn(
+                "Attention layer hooks are partially/unconfigured; output-attention based losses will still run. "
+                "Set teacher_layers/student_layers or keep auto_detect_layers=true for hook alignment."
+            )
         
         if self.teacher_layers:
             self.teacher_extractor = AttentionExtractor(teacher, self.teacher_layers)
@@ -481,6 +506,103 @@ class AttentionTransferDistiller(BaseDistiller):
             weights=loss_weights,
             temperature=temperature
         )
+
+    def _validate_attention_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and sanitize attention transfer config."""
+        validated = dict(config or {})
+
+        allowed_norms = {"l2", "softmax", "sigmoid", "none"}
+        normalization = validated.get('normalization', 'softmax')
+        if normalization not in allowed_norms:
+            warnings.warn(f"Invalid normalization '{normalization}'. Falling back to 'softmax'.")
+            validated['normalization'] = 'softmax'
+
+        allowed_loss_types = {"l2", "kl", "contrastive", "relational"}
+        loss_types = validated.get('loss_types')
+        if loss_types is not None:
+            if isinstance(loss_types, str):
+                loss_types = [loss_types]
+            filtered_loss_types = [lt for lt in loss_types if lt in allowed_loss_types]
+            if not filtered_loss_types:
+                warnings.warn("No valid loss_types found. Falling back to ['l2'].")
+                filtered_loss_types = ['l2']
+            validated['loss_types'] = filtered_loss_types
+
+        mode = validated.get('mode', validated.get('type', 'hybrid'))
+        allowed_modes = {"spatial", "affinity", "probabilistic", "scat", "hybrid"}
+        if mode not in allowed_modes:
+            warnings.warn(f"Invalid attention mode '{mode}'. Falling back to 'hybrid'.")
+            validated['mode'] = 'hybrid'
+
+        for key in ('teacher_layers', 'student_layers'):
+            layers = validated.get(key)
+            if isinstance(layers, str):
+                validated[key] = [layers]
+
+        weights = validated.get('loss_weights')
+        if isinstance(weights, list) and validated.get('loss_types'):
+            if len(weights) != len(validated['loss_types']):
+                warnings.warn("loss_weights length does not match loss_types. Ignoring custom loss_weights.")
+                validated.pop('loss_weights', None)
+
+        return validated
+
+    def _auto_detect_attention_layers(self, model: nn.Module, max_layers: int = 4) -> List[str]:
+        """Auto-detect likely attention layers for hook-based matching."""
+        named_modules = list(model.named_modules())
+        exact_suffixes = (
+            'attention.self',
+            'self_attn',
+            'self_attention',
+            'attn',
+        )
+
+        candidates: List[str] = []
+        for name, _ in named_modules:
+            lname = name.lower()
+            if lname.endswith(exact_suffixes):
+                candidates.append(name)
+
+        if not candidates:
+            for name, _ in named_modules:
+                lname = name.lower()
+                if 'attention' in lname and ('encoder' in lname or 'layer' in lname or 'block' in lname):
+                    candidates.append(name)
+
+        if not candidates:
+            return []
+
+        if len(candidates) <= max_layers:
+            return candidates
+
+        # Select layers uniformly across depth.
+        step = max(1, len(candidates) // max_layers)
+        selected = [candidates[i] for i in range(0, len(candidates), step)]
+        return selected[-max_layers:]
+
+    def _build_relative_layer_mapping(self, teacher_layers: List[str], student_layers: List[str]) -> Dict[str, str]:
+        """Build relative-depth layer mapping when teacher/student layer names differ."""
+        if not teacher_layers or not student_layers:
+            return {}
+
+        mapping: Dict[str, str] = {}
+        if len(teacher_layers) == len(student_layers):
+            for t_name, s_name in zip(teacher_layers, student_layers):
+                mapping[t_name] = s_name
+            return mapping
+
+        ratio = len(teacher_layers) / max(len(student_layers), 1)
+        for idx, s_name in enumerate(student_layers):
+            t_idx = min(len(teacher_layers) - 1, int(round(idx * ratio)))
+            mapping[teacher_layers[t_idx]] = s_name
+        return mapping
+
+    def prepare_for_forward_pass(self) -> None:
+        """Reset extractor state before each teacher/student forward pair."""
+        if self.teacher_extractor:
+            self.teacher_extractor.clear()
+        if self.student_extractor:
+            self.student_extractor.clear()
 
     def _move_to_device(self, data: Any) -> Any:
         """Recursively move tensors (or collections of tensors) to the distiller device."""
@@ -776,12 +898,6 @@ class AttentionTransferDistiller(BaseDistiller):
         
         losses = []
         loss_details: Dict[str, float] = {}
-        
-        # Clear previous extractions
-        if self.teacher_extractor:
-            self.teacher_extractor.clear()
-        if self.student_extractor:
-            self.student_extractor.clear()
 
         # Classical Methods (backward compatible)
         if self.mode in ["spatial", "hybrid"]:
@@ -886,13 +1002,16 @@ class AttentionTransferDistiller(BaseDistiller):
                 s_map = self.compute_spatial_attention(student_feats["last_hidden_state"])
                 s_map = self.matcher.resize(s_map, t_map)
                 loss = self.alpha * F.mse_loss(s_map, t_map)
+                self.prepare_for_forward_pass()
                 return loss, {'attention_transfer': loss.item(), **loss_details}
             else:
                 loss = torch.tensor(0.0, device=next(self.student.parameters()).device)
+                self.prepare_for_forward_pass()
                 return loss, {'attention_transfer': 0.0, **loss_details}
 
         total_loss = self.alpha * torch.stack(losses).mean()
         loss_details['attention_transfer'] = total_loss.item()
+        self.prepare_for_forward_pass()
         return total_loss, loss_details
 
 
@@ -1061,7 +1180,13 @@ class AttentionTransferDistiller(BaseDistiller):
 
     # ---------------------- Forward Pass ----------------------
 
-    def forward(self, x: torch.Tensor, return_loss: bool = True, **kwargs) -> Union[torch.Tensor, Dict[str, Any]]:  # type: ignore[override]
+    def forward(
+        self,
+        inputs: Any,
+        return_features: bool = False,
+        return_loss: bool = False,
+        **kwargs
+    ) -> Union[Tuple[Any, Any], Tuple[Any, Any, Dict[str, Any], Dict[str, Any]], torch.Tensor, Dict[str, Any]]:  # type: ignore[override]
         """
         Forward pass with comprehensive attention-based distillation.
         
@@ -1072,9 +1197,11 @@ class AttentionTransferDistiller(BaseDistiller):
         Note: This override has a different signature than BaseDistiller.forward()
         for attention-specific functionality.
         """
-        inputs = self._move_to_device(x)
+        inputs = self._move_to_device(inputs)
         device_kwargs = self._move_to_device(kwargs)
         if isinstance(device_kwargs, dict):
+            device_kwargs.pop("return_features", None)
+            device_kwargs.pop("return_loss", None)
             device_kwargs.pop("output_attentions", None)
             device_kwargs.pop("output_hidden_states", None)
 
@@ -1115,7 +1242,12 @@ class AttentionTransferDistiller(BaseDistiller):
             
             return loss_tensor
 
-        return student_out
+        if return_features:
+            teacher_feats = self._output_to_dict(teacher_out)
+            student_feats = self._output_to_dict(student_out)
+            return student_out, teacher_out, teacher_feats, student_feats
+
+        return student_out, teacher_out
     
     def _output_to_dict(self, model_output: Any) -> Dict[str, torch.Tensor]:
         """Convert model output to standardized dict format."""

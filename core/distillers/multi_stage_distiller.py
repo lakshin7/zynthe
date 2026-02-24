@@ -22,20 +22,24 @@ Example:
 from typing import Dict, List, Any, Optional, Tuple, Mapping
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from pathlib import Path
+import csv
 import yaml
 import json
 from datetime import datetime
 import warnings
 from collections import defaultdict
 from copy import deepcopy
+import time
 
 from .base_distiller import BaseDistiller
 from .kd_hinton import KDHintonDistiller
 from .feature_distiller import FeatureDistiller
 from .similarity_transfer import SimilarityTransfer
 from .presets import get_preset, list_presets
+from evaluation.metrics_extended import DistillationEfficacyIndex, CompressionAwareScore
 
 # Optional imports
 try:
@@ -304,16 +308,28 @@ class MultiStageDistiller:
         self.val_loader = val_loader
         self.device = device
         self.output_dir = Path(output_dir)
+        self.teacher_params = int(sum(p.numel() for p in self.teacher.parameters()))
+        self.student_params = int(sum(p.numel() for p in self.student.parameters()))
+        self._teacher_baseline: Optional[Dict[str, float]] = None
 
         callbacks_cfg = self.config.get('callbacks', {})
         self.progress_callback = callbacks_cfg.get('on_stage_end')
         self.metrics_callback = callbacks_cfg.get('on_stage_metrics')
         self.plan_metadata = deepcopy(self.config.get('metadata', {}))
+        quality_gate_cfg = self.config.get('quality_gate', {})
+        self.stop_on_regression = bool(quality_gate_cfg.get('stop_on_regression', False))
+        self.max_accuracy_drop = float(quality_gate_cfg.get('max_accuracy_drop', 0.0))
+        self.min_stage_accuracy = quality_gate_cfg.get('min_stage_accuracy', None)
+        self.run_state: Dict[str, Any] = {
+            'stopped_early': False,
+            'stop_reason': None,
+            'stopped_at_stage': None,
+        }
         
         # Initialize components
+        self.registry = DistillerRegistry()
         self.stages = self._parse_stages(config)
         self.controller = StageController(self.stages, output_dir)
-        self.registry = DistillerRegistry()
         self.loss_scheduler = AdaptiveLossScheduler(
             config.get('distillation', {}).get('loss_schedule')
         )
@@ -337,6 +353,14 @@ class MultiStageDistiller:
         """
         distill_cfg = config.get('distillation', {})
         method = distill_cfg.get('method') or distill_cfg.get('type') or 'kd_hinton'
+        method_aliases = {
+            'hinton': 'kd_hinton',
+            'kdhinton': 'kd_hinton',
+            'feature_distillation': 'feature',
+            'similarity_transfer': 'similarity',
+            'attention_transfer': 'attention',
+        }
+        method = method_aliases.get(str(method).lower(), str(method).lower())
         if method == 'multi_stage':
             method = 'kd_hinton'
         
@@ -356,8 +380,64 @@ class MultiStageDistiller:
         if not stages:
             # Auto-generate stages from preflight
             stages = self._auto_generate_stages(config)
-        
-        return stages
+
+        normalized_stages: List[Dict[str, Any]] = []
+        for idx, stage in enumerate(stages, 1):
+            normalized = self._normalize_stage(stage, idx)
+            self._validate_stage(normalized, idx)
+            normalized_stages.append(normalized)
+
+        return normalized_stages
+
+    def _normalize_stage(self, stage: Dict[str, Any], stage_idx: int) -> Dict[str, Any]:
+        """Normalize stage schema and aliases."""
+        normalized = deepcopy(stage)
+
+        stage_type = normalized.get('type') or normalized.get('method') or 'kd'
+        stage_type_aliases = {
+            'hinton': 'kd_hinton',
+            'kdhinton': 'kd_hinton',
+            'feature_distillation': 'feature',
+            'similarity_transfer': 'similarity',
+            'attention_transfer': 'attention',
+        }
+        stage_type = stage_type_aliases.get(str(stage_type).lower(), str(stage_type).lower())
+        normalized['type'] = stage_type
+
+        normalized.setdefault('name', f"Stage {stage_idx} - {stage_type}")
+        normalized['epochs'] = int(normalized.get('epochs', 1) or 1)
+        normalized.setdefault('config', {})
+
+        depends_on = normalized.get('depends_on', [])
+        if isinstance(depends_on, int):
+            depends_on = [depends_on]
+        normalized['depends_on'] = [int(dep) for dep in depends_on if int(dep) > 0]
+        return normalized
+
+    def _validate_stage(self, stage: Dict[str, Any], stage_idx: int) -> None:
+        """Validate stage config and emit actionable warnings."""
+        stage_type = stage.get('type')
+        if self.registry.get(stage_type) is None:
+            warnings.warn(
+                f"Stage {stage_idx} uses unknown distiller type '{stage_type}'. "
+                f"Available: {self.registry.list_available()}"
+            )
+
+        epochs = int(stage.get('epochs', 1) or 1)
+        if epochs <= 0:
+            warnings.warn(f"Stage {stage_idx} has non-positive epochs={epochs}. Forcing epochs=1.")
+            stage['epochs'] = 1
+
+        if stage_type == 'attention':
+            config = stage.get('config', {})
+            attn_cfg = config.get('attention_transfer', config)
+            if not attn_cfg.get('teacher_layers') and not attn_cfg.get('student_layers'):
+                attn_cfg.setdefault('auto_detect_layers', True)
+                warnings.warn(
+                    f"Stage {stage_idx} attention transfer has no explicit layers; enabling auto_detect_layers=true."
+                )
+                if 'attention_transfer' in config:
+                    config['attention_transfer'] = attn_cfg
     
     def _auto_generate_stages(self, config: Dict) -> List[Dict]:
         """
@@ -468,6 +548,23 @@ class MultiStageDistiller:
             self.controller.log_stage(stage_idx, stage_cfg['name'], stage_metrics)
             self.stage_metrics.append(stage_metrics)
 
+            quality_ok, reason = self._check_quality_gate(stage_idx, stage_cfg, stage_metrics)
+            if not quality_ok:
+                warn_msg = (
+                    f"Quality gate failed at stage {stage_idx} ({stage_cfg.get('name')}): {reason}"
+                )
+                warnings.warn(warn_msg)
+                if self.stop_on_regression:
+                    self.run_state['stopped_early'] = True
+                    self.run_state['stop_reason'] = reason
+                    self.run_state['stopped_at_stage'] = stage_idx
+
+            if callable(self.metrics_callback):
+                try:
+                    self.metrics_callback(stage_idx, stage_cfg, stage_metrics)
+                except Exception as callback_error:
+                    warnings.warn(f"Metrics callback failed at stage {stage_idx}: {callback_error}")
+
             if callable(self.progress_callback):
                 try:
                     self.progress_callback(stage_idx, stage_cfg, stage_metrics)
@@ -481,6 +578,10 @@ class MultiStageDistiller:
             
             print(f"\n✅ Stage {stage_idx} completed!")
             self._print_stage_summary(stage_idx, stage_metrics)
+
+            if self.run_state.get('stopped_early'):
+                print("\n⛔ Early stop triggered by quality gate.")
+                break
         
         # Generate final report
         report = self._generate_final_report()
@@ -494,6 +595,23 @@ class MultiStageDistiller:
         self._print_final_summary(report)
         
         return report
+
+    def _check_quality_gate(self, stage_idx: int, stage_cfg: Dict[str, Any], stage_metrics: Dict[str, float]) -> Tuple[bool, str]:
+        """Return (is_ok, reason) for configured stage quality gates."""
+        current_acc = float(stage_metrics.get('val_accuracy', 0.0) or 0.0)
+
+        if self.min_stage_accuracy is not None:
+            min_required = float(self.min_stage_accuracy)
+            if current_acc < min_required:
+                return False, f"val_accuracy {current_acc:.2f}% < min_stage_accuracy {min_required:.2f}%"
+
+        if stage_idx > 1 and self.max_accuracy_drop > 0 and len(self.stage_metrics) >= 2:
+            prev_acc = float(self.stage_metrics[-2].get('val_accuracy', 0.0) or 0.0)
+            drop = prev_acc - current_acc
+            if drop > self.max_accuracy_drop:
+                return False, f"accuracy drop {drop:.2f}% exceeds threshold {self.max_accuracy_drop:.2f}%"
+
+        return True, "ok"
     
     def _instantiate_distiller(self, distiller_cls: type, distiller_config: Dict[str, Any]) -> BaseDistiller:
         """Instantiate a distiller with graceful fallback for legacy signatures."""
@@ -553,9 +671,13 @@ class MultiStageDistiller:
         # Initialize optimizer and scheduler
         learning_rate = distiller_config.get('lr', distiller_config.get('learning_rate', 2e-5))
         weight_decay = distiller_config.get('weight_decay', 0.01)
+        optimizer_type = distiller_config.get('optimizer_type', distiller_config.get('optimizer', 'adamw'))
+        scheduler_type = distiller_config.get('scheduler_type', distiller_config.get('scheduler', 'cosine'))
         distiller.optimizer, distiller.scheduler = distiller._init_optimizers(
             lr=learning_rate,
             weight_decay=weight_decay,
+            optimizer_type=optimizer_type,
+            scheduler_type=scheduler_type,
             total_steps=max(1, len(self.train_loader) * stage_cfg.get('epochs', 3)) if self.train_loader else 1000
         )
         
@@ -672,6 +794,7 @@ class MultiStageDistiller:
         total_loss = 0.0
         correct = 0
         total = 0
+        student_latencies_ms: List[float] = []
         
         with torch.no_grad():
             for batch in self.val_loader:
@@ -689,10 +812,12 @@ class MultiStageDistiller:
                 
                 # Forward pass
                 try:
+                    t0 = time.perf_counter()
                     if isinstance(inputs, dict):
                         student_out = self.student(**inputs)
                     else:
                         student_out = self.student(inputs)
+                    student_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
                     
                     # Extract logits - handle dict, object with logits attr, or tensor
                     if isinstance(student_out, dict):
@@ -706,6 +831,10 @@ class MultiStageDistiller:
                     
                     # Compute accuracy
                     if labels is not None and hasattr(logits, 'dim') and logits.dim() >= 2:
+                        try:
+                            total_loss += float(F.cross_entropy(logits, labels).item())
+                        except Exception:
+                            pass
                         _, predicted = logits.max(1)
                         total += labels.size(0)
                         correct += predicted.eq(labels).sum().item()
@@ -715,10 +844,12 @@ class MultiStageDistiller:
                     continue
         
         accuracy = 100.0 * correct / max(total, 1)
+        latency_ms = float(sum(student_latencies_ms) / max(len(student_latencies_ms), 1))
         
         return {
             'val_loss': total_loss / max(len(self.val_loader), 1),
-            'val_accuracy': accuracy
+            'val_accuracy': accuracy,
+            'student_latency_ms': latency_ms,
         }
     
     def _freeze_layers(self, layer_spec: List[int]):
@@ -782,6 +913,120 @@ class MultiStageDistiller:
         print(f"  Train Loss: {metrics.get('train_loss', 0):.4f}")
         print(f"  Val Loss: {metrics.get('val_loss', 0):.4f}")
         print(f"  Val Accuracy: {metrics.get('val_accuracy', 0):.2f}%")
+
+    def _compute_teacher_baseline(self) -> Dict[str, float]:
+        """Compute and cache teacher baseline metrics on validation split."""
+        if self._teacher_baseline is not None:
+            return self._teacher_baseline
+
+        baseline = {
+            'teacher_accuracy_pct': 0.0,
+            'teacher_latency_ms': 1.0,
+        }
+
+        if self.val_loader is None:
+            self._teacher_baseline = baseline
+            return baseline
+
+        self.teacher.eval()
+        correct = 0
+        total = 0
+        latencies_ms: List[float] = []
+
+        with torch.no_grad():
+            for batch in self.val_loader:
+                if isinstance(batch, (list, tuple)):
+                    inputs, labels = batch[0].to(self.device), batch[1].to(self.device)
+                elif isinstance(batch, dict):
+                    inputs = {k: v.to(self.device) for k, v in batch.items() if k != 'labels'}
+                    labels = batch.get('labels', None)
+                    if labels is not None:
+                        labels = labels.to(self.device)
+                else:
+                    inputs = batch.to(self.device)
+                    labels = None
+
+                try:
+                    t0 = time.perf_counter()
+                    if isinstance(inputs, dict):
+                        teacher_out = self.teacher(**inputs)
+                    else:
+                        teacher_out = self.teacher(inputs)
+                    latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+
+                    if isinstance(teacher_out, dict):
+                        logits = teacher_out['logits']
+                    elif hasattr(teacher_out, 'logits'):
+                        logits = teacher_out.logits
+                    elif isinstance(teacher_out, tuple):
+                        logits = teacher_out[0]
+                    else:
+                        logits = teacher_out
+
+                    if labels is not None and hasattr(logits, 'dim') and logits.dim() >= 2:
+                        _, predicted = logits.max(1)
+                        total += labels.size(0)
+                        correct += predicted.eq(labels).sum().item()
+                except Exception:
+                    continue
+
+        baseline['teacher_accuracy_pct'] = float(100.0 * correct / max(total, 1))
+        baseline['teacher_latency_ms'] = float(sum(latencies_ms) / max(len(latencies_ms), 1))
+        self._teacher_baseline = baseline
+        return baseline
+
+    def _build_stage_comparison(self) -> List[Dict[str, Any]]:
+        """Build stage-wise trend artifact including DEI/CAS and accuracy deltas."""
+        baseline = self._compute_teacher_baseline()
+        teacher_acc_pct = float(baseline.get('teacher_accuracy_pct', 0.0))
+        teacher_latency_ms = max(float(baseline.get('teacher_latency_ms', 1.0)), 1e-6)
+
+        comparison: List[Dict[str, Any]] = []
+        prev_acc = None
+        prev_dei = None
+        prev_cas = None
+
+        for idx, (stage_cfg, metrics) in enumerate(zip(self.stages, self.stage_metrics), 1):
+            student_acc_pct = float(metrics.get('val_accuracy', 0.0) or 0.0)
+            student_latency_ms = max(float(metrics.get('student_latency_ms', teacher_latency_ms) or teacher_latency_ms), 1e-6)
+
+            dei_payload = DistillationEfficacyIndex.compute_dei(
+                teacher_acc=max(teacher_acc_pct / 100.0, 1e-8),
+                student_acc=max(student_acc_pct / 100.0, 0.0),
+                teacher_params=max(self.teacher_params, 1),
+                student_params=max(self.student_params, 1),
+            )
+            cas_payload = CompressionAwareScore.compute_cas(
+                accuracy=max(student_acc_pct / 100.0, 0.0),
+                teacher_params=max(self.teacher_params, 1),
+                student_params=max(self.student_params, 1),
+                teacher_latency=teacher_latency_ms,
+                student_latency=student_latency_ms,
+            )
+
+            rec: Dict[str, Any] = {
+                'stage': idx,
+                'name': stage_cfg.get('name', f'Stage {idx}'),
+                'type': stage_cfg.get('type', 'unknown'),
+                'val_accuracy_pct': student_acc_pct,
+                'student_latency_ms': student_latency_ms,
+                'teacher_accuracy_pct': teacher_acc_pct,
+                'teacher_latency_ms': teacher_latency_ms,
+                'dei': float(dei_payload.get('dei', 0.0)),
+                'cas': float(cas_payload.get('cas', 0.0)),
+                'compression_ratio': float(dei_payload.get('compression_ratio', 0.0)),
+            }
+
+            rec['accuracy_delta_pct'] = None if prev_acc is None else (student_acc_pct - prev_acc)
+            rec['dei_delta'] = None if prev_dei is None else (rec['dei'] - prev_dei)
+            rec['cas_delta'] = None if prev_cas is None else (rec['cas'] - prev_cas)
+
+            comparison.append(rec)
+            prev_acc = student_acc_pct
+            prev_dei = rec['dei']
+            prev_cas = rec['cas']
+
+        return comparison
     
     def _generate_final_report(self) -> Dict[str, Any]:
         """Generate comprehensive final report."""
@@ -813,6 +1058,7 @@ class MultiStageDistiller:
             'final_metrics': {},
             'stage_controller_report': self.controller.generate_report(),
             'metadata': self.plan_metadata,
+            'run_state': deepcopy(self.run_state),
         }
 
         if self.plan_metadata and 'preset' in self.plan_metadata:
@@ -852,6 +1098,20 @@ class MultiStageDistiller:
             }
             # Update summary as well
             report['summary']['total_accuracy_gain'] = total_gain
+
+        stage_comparison = self._build_stage_comparison()
+        report['stage_comparison'] = stage_comparison
+        if stage_comparison:
+            report['summary']['best_dei'] = max(row.get('dei', 0.0) for row in stage_comparison)
+            report['summary']['best_cas'] = max(row.get('cas', 0.0) for row in stage_comparison)
+            report['summary']['best_stage_by_dei'] = max(
+                stage_comparison,
+                key=lambda row: row.get('dei', 0.0)
+            ).get('name')
+            report['summary']['best_stage_by_cas'] = max(
+                stage_comparison,
+                key=lambda row: row.get('cas', 0.0)
+            ).get('name')
         
         return report
     
@@ -890,6 +1150,36 @@ class MultiStageDistiller:
         with open(yaml_path, 'w') as f:
             yaml.dump(report, f, default_flow_style=False)
         print(f"💾 Report saved: {yaml_path}")
+
+        comparison_rows = report.get('stage_comparison', [])
+        if comparison_rows:
+            comparison_json = self.output_dir / 'stage_comparison.json'
+            with open(comparison_json, 'w') as f:
+                json.dump(comparison_rows, f, indent=2, default=str)
+            print(f"💾 Stage comparison saved: {comparison_json}")
+
+            comparison_csv = self.output_dir / 'stage_comparison.csv'
+            fieldnames = [
+                'stage',
+                'name',
+                'type',
+                'val_accuracy_pct',
+                'accuracy_delta_pct',
+                'student_latency_ms',
+                'teacher_accuracy_pct',
+                'teacher_latency_ms',
+                'compression_ratio',
+                'dei',
+                'dei_delta',
+                'cas',
+                'cas_delta',
+            ]
+            with open(comparison_csv, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in comparison_rows:
+                    writer.writerow({key: row.get(key) for key in fieldnames})
+            print(f"💾 Stage comparison saved: {comparison_csv}")
 
 
 # Convenience function for backward compatibility

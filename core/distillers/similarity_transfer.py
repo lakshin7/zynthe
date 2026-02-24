@@ -535,6 +535,9 @@ class SimilarityTransfer(BaseDistiller):
 
         student_logits = self._extract_logits(student_outputs)
         teacher_logits = self._extract_logits(teacher_outputs)
+        task_type = self._resolve_task_type(student_logits if isinstance(student_logits, torch.Tensor) else None)
+        ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
+        shift_labels = bool(self.config.get('distillation', {}).get('shift_labels', True))
         
         # Compute similarity loss across registered layers
         sim_loss_total = 0.0
@@ -584,16 +587,47 @@ class SimilarityTransfer(BaseDistiller):
         ce_loss = torch.tensor(0.0, device=device)
         
         if targets is not None:
-            # Cross-entropy with labels
-            ce_loss = F.cross_entropy(student_logits, targets)
-            
-            # KL divergence with teacher
-            T = self.temperature
-            kd_loss = F.kl_div(
-                F.log_softmax(student_logits / T, dim=1),
-                F.softmax(teacher_logits / T, dim=1),
-                reduction='batchmean'
-            ) * (T * T)
+            if (
+                task_type == 'causal_lm'
+                and isinstance(student_logits, torch.Tensor)
+                and isinstance(teacher_logits, torch.Tensor)
+                and student_logits.dim() == 3
+                and teacher_logits.dim() == 3
+            ):
+                flat_student, flat_targets = self._flatten_lm_logits_and_targets(
+                    student_logits,
+                    targets,
+                    ignore_index=ignore_index,
+                    shift_labels=shift_labels,
+                )
+                flat_teacher, _ = self._flatten_lm_logits_and_targets(
+                    teacher_logits,
+                    targets,
+                    ignore_index=ignore_index,
+                    shift_labels=shift_labels,
+                )
+                if flat_student.numel() > 0:
+                    ce_loss = F.cross_entropy(flat_student, flat_targets)
+                    T = self.temperature
+                    kd_loss = F.kl_div(
+                        F.log_softmax(flat_student / T, dim=-1),
+                        F.softmax(flat_teacher / T, dim=-1),
+                        reduction='batchmean'
+                    ) * (T * T)
+                else:
+                    ce_loss = torch.zeros((), device=device)
+                    kd_loss = torch.zeros((), device=device)
+            else:
+                # Cross-entropy with labels
+                ce_loss = F.cross_entropy(student_logits, targets)
+                
+                # KL divergence with teacher
+                T = self.temperature
+                kd_loss = F.kl_div(
+                    F.log_softmax(student_logits / T, dim=1),
+                    F.softmax(teacher_logits / T, dim=1),
+                    reduction='batchmean'
+                ) * (T * T)
         
         # Combined loss
         total_loss = self.weight * sim_loss_avg + self.kd_weight * kd_loss

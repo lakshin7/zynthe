@@ -233,6 +233,64 @@ class BaseDistiller(nn.Module):
                     self.loss_weights['supervised'] = weight
                 
                 # Subclasses add their specific losses here
+
+    def _resolve_task_type(self, logits: Optional[torch.Tensor] = None) -> str:
+        """Infer task type from config with logits-shape fallback."""
+        distill_cfg = self.config.get('distillation', {}) if isinstance(self.config, dict) else {}
+        task_type = None
+        if isinstance(distill_cfg, dict):
+            task_type = distill_cfg.get('task_type')
+        if not task_type and isinstance(self.config, dict):
+            task_type = self.config.get('task_type')
+
+        if isinstance(task_type, str) and task_type.strip():
+            return task_type.strip().lower()
+
+        if isinstance(logits, torch.Tensor) and logits.dim() == 3:
+            return 'causal_lm'
+        return 'classification'
+
+    @staticmethod
+    def _extract_logits_tensor(outputs: Any) -> torch.Tensor:
+        """Extract logits tensor from common output formats."""
+        if isinstance(outputs, dict):
+            return outputs['logits']
+        if hasattr(outputs, 'logits'):
+            return outputs.logits
+        if isinstance(outputs, tuple):
+            return outputs[0]
+        return outputs
+
+    @staticmethod
+    def _flatten_lm_logits_and_targets(
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        *,
+        ignore_index: int = -100,
+        shift_labels: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Flatten LM logits/labels for token-level CE/KD computations."""
+        lm_logits = logits
+        lm_targets = targets
+
+        if shift_labels and lm_logits.dim() == 3 and lm_targets.dim() >= 2:
+            lm_logits = lm_logits[:, :-1, :].contiguous()
+            lm_targets = lm_targets[:, 1:].contiguous()
+
+        if lm_logits.dim() != 3:
+            raise ValueError(f"Expected LM logits [B,T,V], got {tuple(lm_logits.shape)}")
+
+        flat_logits = lm_logits.view(-1, lm_logits.size(-1))
+        flat_targets = lm_targets.reshape(-1)
+        valid_mask = flat_targets != ignore_index
+        if valid_mask.any():
+            flat_logits = flat_logits[valid_mask]
+            flat_targets = flat_targets[valid_mask]
+        else:
+            flat_logits = flat_logits[:0]
+            flat_targets = flat_targets[:0]
+
+        return flat_logits, flat_targets
     
     def _init_optimizers(
         self,
