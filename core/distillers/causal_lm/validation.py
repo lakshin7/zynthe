@@ -147,7 +147,7 @@ def validate_distillation_numerics(
     eps = 1e-12
     kd_manual = (t_probs * (torch.log(t_probs.clamp_min(eps)) - s_log_probs)).sum(dim=-1).mean() * (temp * temp)
 
-    checks["kl_formula_matches_manual"] = bool(torch.allclose(kd_reference, kd_manual, atol=atol, rtol=rtol).item())
+    checks["kl_formula_matches_manual"] = bool(torch.allclose(kd_reference, kd_manual, atol=atol, rtol=rtol))
     checks["finite_student_logits"] = bool(torch.isfinite(s_valid).all().item())
     checks["finite_teacher_logits"] = bool(torch.isfinite(t_valid).all().item())
     checks["teacher_requires_grad_off"] = bool(not t.requires_grad)

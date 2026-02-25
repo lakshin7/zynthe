@@ -671,6 +671,26 @@ class Trainer:
 
     def _collect_distiller_features(self) -> Dict[str, Dict[str, Any]]:
         """Collect optional hook/extractor features from the active distiller."""
+        def _coerce_feature(value: Any) -> Any:
+            if isinstance(value, torch.Tensor):
+                return value
+            if isinstance(value, (tuple, list)):
+                for item in value:
+                    coerced = _coerce_feature(item)
+                    if isinstance(coerced, torch.Tensor):
+                        return coerced
+                return None
+            return value
+
+        def _sanitize_feature_dict(features: Dict[str, Any]) -> Dict[str, Any]:
+            sanitized: Dict[str, Any] = {}
+            for key, value in features.items():
+                coerced = _coerce_feature(value)
+                if coerced is None:
+                    continue
+                sanitized[key] = coerced
+            return sanitized
+
         teacher_features: Dict[str, Any] = {}
         student_features: Dict[str, Any] = {}
 
@@ -701,9 +721,48 @@ class Trainer:
                 LOG.debug("Failed collecting student extractor attention maps", exc_info=True)
 
         return {
-            'teacher_features': teacher_features,
-            'student_features': student_features,
+            'teacher_features': _sanitize_feature_dict(teacher_features),
+            'student_features': _sanitize_feature_dict(student_features),
         }
+
+    def _compute_supervised_fallback_loss(self, student_outputs: Any, labels: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        """Fallback loss when a distiller-specific compute_loss path fails."""
+        if labels is None:
+            return None
+
+        logits = None
+        if isinstance(student_outputs, dict):
+            logits = student_outputs.get('logits')
+        elif hasattr(student_outputs, 'logits'):
+            logits = student_outputs.logits
+        elif isinstance(student_outputs, tuple) and student_outputs:
+            logits = student_outputs[0]
+        else:
+            logits = student_outputs
+
+        if not isinstance(logits, torch.Tensor):
+            return None
+
+        # Causal LM token-level CE
+        if logits.dim() == 3 and labels.dim() >= 2:
+            ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
+            shift_labels = bool(self.config.get('distillation', {}).get('shift_labels', True))
+            if shift_labels:
+                logits = logits[:, :-1, :].contiguous()
+                labels = labels[:, 1:].contiguous()
+
+            flat_logits = logits.view(-1, logits.size(-1))
+            flat_labels = labels.reshape(-1)
+            valid = flat_labels != ignore_index
+            if valid.any():
+                return F.cross_entropy(flat_logits[valid], flat_labels[valid])
+            return logits.sum() * 0.0
+
+        # Classification CE
+        if logits.dim() >= 2:
+            return F.cross_entropy(logits, labels)
+
+        return None
 
     def train_epoch(self, dataloader):
         self.student.train()
@@ -786,7 +845,12 @@ class Trainer:
                             
                     except Exception as e:
                         print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
-                        loss = torch.tensor(0.0, device=self.device)
+                        fallback_loss = self._compute_supervised_fallback_loss(student_outputs, labels)
+                        if fallback_loss is None:
+                            print(f"[WARNING] Skipping batch {batch_idx}: no valid fallback loss")
+                            continue
+                        loss = fallback_loss / self.gradient_accumulation_steps
+                        print(f"[INFO] Using supervised fallback loss at batch {batch_idx}")
             else:
                 try:
                     student_outputs = self.student(**student_batch, **student_runtime_kwargs)
@@ -816,7 +880,12 @@ class Trainer:
                     loss = loss / self.gradient_accumulation_steps
                 except Exception as e:
                     print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
-                    loss = torch.tensor(0.0, device=self.device)
+                    fallback_loss = self._compute_supervised_fallback_loss(student_outputs, labels)
+                    if fallback_loss is None:
+                        print(f"[WARNING] Skipping batch {batch_idx}: no valid fallback loss")
+                        continue
+                    loss = fallback_loss / self.gradient_accumulation_steps
+                    print(f"[INFO] Using supervised fallback loss at batch {batch_idx}")
             
             # ========== GRADIENT ACCUMULATION ==========
             # Accumulate gradients over multiple batches
