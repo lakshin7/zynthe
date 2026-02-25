@@ -1972,7 +1972,53 @@ class Trainer:
             # Compute metrics
             teacher_metrics = {}
             if all_preds and all_labels:
-                teacher_metrics = compute_all_metrics(all_preds, all_labels)
+                # For causal-LM, predictions/labels are token grids (multiclass-multioutput)
+                # and sklearn classification helpers will fail. Compute token accuracy directly.
+                first_label = all_labels[0]
+                is_token_grid = isinstance(first_label, (list, tuple, np.ndarray))
+
+                if is_token_grid:
+                    flat_preds: List[int] = []
+                    flat_labels: List[int] = []
+                    ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
+
+                    for pred_row, label_row in zip(all_preds, all_labels):
+                        if not isinstance(pred_row, (list, tuple, np.ndarray)):
+                            pred_row = [pred_row]
+                        if not isinstance(label_row, (list, tuple, np.ndarray)):
+                            label_row = [label_row]
+                        for p, l in zip(pred_row, label_row):
+                            try:
+                                li = int(l)
+                            except Exception:
+                                continue
+                            if li == ignore_index:
+                                continue
+                            try:
+                                pi = int(p)
+                            except Exception:
+                                continue
+                            flat_preds.append(pi)
+                            flat_labels.append(li)
+
+                    if flat_labels:
+                        correct = sum(int(p == l) for p, l in zip(flat_preds, flat_labels))
+                        token_acc = correct / max(len(flat_labels), 1)
+                        teacher_metrics = {
+                            'accuracy': float(token_acc),
+                            'f1': float(token_acc),  # placeholder for LM mode summary compatibility
+                            'precision': float(token_acc),
+                            'recall': float(token_acc),
+                        }
+                    else:
+                        teacher_metrics = {
+                            'accuracy': 0.0,
+                            'f1': 0.0,
+                            'precision': 0.0,
+                            'recall': 0.0,
+                        }
+                else:
+                    teacher_metrics = compute_all_metrics(all_preds, all_labels)
                 # Save last preds/labels for confusion matrix later
                 self.teacher_last_preds = all_preds
                 self.teacher_last_labels = all_labels
