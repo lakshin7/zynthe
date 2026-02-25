@@ -23,6 +23,7 @@ from training.scheduler import SchedulerFactory
 from core.utils.data_validator import DataValidator, DataLeakageDetector, OverfitUnderfitDetector
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.cuda.amp import autocast, GradScaler  # Mixed Precision Training
 import os
@@ -131,7 +132,12 @@ class Trainer:
         self.should_train_teacher = self.config['train'].get('train_teacher', False)
         self.teacher_epochs = self.config['train'].get('teacher_epochs', 2)
         if self.should_train_teacher:
-            self.teacher_optimizer = AdamW(self.teacher.parameters(), lr=self.config['train'].get('teacher_lr', 2e-5))
+            raw_teacher_lr = self.config['train'].get('teacher_lr', 2e-5)
+            try:
+                teacher_lr = float(raw_teacher_lr)
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid train.teacher_lr value: {raw_teacher_lr!r}")
+            self.teacher_optimizer = AdamW(self.teacher.parameters(), lr=teacher_lr)
         
         # Initialize distiller from registry
         distil_cfg = self.config.get('distillation', {}) or {}
@@ -1729,6 +1735,47 @@ class Trainer:
 
     def _train_teacher(self, train_loader, val_loader):
         """Train/fine-tune the teacher model on the task before distillation."""
+        def _extract_logits(output: Any) -> Optional[torch.Tensor]:
+            if isinstance(output, dict):
+                return output.get('logits')
+            logits_attr = getattr(output, 'logits', None)
+            if logits_attr is not None:
+                return logits_attr
+            if isinstance(output, tuple) and len(output) > 0 and torch.is_tensor(output[0]):
+                return output[0]
+            return None
+
+        def _teacher_loss(output: Any, labels: Optional[torch.Tensor]) -> torch.Tensor:
+            # Preferred path when model returns native loss
+            if hasattr(output, 'loss') and getattr(output, 'loss') is not None:
+                return output.loss
+            if isinstance(output, dict) and output.get('loss') is not None:
+                return output['loss']
+
+            logits = _extract_logits(output)
+            if logits is None or labels is None:
+                raise KeyError("loss")
+
+            # Causal-LM fallback
+            if logits.dim() == 3 and labels.dim() >= 2:
+                ignore_index = int(self.config.get('distillation', {}).get('ignore_index', -100))
+                shift_labels = bool(self.config.get('distillation', {}).get('shift_labels', True))
+                if shift_labels:
+                    logits = logits[:, :-1, :].contiguous()
+                    labels_local = labels[:, 1:].contiguous()
+                else:
+                    labels_local = labels
+
+                flat_logits = logits.view(-1, logits.size(-1))
+                flat_labels = labels_local.reshape(-1)
+                valid = flat_labels != ignore_index
+                if valid.any():
+                    return F.cross_entropy(flat_logits[valid], flat_labels[valid])
+                return logits.sum() * 0.0
+
+            # Classification fallback
+            return F.cross_entropy(logits, labels)
+
         # Ensure teacher is in training mode and gradients are enabled
         self.teacher.train()
         # Explicitly enable gradients for teacher parameters
@@ -1766,7 +1813,7 @@ class Trainer:
                 
                 self.teacher_optimizer.zero_grad()
                 outputs = self.teacher(**teacher_batch)
-                loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
+                loss = _teacher_loss(outputs, batch.get('labels'))
                 
                 # Ensure loss requires grad
                 if not loss.requires_grad:
@@ -1855,7 +1902,7 @@ class Trainer:
                     teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
                     
                     outputs = self.teacher(**teacher_batch)
-                    loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
+                    loss = _teacher_loss(outputs, batch.get('labels'))
                     val_loss += loss.item()
                     val_batches += 1
                     try:
