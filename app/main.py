@@ -153,6 +153,18 @@ def parse_args():
         default=None,
         help="Optional JSON output path for inference predictions"
     )
+    parser.add_argument(
+        "--smoke-no-model",
+        action="store_true",
+        help="Run full CPU smoke loop without downloading/loading HF models"
+    )
+    parser.add_argument("--smoke-epochs", type=int, default=1, help="Smoke test epochs")
+    parser.add_argument("--smoke-batch-size", type=int, default=2, help="Smoke test batch size")
+    parser.add_argument("--smoke-seq-len", type=int, default=32, help="Smoke test sequence length")
+    parser.add_argument("--smoke-train-samples", type=int, default=16, help="Smoke test train samples")
+    parser.add_argument("--smoke-val-samples", type=int, default=8, help="Smoke test val samples")
+    parser.add_argument("--smoke-vocab-size", type=int, default=128, help="Smoke test vocab size")
+    parser.add_argument("--smoke-hidden-size", type=int, default=64, help="Smoke test hidden size")
     parser.set_defaults(save_model=True)
     return parser.parse_args()
 
@@ -206,6 +218,118 @@ def load_config(path: str | Path, overrides: dict | None = None):
     """
     cm = ConfigManager(config_path=str(path), overrides=overrides)
     return cm, cm.resolved_config
+
+
+def _run_smoke_no_model(args) -> None:
+    """Run a tiny CPU-only synthetic training smoke test from main.py.
+
+    This path avoids model downloads and heavyweight trainer internals so it can run
+    on low-resource laptops for quick pipeline sanity checks.
+    """
+    import json
+    import time
+    import torch
+    import torch.nn as nn
+
+    epochs = max(1, int(getattr(args, "smoke_epochs", 1)))
+    batch_size = max(1, int(getattr(args, "smoke_batch_size", 2)))
+    seq_len = max(8, int(getattr(args, "smoke_seq_len", 32)))
+    train_samples = max(4, int(getattr(args, "smoke_train_samples", 16)))
+    val_samples = max(4, int(getattr(args, "smoke_val_samples", 8)))
+    vocab_size = max(32, int(getattr(args, "smoke_vocab_size", 128)))
+    hidden_size = max(16, int(getattr(args, "smoke_hidden_size", 64)))
+
+    torch.manual_seed(42)
+    device = torch.device("cpu")
+
+    class TinyLM(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed = nn.Embedding(vocab_size, hidden_size)
+            self.head = nn.Linear(hidden_size, vocab_size)
+
+        def forward(self, ids: torch.Tensor) -> torch.Tensor:
+            return self.head(self.embed(ids))
+
+    model = TinyLM().to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+
+    def make_data(n: int) -> torch.Tensor:
+        return torch.randint(0, vocab_size, (n, seq_len), dtype=torch.long, device=device)
+
+    train_ids = make_data(train_samples)
+    val_ids = make_data(val_samples)
+
+    def iter_batches(data: torch.Tensor, bs: int):
+        for i in range(0, data.size(0), bs):
+            yield data[i:i + bs]
+
+    started = time.time()
+    best_val = float("inf")
+    train_history: List[float] = []
+    val_history: List[float] = []
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        steps = 0
+        for x in iter_batches(train_ids, batch_size):
+            logits = model(x)
+            # next-token objective
+            shift_logits = logits[:, :-1, :].contiguous().view(-1, vocab_size)
+            shift_labels = x[:, 1:].contiguous().view(-1)
+            loss = nn.functional.cross_entropy(shift_logits, shift_labels)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += float(loss.item())
+            steps += 1
+
+        train_loss = epoch_loss / max(1, steps)
+        train_history.append(train_loss)
+
+        model.eval()
+        with torch.no_grad():
+            val_epoch = 0.0
+            val_steps = 0
+            for x in iter_batches(val_ids, batch_size):
+                logits = model(x)
+                shift_logits = logits[:, :-1, :].contiguous().view(-1, vocab_size)
+                shift_labels = x[:, 1:].contiguous().view(-1)
+                vloss = nn.functional.cross_entropy(shift_logits, shift_labels)
+                val_epoch += float(vloss.item())
+                val_steps += 1
+            val_loss = val_epoch / max(1, val_steps)
+            val_history.append(val_loss)
+            best_val = min(best_val, val_loss)
+
+        print(f"[SMOKE] epoch={epoch+1}/{epochs} train_loss={train_loss:.4f} val_loss={val_loss:.4f}")
+
+    out_dir = Path("experiments") / "smoke_no_model"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "status": "ok",
+        "mode": "smoke_no_model",
+        "device": str(device),
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+        "train_samples": train_samples,
+        "val_samples": val_samples,
+        "vocab_size": vocab_size,
+        "hidden_size": hidden_size,
+        "train_loss": train_history,
+        "val_loss": val_history,
+        "best_val_loss": best_val,
+        "duration_sec": round(time.time() - started, 3),
+    }
+
+    summary_path = out_dir / "smoke_summary.json"
+    with summary_path.open("w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2)
+
+    print("✅ Smoke test complete (no model downloads)")
+    print(f"Summary: {summary_path}")
 
 
 def _use_teacher_agent(config: Dict[str, Any]) -> bool:
@@ -710,6 +834,15 @@ def main():
     args = parse_args()
 
     try:
+        if bool(getattr(args, "smoke_no_model", False)):
+            print("\n" + "="*70)
+            print("SMOKE MODE: No model downloads (CPU synthetic test)")
+            print("="*70 + "\n")
+            _run_smoke_no_model(args)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
+
         # ========================================================================
         # PHASE 0: Environment & Configuration Setup
         # ========================================================================

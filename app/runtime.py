@@ -73,6 +73,7 @@ class UnifiedTrainingRuntime:
         warnings: List[str] = []
         errors: List[str] = []
         manifest_path: Optional[str] = None
+        quantization_summary_path: Optional[Path] = None
 
         cfg_manager = ConfigManager(config_path=options.config_path, overrides=options.overrides)
         normalized, norm_warnings = self._normalize_config(copy.deepcopy(cfg_manager.resolved_config))
@@ -192,6 +193,13 @@ class UnifiedTrainingRuntime:
         # Phase 6: train
         trainer.fit(train_loader, val_loader)
 
+        # Phase 6.5: optional quantization pipeline (PTQ / QAT)
+        quantization_summary_path, quantization_warnings = self._run_optional_quantization(
+            config=normalized,
+            experiment_dir=cfg_manager.experiment_dir,
+        )
+        warnings.extend(quantization_warnings)
+
         # Phase 7: save artifacts
         self._save_optional_artifacts(
             trainer=trainer,
@@ -212,7 +220,10 @@ class UnifiedTrainingRuntime:
             dataset_hash=dataset_hash,
             preflight_status={"can_proceed": True, "path": str(preflight_report_path)},
             resume_decision=resume_decision,
-            artifacts_extra=[("preflight_report", preflight_report_path)],
+            artifacts_extra=self._build_runtime_artifacts(
+                preflight_report_path=preflight_report_path,
+                quantization_summary_path=quantization_summary_path,
+            ),
             frozen_snapshot=frozen_snapshot,
         )
 
@@ -417,6 +428,58 @@ class UnifiedTrainingRuntime:
     # ------------------------------------------------------------------
     # Artifacts and manifest
     # ------------------------------------------------------------------
+    @staticmethod
+    def _build_runtime_artifacts(
+        *,
+        preflight_report_path: Path,
+        quantization_summary_path: Optional[Path],
+    ) -> List[Tuple[str, Path]]:
+        artifacts: List[Tuple[str, Path]] = [("preflight_report", preflight_report_path)]
+        if quantization_summary_path is not None:
+            artifacts.append(("quantization_summary", quantization_summary_path))
+        return artifacts
+
+    def _run_optional_quantization(
+        self,
+        *,
+        config: Dict[str, Any],
+        experiment_dir: str,
+    ) -> Tuple[Optional[Path], List[str]]:
+        warnings: List[str] = []
+        quant_cfg = config.get("quantization", {}) or {}
+        if not bool(quant_cfg.get("enable", False)):
+            return None, warnings
+
+        mode = str(quant_cfg.get("mode", "ptq")).lower()
+        if mode not in {"ptq", "qat"}:
+            warnings.append(f"Unsupported quantization.mode='{mode}', skipping quantization stage.")
+            return None, warnings
+
+        runner_cfg = copy.deepcopy(config)
+        runner_quant_cfg = runner_cfg.setdefault("quantization", {})
+        default_output_dir = Path(experiment_dir) / "quantization"
+        runner_quant_cfg.setdefault("output_dir", str(default_output_dir))
+
+        summary: Dict[str, Any]
+        if mode == "qat":
+            from core.quant.qat import QATRunner
+
+            # Note: current QAT runner loads model bundle from config instead of in-memory trainer state.
+            warnings.append(
+                "QAT stage is linked in pipeline, but it currently reloads models from config artifacts."
+            )
+            summary = QATRunner(runner_cfg).run()
+        else:
+            from core.quant.ptq import PTQRunner
+
+            summary = PTQRunner(runner_cfg).run()
+
+        logs_dir = Path(experiment_dir) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = logs_dir / "runtime_quantization_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        return summary_path, warnings
+
     def _save_optional_artifacts(
         self,
         *,

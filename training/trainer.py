@@ -25,7 +25,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.cuda.amp import autocast, GradScaler  # Mixed Precision Training
+from torch.amp import GradScaler  # Mixed Precision Training
 import os
 import inspect
 import json
@@ -78,7 +78,8 @@ class Trainer:
         
         # 1. Mixed Precision Training (AMP) - 2-3x speedup
         self.use_amp = bool(train_cfg.get('use_amp', train_cfg.get('mixed_precision', True)))
-        self.scaler = GradScaler() if self.use_amp else None
+        scaler_device = 'cuda' if device.type == 'cuda' else 'cpu'
+        self.scaler = GradScaler(device=scaler_device, enabled=self.use_amp) if self.use_amp else None
         if self.use_amp:
             print("[OPTIMIZATION] Mixed Precision Training (AMP) enabled - expect 2-3x speedup")
         
@@ -800,7 +801,7 @@ class Trainer:
             amp_dtype = torch.bfloat16 if self.use_amp and self.device.type == 'cpu' else torch.float16
             with torch.no_grad():
                 if self.use_amp and self.device.type != 'mps':
-                    with autocast(dtype=amp_dtype):
+                    with torch.amp.autocast(device_type=self.device.type, dtype=amp_dtype):
                         try:
                             teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                         except Exception as e:
@@ -814,7 +815,7 @@ class Trainer:
                         continue
             
             if self.use_amp and self.device.type != 'mps':
-                with autocast(dtype=amp_dtype):
+                with torch.amp.autocast(device_type=self.device.type, dtype=amp_dtype):
                     try:
                         student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                     except Exception as e:
@@ -927,6 +928,18 @@ class Trainer:
                     self.scaler.update()
                 else:
                     self.optimizer.step()
+
+                # Step scheduler per optimizer step for all schedulers
+                # EXCEPT ReduceLROnPlateau (epoch-based)
+                if self.scheduler is not None and hasattr(self.scheduler, 'step'):
+                    scheduler_name = type(self.scheduler).__name__
+                    if 'ReduceLROnPlateau' not in scheduler_name:
+                        # Type safety: Check if step method requires metrics parameter
+                        step_signature = inspect.signature(self.scheduler.step)
+                        if 'metrics' in step_signature.parameters:
+                            self.scheduler.step(metrics=None)  # type: ignore[call-arg]
+                        else:
+                            self.scheduler.step()  # type: ignore[call-arg]
                 
                 self.optimizer.zero_grad()
                 accumulation_counter = 0
@@ -957,17 +970,6 @@ class Trainer:
                     f"Loss={unscaled_loss:.4f}, LR={current_lr:.2e}, "
                     f"GradNorm={grad_norm_str}"
                 )
-            
-            # Step scheduler per-batch for all schedulers EXCEPT ReduceLROnPlateau (epoch-based)
-            if self.scheduler is not None and hasattr(self.scheduler, 'step'):
-                scheduler_name = type(self.scheduler).__name__
-                if 'ReduceLROnPlateau' not in scheduler_name:
-                    # Type safety: Check if step method requires metrics parameter
-                    step_signature = inspect.signature(self.scheduler.step)
-                    if 'metrics' in step_signature.parameters:
-                        self.scheduler.step(metrics=None)  # type: ignore[call-arg]
-                    else:
-                        self.scheduler.step()  # type: ignore[call-arg]
             
             total_loss += loss.item()
             # Track per-batch (scaled) loss for visualization

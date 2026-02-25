@@ -1,0 +1,103 @@
+# Canonical one-file profile for T4-safe GPT feature distillation.
+# Use this file as the single source of truth instead of ad-hoc CLI overrides.
+#
+# Current use:
+#   python -m app.main --config configs/t4_gpt_feature_lowmem_qat_plan.yaml
+#
+# QAT plan (prepared, staged rollout):
+#   python -m app.main quantize --config configs/t4_gpt_feature_lowmem_qat_plan.yaml --mode qat
+#
+# Notes:
+# - Distillation remains low-memory and stable.
+# - QAT output is separated into a dedicated artifact directory.
+# - Scope is set to teacher+student planning (Option C), but rollout should start student-first.
+
+seed: 42
+output_root: "experiments"
+
+train:
+  engine: "legacy"
+  epochs: 2
+  batch_size: 1
+  lr: 0.00003
+  grad_accum_steps: 16
+  mixed_precision: true
+  max_grad_norm: 1.0
+  early_stop_patience: 2
+
+  train_teacher: true
+  teacher_epochs: 1
+  teacher_lr: 0.00002
+
+model:
+  name: "gpt2"
+  student_name: "distilgpt2"
+  tokenizer_name: "gpt2"
+  type: "causal_lm"
+  max_length: 128
+
+distillation:
+  method: "feature"
+  task_type: "causal_lm"
+  ignore_index: -100
+  shift_labels: true
+
+  config:
+    task_type: "causal_lm"
+    distillation:
+      task_type: "causal_lm"
+      ignore_index: -100
+      shift_labels: true
+    feature_distillation:
+      enabled: true
+      metrics: ["l2"]
+      metric_weights:
+        l2: 1.0
+      auto_align: true
+      adapter_type: "linear"
+      layers:
+        - teacher: "transformer.h.11"
+          student: "transformer.h.5"
+          weight: 1.0
+
+data:
+  train_path: "data/test_hf_dataset/train.jsonl"
+  val_path: "data/test_hf_dataset/validation.jsonl"
+  preprocessing:
+    max_examples: 8000
+
+device:
+  prefer_cuda: true
+  prefer_mps: false
+
+# Keep disabled during distillation runs; use explicit quantize command for PTQ/QAT.
+quantization:
+  enable: false
+
+  # Default quantization command behavior:
+  #   python -m app.main quantize --config <this-file> --mode ptq
+  mode: "ptq"
+
+  # QAT runner compatible keys (current lightweight QAT path):
+  #   python -m app.main quantize --config <this-file> --mode qat
+  backend: "fbgemm"
+  qat_epochs: 1
+  max_steps: 200
+  learning_rate: 0.00005
+  weight_decay: 0.0
+  eval_interval: 1
+  amp: false
+
+  # Separate artifacts for quantization outputs (approved strategy).
+  output_dir: "experiments/quantized/qat"
+
+  # Planning metadata for staged QAT rollout (Option C: teacher + student).
+  scope: "teacher_and_student"
+  rollout:
+    stage_1: "student_qat_only"
+    stage_2: "teacher_qat_only"
+    stage_3: "dual_qat_consistency"
+
+visualization:
+  enable: false
+  save_plots: false
