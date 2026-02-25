@@ -1,0 +1,74 @@
+# GPT-like distillation config for T4 (non-Hinton)
+# Uses FeatureDistiller and trains both teacher and student.
+
+seed: 42
+output_root: "experiments"
+
+train:
+  engine: "legacy"              # teacher training currently lives in legacy trainer path
+  epochs: 2                      # student distillation epochs
+  batch_size: 4
+  lr: 0.00003                    # use decimal to avoid string/float parsing issues
+  grad_accum_steps: 4
+  mixed_precision: true
+  max_grad_norm: 1.0
+  early_stop_patience: 2
+
+  # train teacher first
+  train_teacher: true
+  teacher_epochs: 1
+  teacher_lr: 0.00002
+
+model:
+  name: "gpt2"                  # teacher
+  student_name: "distilgpt2"    # student
+  tokenizer_name: "gpt2"
+  type: "causal_lm"
+  max_length: 256
+
+distillation:
+  method: "feature"             # non-hinton distiller
+  task_type: "causal_lm"
+  ignore_index: -100
+  shift_labels: true
+
+  # trainer passes distillation.config directly to FeatureDistiller
+  config:
+    task_type: "causal_lm"
+    distillation:
+      task_type: "causal_lm"
+      ignore_index: -100
+      shift_labels: true
+    feature_distillation:
+      enabled: true
+      metrics: ["l2", "cosine"]
+      metric_weights:
+        l2: 1.0
+        cosine: 0.35
+      auto_align: true
+      adapter_type: "linear"
+      layers:
+        - teacher: "transformer.h.11"
+          student: "transformer.h.5"
+          weight: 1.0
+        - teacher: "transformer.h.8"
+          student: "transformer.h.4"
+          weight: 0.6
+
+data:
+  # lightweight HF-derived JSONL already in repo
+  train_path: "data/test_hf_dataset/train.jsonl"
+  val_path: "data/test_hf_dataset/validation.jsonl"
+  preprocessing:
+    max_examples: 20000
+
+device:
+  prefer_cuda: true
+  prefer_mps: false
+
+quantization:
+  enable: false
+
+visualization:
+  enable: true
+  save_plots: true

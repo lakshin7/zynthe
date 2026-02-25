@@ -795,6 +795,40 @@ def main():
             print(f"✅ Inference results saved to: {out_path}")
             return
 
+        # Unified training runtime (Phase 1 orchestration spine)
+        from app.runtime import RuntimeOptions, UnifiedTrainingRuntime
+
+        runtime = UnifiedTrainingRuntime()
+        runtime_options = RuntimeOptions(
+            config_path=args.config,
+            overrides=overrides_dict,
+            load_model_dir=args.load_model_dir,
+            load_checkpoint_path=args.load_checkpoint_path,
+            checkpoint_non_strict=args.checkpoint_non_strict,
+            save_model=args.save_model,
+            save_model_dir=args.save_model_dir,
+            save_checkpoint=args.save_checkpoint,
+            checkpoint_path=args.checkpoint_path,
+            use_teacher_agent=_use_teacher_agent(cfg_manager.resolved_config),
+        )
+        runtime_result = runtime.run(runtime_options)
+        if runtime_result.success:
+            print("✅ Unified runtime completed")
+            print(f"Engine: {runtime_result.engine}")
+            print(f"Experiment: {runtime_result.experiment_id}")
+            if runtime_result.manifest_path:
+                print(f"Manifest: {runtime_result.manifest_path}")
+            if runtime_result.warnings:
+                print("Warnings:")
+                for warning in runtime_result.warnings:
+                    print(f"  • {warning}")
+            return
+
+        print("❌ Unified runtime failed")
+        for error in runtime_result.errors:
+            print(f"  • {error}")
+        raise RuntimeError("Unified runtime execution failed")
+
         print("✅ Config loaded successfully")
         print("Experiment ID:", cfg_manager.experiment_id)
         print("Paths:", cfg_manager.paths)
