@@ -340,9 +340,9 @@ class ModelLoader:
                 logger.warning("Auto model type resolution failed (%s); falling back to sequence classification", exc)
                 resolved_model_type = "sequenceclassification"
 
-        if resolved_model_type in {"causallm", "decoder", "gpt", "lm"}:
+        if resolved_model_type in {"causallm", "causal_lm", "causal-lm", "decoder", "gpt", "lm", "language_modeling"}:
             model_class = AutoModelForCausalLM
-        elif resolved_model_type in {"sequenceclassification", "classification", "transformer"}:
+        elif resolved_model_type in {"sequenceclassification", "sequence_classification", "classification", "transformer"}:
             model_class = AutoModelForSequenceClassification
             if "num_labels" in self.model_cfg:
                 model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels", 2))
