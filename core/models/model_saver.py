@@ -91,7 +91,7 @@ def load_checkpoint(
     """Load checkpoint and restore model/optimizer/scheduler states."""
 
     safe_map_location = map_location if map_location is not None else "cpu"
-    checkpoint = torch.load(path, map_location=safe_map_location)
+    checkpoint = torch.load(path, map_location=safe_map_location, weights_only=False)
     load_result = model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
     if not strict:
         missing = getattr(load_result, "missing_keys", [])

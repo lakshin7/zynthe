@@ -540,7 +540,7 @@ class OptimizerCheckpoint:
         Returns:
             Dict with checkpoint metadata
         """
-        checkpoint = torch.load(path, map_location='cpu')
+        checkpoint = torch.load(path, map_location='cpu', weights_only=False)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         
         metadata = {

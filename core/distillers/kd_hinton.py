@@ -395,8 +395,8 @@ class KDHintonDistiller(BaseDistiller):
 
         if 'hint_enabled' in config:
             self.hint_enabled = bool(config['hint_enabled'])
-        
-    # Call parent
+
+        # Call parent
         super().__init__(teacher, student, config, device, **kwargs)
         
         # Classical KD parameters

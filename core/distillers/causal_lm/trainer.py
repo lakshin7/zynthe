@@ -15,7 +15,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -80,7 +80,7 @@ class SafeCausalLMTrainer:
         self.allow_shape_mismatch_fallback = bool(checkpoint_cfg.get("allow_shape_mismatch_fallback", True))
 
         self.use_amp = bool(train_cfg.get("use_amp", train_cfg.get("mixed_precision", True))) and self.device.type == "cuda"
-        self.scaler = GradScaler(enabled=self.use_amp)
+        self.scaler = GradScaler("cuda", enabled=self.use_amp)
 
         self.distill_engine = CausalLMDistillationEngine(
             DistillationConfig(
@@ -296,7 +296,7 @@ class SafeCausalLMTrainer:
                 teacher_grad_enabled = torch.is_grad_enabled()
                 teacher_outputs = self.teacher(**inputs)
 
-            with autocast(enabled=self.use_amp):
+            with autocast("cuda", enabled=self.use_amp):
                 student_outputs = self.student(**inputs)
                 distill_out = self.distill_engine.compute_total_loss(
                     student_outputs=student_outputs,
@@ -575,7 +575,7 @@ class SafeCausalLMTrainer:
         """Lightweight pre-load validation for checkpoint discover/resume."""
 
         try:
-            payload = torch.load(str(path), map_location="cpu")
+            payload = torch.load(str(path), map_location="cpu", weights_only=False)
         except Exception as exc:
             LOG.warning("Checkpoint integrity failure (%s): %s", path, exc)
             return False

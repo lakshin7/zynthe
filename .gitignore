@@ -35,6 +35,10 @@ training.log
 .AppleDouble
 .LSOverride
 
+# Environment files with secrets
+.env
+.env.*
+
 # IDE
 .vscode/
 .idea/
@@ -51,6 +55,7 @@ data/generated_students/
 data/sst2_test/
 data/test_hf_dataset/
 data/*.backup
+*.backup
 
 # Reports
 *_test_report.json

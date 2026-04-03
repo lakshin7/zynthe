@@ -111,7 +111,7 @@ class StageController:
             raise ValueError(f"No checkpoint found for stage {stage_idx}")
         
         checkpoint_path = self.checkpoints[stage_idx]
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
         
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"✓ Loaded checkpoint from stage {stage_idx}")

@@ -91,7 +91,7 @@ class QATRunner:
 		val_loader,
 	) -> nn.Module:
 		optimizer = AdamW(model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-		scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)  # type: ignore[attr-defined]
+		scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
 
 		global_step = 0
 		for epoch in range(self.epochs):
@@ -101,7 +101,7 @@ class QATRunner:
 					break
 				optimizer.zero_grad()
 				batch_on_device = self._move_batch_to_device(batch)
-				with torch.cuda.amp.autocast(enabled=self.use_amp):  # type: ignore[attr-defined]
+				with torch.amp.autocast("cuda", enabled=self.use_amp):
 					outputs = model(**batch_on_device)
 					loss = self._resolve_loss(outputs, batch_on_device)
 				scaler.scale(loss).backward()
