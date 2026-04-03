@@ -107,7 +107,7 @@ class TestCheckpointRoundTrip:
 class TestAMPNoDeprecationWarning:
     """torch.amp.GradScaler / autocast usage must not emit FutureWarning."""
 
-    def test_grads_caler_no_future_warning_validation(self):
+    def test_grad_scaler_no_future_warning_validation(self):
         """validation.py scalers must not produce FutureWarning."""
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
