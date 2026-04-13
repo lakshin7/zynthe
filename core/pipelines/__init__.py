@@ -1,0 +1,49 @@
+"""
+Zynthe Pipeline System
+======================
+
+End-to-end distillation pipelines for modular, composable knowledge distillation.
+
+Core Components:
+- BasePipeline: Abstract pipeline interface
+- SingleDistillerPipeline: Wrap individual distillers
+- MultiStagePipeline: Compose multiple distillers (sequential, parallel, hybrid)
+- PipelineBuilder: Fluent API for building pipelines
+- PipelineRegistry: Discovery and instantiation
+
+Usage:
+    from core.pipelines import PipelineBuilder
+    
+    # Single distiller
+    pipeline = PipelineBuilder() \
+        .add_distiller('kd_hinton', temperature=4.0) \
+        .build(teacher, student, device)
+    
+    # Multi-stage
+    pipeline = PipelineBuilder() \
+        .add_stage('logit', weight=0.7) \
+            .add_distiller('kd_hinton') \
+        .add_stage('features', weight=0.3) \
+            .add_distiller('feature') \
+        .build(teacher, student, device)
+"""
+
+from .base_pipeline import BasePipeline, PipelineMetrics
+from .single_distiller_pipeline import SingleDistillerPipeline
+from .pipeline_registry import PipelineRegistry, get_registry
+from .multi_stage_pipeline import MultiStagePipeline, ExecutionMode, PipelineStage
+from .pipeline_builder import PipelineBuilder
+
+__all__ = [
+    'BasePipeline',
+    'PipelineMetrics',
+    'SingleDistillerPipeline',
+    'PipelineRegistry',
+    'get_registry',
+    'MultiStagePipeline',
+    'ExecutionMode',
+    'PipelineStage',
+    'PipelineBuilder',
+]
+
+__version__ = '1.0.0'
