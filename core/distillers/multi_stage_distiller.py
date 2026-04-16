@@ -280,7 +280,18 @@ class MultiStageDistiller:
             val_loader: Validation dataloader
             device: Device for training
             output_dir: Output directory for checkpoints and logs
+        
+        .. deprecated::
+            Use :class:`core.pipelines.multi_stage_pipeline.MultiStagePipeline`
+            instead for new distillation workflows.
         """
+        warnings.warn(
+            "MultiStageDistiller is deprecated. Use MultiStagePipeline from "
+            "core.pipelines instead for new distillation workflows.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         if config is None:
             config = {}
         else:

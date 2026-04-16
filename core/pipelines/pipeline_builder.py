@@ -55,6 +55,10 @@ class PipelineBuilder:
         self._config: Dict[str, Any] = {}
         self._name: str = "CustomPipeline"
         self._normalize_weights: bool = True
+        # Adapter support (Phase 2)
+        self._teacher_adapter = None
+        self._student_adapter = None
+        self._auto_detect_adapters_flag: bool = False
     
     def add_stage(
         self,
@@ -177,6 +181,58 @@ class PipelineBuilder:
         self._normalize_weights = enable
         return self
     
+    def with_adapters(
+        self,
+        teacher_adapter=None,
+        student_adapter=None,
+    ) -> 'PipelineBuilder':
+        """
+        Set explicit adapters for teacher and student models.
+        
+        Args:
+            teacher_adapter: ModelAdapter instance for the teacher
+            student_adapter: ModelAdapter instance for the student
+        
+        Returns:
+            Self for chaining
+        """
+        self._teacher_adapter = teacher_adapter
+        self._student_adapter = student_adapter
+        return self
+    
+    def auto_detect_adapters(self) -> 'PipelineBuilder':
+        """
+        Auto-detect adapters from model architectures at build time.
+        
+        Uses :class:`core.adapters.AdapterRegistry` to inspect both
+        teacher and student models and select the right adapters.
+        
+        Returns:
+            Self for chaining
+        """
+        self._auto_detect_adapters_flag = True
+        return self
+    
+    def _attach_adapters(
+        self,
+        pipeline: BasePipeline,
+        teacher: nn.Module,
+        student: nn.Module,
+    ) -> None:
+        """Attach adapters to a built pipeline."""
+        if self._auto_detect_adapters_flag:
+            from core.adapters import AdapterRegistry
+            registry = AdapterRegistry()
+            self._teacher_adapter = registry.detect(teacher)
+            self._student_adapter = registry.detect(student)
+            print(f"[PipelineBuilder] Auto-detected adapters: "
+                  f"teacher={self._teacher_adapter}, student={self._student_adapter}")
+        
+        if self._teacher_adapter is not None:
+            pipeline.teacher_adapter = self._teacher_adapter
+        if self._student_adapter is not None:
+            pipeline.student_adapter = self._student_adapter
+    
     def build(
         self,
         teacher: nn.Module,
@@ -205,10 +261,15 @@ class PipelineBuilder:
         
         if len(self._stages) == 1 and len(self._stages[0]['distillers']) == 1:
             # Single distiller - use SingleDistillerPipeline
-            return self._build_single_distiller(teacher, student, device)
+            pipeline = self._build_single_distiller(teacher, student, device)
         else:
             # Multi-stage - use MultiStagePipeline
-            return self._build_multi_stage(teacher, student, device)
+            pipeline = self._build_multi_stage(teacher, student, device)
+        
+        # Attach adapters if configured
+        self._attach_adapters(pipeline, teacher, student)
+        
+        return pipeline
     
     def _build_single_distiller(
         self,

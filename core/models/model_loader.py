@@ -62,9 +62,12 @@ class ModelBundle:
     spec: ModelLoadSpec
     device: torch.device
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Multi-platform adapter support (populated when auto_detect is enabled)
+    teacher_adapter: Optional[Any] = None  # Optional[ModelAdapter]
+    student_adapter: Optional[Any] = None  # Optional[ModelAdapter]
 
     def summary(self) -> Dict[str, Any]:
-        return {
+        summary = {
             "teacher": _summarize_model(self.teacher),
             "student": _summarize_model(self.student),
             "tokenizer": self.tokenizer.__class__.__name__,
@@ -72,6 +75,11 @@ class ModelBundle:
             "quantization": self.spec.quantization,
             "compile": self.spec.compile_graph,
         }
+        if self.teacher_adapter is not None:
+            summary["teacher_adapter"] = repr(self.teacher_adapter)
+        if self.student_adapter is not None:
+            summary["student_adapter"] = repr(self.student_adapter)
+        return summary
 
 
 def _cfg_get(cfg: Union["ConfigManager", Dict[str, Any]], key: str, default: Any = None) -> Any:
@@ -589,6 +597,25 @@ def load_models(
         ModelBundle,
         loader.load(use_agent=use_agent, data_samples=data_samples, return_bundle=True),
     )
+
+    # Auto-detect adapters if config requests it
+    adapter_cfg = (
+        _cfg_get(cfg, "adapters", {})
+        if not isinstance(cfg, dict)
+        else cfg.get("adapters", {})
+    )
+    if isinstance(adapter_cfg, dict) and adapter_cfg.get("auto_detect", False):
+        try:
+            from core.adapters import AdapterRegistry
+            registry = AdapterRegistry()
+            bundle.teacher_adapter = registry.detect(bundle.teacher)
+            bundle.student_adapter = registry.detect(bundle.student)
+            logger.info(
+                "Auto-detected adapters: teacher=%s, student=%s",
+                bundle.teacher_adapter, bundle.student_adapter,
+            )
+        except ImportError:
+            logger.warning("core.adapters not available; skipping adapter detection")
 
     if return_bundle:
         return bundle

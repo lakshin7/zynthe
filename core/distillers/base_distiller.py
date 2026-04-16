@@ -29,6 +29,12 @@ from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR
 from collections import OrderedDict
 import warnings
 
+from core.utils.device_utils import (
+    auto_detect_device as _shared_auto_detect_device,
+    move_to_device as _shared_move_to_device,
+    normalize_model_output,
+)
+
 
 class BaseDistiller(nn.Module):
     """
@@ -132,14 +138,19 @@ class BaseDistiller(nn.Module):
     # CORE SETUP METHODS
     # ============================================================================
     
+    @property
+    def modality_type(self) -> str:
+        """Return the modality this distiller operates on.
+
+        Subclasses override to return ``"vision"``, ``"multimodal"``,
+        ``"vlm"``, etc.  Used by adapters and pipelines to select the
+        correct I/O normalisation strategy.
+        """
+        return "text"
+
     def _auto_detect_device(self) -> torch.device:
         """Auto-detect the best available device."""
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        elif torch.backends.mps.is_available():
-            return torch.device("mps")
-        else:
-            return torch.device("cpu")
+        return _shared_auto_detect_device()
     
     def _register_hooks(self) -> None:
         """
@@ -163,15 +174,16 @@ class BaseDistiller(nn.Module):
 
     def _move_to_device(self, data: Any) -> Any:
         """Recursively move tensors contained in `data` onto the distiller's device."""
-        if isinstance(data, torch.Tensor):
-            return data.to(self.device)
-        if isinstance(data, dict):
-            return {k: self._move_to_device(v) for k, v in data.items()}
-        if isinstance(data, list):
-            return [self._move_to_device(v) for v in data]
-        if isinstance(data, tuple):
-            return tuple(self._move_to_device(v) for v in data)
-        return data
+        return _shared_move_to_device(data, self.device)
+
+    @staticmethod
+    def normalize_outputs(raw_output: Any) -> dict:
+        """Normalize HuggingFace model outputs into a standard dict.
+
+        Returns dict with keys: ``logits``, ``hidden_states``,
+        ``attentions``, ``loss``.
+        """
+        return normalize_model_output(raw_output)
     
     def _get_teacher_hook(self, name: str) -> Callable:
         """Create a forward hook for teacher features."""

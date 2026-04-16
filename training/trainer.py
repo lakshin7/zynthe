@@ -152,28 +152,21 @@ class Trainer:
             self.teacher_optimizer = AdamW(self.teacher.parameters(), lr=teacher_lr)
         
         # ========== PIPELINE / DISTILLER INITIALIZATION ==========
-        # NEW: Support both pipeline (new) and distiller (legacy) modes
-        if self._use_pipeline:
-            # Pipeline mode - use provided pipeline
+        # Pipeline-first design: ALL distillation flows go through a pipeline.
+        # If a legacy distiller is configured, it gets wrapped in a
+        # SingleDistillerPipeline automatically.  This eliminates the
+        # previous dual-path branching throughout the training loop.
+        
+        if pipeline is not None:
+            # Pipeline passed directly by caller
             self.pipeline = pipeline
-            self.distiller = None  # No direct distiller
             print(f"[TRAINER] Using pipeline: {pipeline.name}")
-            
-            # Setup pipeline
-            if not pipeline._is_setup:
-                pipeline.setup()
-                pipeline._is_setup = True
-            
-            # For backward compatibility, assume no attention outputs needed in pipeline mode
-            self._requires_attention_outputs = False
         else:
-            # Legacy distiller mode - build distiller from config
             distil_cfg = self.config.get('distillation', {}) or {}
-            
-            # Check if config specifies pipeline
             pipeline_cfg = distil_cfg.get('pipeline', {})
+            
             if pipeline_cfg and pipeline_cfg.get('type') in ['multi_stage', 'multistage', 'multi']:
-                # Config wants pipeline - build it
+                # Config requests a multi-stage pipeline
                 print("[TRAINER] Building pipeline from configuration...")
                 from core.pipelines import PipelineBuilder
                 self.pipeline = PipelineBuilder.from_config(
@@ -182,18 +175,12 @@ class Trainer:
                     self.student,
                     self.device
                 )
-                self.distiller = None
-                self._use_pipeline = True
-                
-                # Setup pipeline
-                if not self.pipeline._is_setup:
-                    self.pipeline.setup()
-                    self.pipeline._is_setup = True
-                
-                self._requires_attention_outputs = False
                 print(f"[TRAINER] Pipeline built: {self.pipeline.name}")
             else:
-                # Traditional single distiller mode
+                # Legacy distiller → auto-wrap in SingleDistillerPipeline
+                from core.distillers.multi_stage_distiller import DistillerRegistry
+                from core.pipelines.single_distiller_pipeline import SingleDistillerPipeline
+                
                 registry = DistillerRegistry()
                 distiller_type = distil_cfg.get('method') or distil_cfg.get('type') or 'kd_hinton'
                 distiller_aliases = {
@@ -203,39 +190,59 @@ class Trainer:
                     'similarity_transfer': 'similarity',
                     'attention_transfer': 'attention',
                 }
-                distiller_type = distiller_aliases.get(str(distiller_type).lower(), str(distiller_type).lower())
+                distiller_type = distiller_aliases.get(
+                    str(distiller_type).lower(), str(distiller_type).lower()
+                )
                 self.distiller_type = distiller_type
                 
-                # Get distiller class and instantiate with proper parameters
                 distiller_class = registry.get(distiller_type)
-                
-                # Check if distiller_class is valid before instantiating
                 if distiller_class is None:
                     raise ValueError(f"Unknown distiller type: {distiller_type}")
                 
                 distiller_config = copy.deepcopy(distil_cfg.get('config', {}))
-                for key in ('temperature', 'alpha', 'label_smoothing', 'hint_enabled', 'confidence_scaling', 'min_confidence'):
+                for key in ('temperature', 'alpha', 'label_smoothing',
+                            'hint_enabled', 'confidence_scaling', 'min_confidence'):
                     if key in distil_cfg and key not in distiller_config:
                         distiller_config[key] = distil_cfg[key]
                 if isinstance(distil_cfg.get('kd_hinton'), dict) and 'kd_hinton' not in distiller_config:
                     distiller_config['kd_hinton'] = copy.deepcopy(distil_cfg['kd_hinton'])
-
-                try:
-                    self.distiller = distiller_class(
+                
+                # Instantiate distiller using signature introspection
+                _distiller_sig = inspect.signature(distiller_class.__init__)
+                _distiller_params = set(_distiller_sig.parameters.keys()) - {'self'}
+                
+                if 'config' in _distiller_params:
+                    distiller = distiller_class(
                         teacher=self.teacher,
                         student=self.student,
                         config=distiller_config,
                         device=self.device,
                     )
-                except TypeError:
-                    self.distiller = distiller_class(
+                else:
+                    distiller = distiller_class(
                         teacher=self.teacher,
                         student=self.student,
                         device=self.device,
                         **distiller_config,
                     )
-                self._requires_attention_outputs = self._distiller_needs_attention_outputs()
-                self.pipeline = None
+                
+                # Wrap in pipeline for unified interface
+                self.pipeline = SingleDistillerPipeline(
+                    distiller,
+                    name=f"AutoWrapped_{distiller_class.__name__}",
+                )
+                print(f"[TRAINER] Distiller '{distiller_type}' auto-wrapped in pipeline")
+        
+        # Ensure pipeline is set up
+        if not self.pipeline._is_setup:
+            self.pipeline.setup()
+            self.pipeline._is_setup = True
+        
+        # Pipeline-first: always True now.
+        self._use_pipeline = True
+        
+        # Determine if attention outputs are needed
+        self._requires_attention_outputs = self._distiller_needs_attention_outputs()
         # ========== END PIPELINE / DISTILLER INITIALIZATION ==========
         
         self.train_losses = []
@@ -684,7 +691,13 @@ class Trainer:
 
     def _distiller_needs_attention_outputs(self) -> bool:
         """Determine whether model forwards should request attentions/hidden states."""
-        if self.distiller_type == 'attention':
+        # Check if the underlying distiller (if any) needs attention outputs
+        distiller = getattr(self.pipeline, 'distiller', None)
+        if distiller is None:
+            return False
+        
+        distiller_type = getattr(self, 'distiller_type', '')
+        if distiller_type == 'attention':
             return True
 
         # Explicit opt-in from config for custom distillers.
@@ -699,7 +712,7 @@ class Trainer:
             'use_dual_matching',
             'use_temporal_attention',
         )
-        return any(hasattr(self.distiller, flag) for flag in attention_flags)
+        return any(hasattr(distiller, flag) for flag in attention_flags)
     
     def _compute_distillation_loss(
         self,
@@ -709,77 +722,54 @@ class Trainer:
         feature_payload: Optional[Dict[str, Any]] = None
     ) -> tuple:
         """
-        Compute distillation loss using either pipeline or distiller.
+        Compute distillation loss using the pipeline (unified path).
+        
+        All distillation now goes through the pipeline interface.
+        Legacy distillers are auto-wrapped in SingleDistillerPipeline
+        at init time, so this method always uses the pipeline path.
         
         Args:
             student_outputs: Student model outputs
             teacher_outputs: Teacher model outputs  
             batch: Input batch
-            feature_payload: Optional feature dict for legacy distillers
+            feature_payload: Ignored (kept for API compat)
         
         Returns:
             (loss, metrics_dict) tuple
         """
         labels = batch.get('labels', None)
         
-        if self._use_pipeline:
-            # NEW: Pipeline mode - use pipeline interface
-            pipeline_batch = {
+        # Build outputs dict for pipeline
+        pipeline_outputs = {
+            'teacher_outputs': teacher_outputs,
+            'student_outputs': student_outputs,
+            'batch': {
                 'input_ids': batch.get('input_ids'),
                 'attention_mask': batch.get('attention_mask'),
                 'labels': labels,
-            }
-            
-            # Create outputs dict for pipeline
-            outputs = {
-                'teacher_outputs': teacher_outputs,
-                'student_outputs': student_outputs,
-                'batch': pipeline_batch,
-            }
-            
-            # Compute loss through pipeline
-            loss = self.pipeline.compute_loss(outputs)
-            
-            # Get metrics from pipeline
-            try:
-                metrics = self.pipeline.get_metrics()
-                metrics_dict = {
-                    'pipeline_metrics': metrics.to_dict(),
-                    'total_loss': loss.item() if hasattr(loss, 'item') else float(loss),
-                }
-                
-                # Extract component losses if available
-                if metrics.component_losses:
-                    metrics_dict.update(metrics.component_losses)
-                
-            except Exception as e:
-                LOG.debug(f"Failed to get pipeline metrics: {e}")
-                metrics_dict = {}
-            
-            return loss, metrics_dict
+            },
+        }
         
-        else:
-            # Legacy distiller mode
-            if feature_payload is None:
-                feature_payload = self._collect_distiller_features()
+        # Compute loss through pipeline
+        loss = self.pipeline.compute_loss(pipeline_outputs)
+        
+        # Get metrics from pipeline
+        try:
+            metrics = self.pipeline.get_metrics()
+            metrics_dict = {
+                'pipeline_metrics': metrics.to_dict(),
+                'total_loss': loss.item() if hasattr(loss, 'item') else float(loss),
+            }
             
-            result = self.distiller.compute_loss(
-                student_outputs=student_outputs,
-                teacher_outputs=teacher_outputs,
-                targets=labels,
-                student_features=feature_payload.get('student_features'),
-                teacher_features=feature_payload.get('teacher_features'),
-            )
+            # Extract component losses if available
+            if metrics.component_losses:
+                metrics_dict.update(metrics.component_losses)
             
-            # Handle tuple return (loss, metrics_dict)
-            if isinstance(result, tuple):
-                loss, metrics_dict = result
-            else:
-                # Fallback if distiller returns only loss
-                loss = result
-                metrics_dict = {}
-            
-            return loss, metrics_dict
+        except Exception as e:
+            LOG.debug(f"Failed to get pipeline metrics: {e}")
+            metrics_dict = {}
+        
+        return loss, metrics_dict
 
     def _build_forward_runtime_kwargs(self, model_params) -> Dict[str, Any]:
         """Build runtime kwargs compatible with the model forward signature."""
@@ -797,11 +787,12 @@ class Trainer:
 
     def _prepare_distiller_batch(self) -> None:
         """Allow distillers to clear transient caches before a new forward pass."""
-        if self._use_pipeline:
-            # Pipeline mode - no preparation needed (pipelines are stateless)
+        # Pipeline mode: check if the wrapped distiller has a prepare method
+        distiller = getattr(self.pipeline, 'distiller', None)
+        if distiller is None:
             return
         
-        prepare_fn = getattr(self.distiller, 'prepare_for_forward_pass', None)
+        prepare_fn = getattr(distiller, 'prepare_for_forward_pass', None)
         if callable(prepare_fn):
             try:
                 prepare_fn()
@@ -809,11 +800,17 @@ class Trainer:
                 LOG.debug("Distiller prepare_for_forward_pass() failed", exc_info=True)
 
     def _collect_distiller_features(self) -> Dict[str, Dict[str, Any]]:
-        """Collect optional hook/extractor features from the active distiller."""
-        if self._use_pipeline:
-            # Pipeline mode - pipelines handle feature extraction internally
-            return {'student_features': {}, 'teacher_features': {}}
+        """Collect optional hook/extractor features from the active distiller.
         
+        In pipeline-first mode, pipelines handle feature extraction
+        internally.  This method accesses the underlying distiller
+        (if wrapped) for backward compatibility with code that
+        calls it directly.
+        """
+        distiller = getattr(self.pipeline, 'distiller', None)
+        if distiller is None:
+            return {'student_features': {}, 'teacher_features': {}}
+
         def _coerce_feature(value: Any) -> Any:
             if isinstance(value, torch.Tensor):
                 return value
@@ -837,15 +834,15 @@ class Trainer:
         teacher_features: Dict[str, Any] = {}
         student_features: Dict[str, Any] = {}
 
-        teacher_hooks = getattr(self.distiller, 'teacher_hooks', None)
+        teacher_hooks = getattr(distiller, 'teacher_hooks', None)
         if isinstance(teacher_hooks, dict) and teacher_hooks:
             teacher_features.update(teacher_hooks)
 
-        student_hooks = getattr(self.distiller, 'student_hooks', None)
+        student_hooks = getattr(distiller, 'student_hooks', None)
         if isinstance(student_hooks, dict) and student_hooks:
             student_features.update(student_hooks)
 
-        teacher_extractor = getattr(self.distiller, 'teacher_extractor', None)
+        teacher_extractor = getattr(distiller, 'teacher_extractor', None)
         if teacher_extractor is not None and hasattr(teacher_extractor, 'extract_attention_maps'):
             try:
                 maps = teacher_extractor.extract_attention_maps()
@@ -854,7 +851,7 @@ class Trainer:
             except Exception:
                 LOG.debug("Failed collecting teacher extractor attention maps", exc_info=True)
 
-        student_extractor = getattr(self.distiller, 'student_extractor', None)
+        student_extractor = getattr(distiller, 'student_extractor', None)
         if student_extractor is not None and hasattr(student_extractor, 'extract_attention_maps'):
             try:
                 maps = student_extractor.extract_attention_maps()

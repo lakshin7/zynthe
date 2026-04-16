@@ -22,6 +22,8 @@ import torch.nn as nn
 from dataclasses import dataclass, field
 import time
 
+from core.utils.device_utils import auto_detect_device as _shared_auto_detect_device
+
 
 @dataclass
 class PipelineMetrics:
@@ -106,23 +108,26 @@ class BasePipeline(ABC, nn.Module):
         self._total_batches_processed = 0
         self._cumulative_metrics = PipelineMetrics()
         
+        # Adapter slots (populated by PipelineBuilder or manually)
+        # Used for multi-platform support (Phase 2)
+        self.teacher_adapter = None  # Optional ModelAdapter
+        self.student_adapter = None  # Optional ModelAdapter
+        
         # Memory optimization for T4
         self._enable_memory_optimization()
     
     def _auto_detect_device(self) -> torch.device:
         """Auto-detect best available device (T4 GPU prioritized)."""
-        if torch.cuda.is_available():
-            # Print GPU info for Colab users
+        device = _shared_auto_detect_device()
+        if device.type == 'cuda':
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
             print(f"[Pipeline] Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
-            return torch.device("cuda")
-        elif torch.backends.mps.is_available():
+        elif device.type == 'mps':
             print("[Pipeline] Using Apple MPS")
-            return torch.device("mps")
         else:
             print("[Pipeline] Using CPU (WARNING: Training will be slow)")
-            return torch.device("cpu")
+        return device
     
     def _enable_memory_optimization(self):
         """Enable memory optimizations for T4 GPU (16GB VRAM)."""

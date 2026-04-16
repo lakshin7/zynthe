@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from .base_pipeline import BasePipeline, PipelineMetrics
 from .single_distiller_pipeline import SingleDistillerPipeline
 from core.distillers.base_distiller import BaseDistiller
+from core.utils.device_utils import move_to_device
 
 
 class ExecutionMode(Enum):
@@ -219,128 +220,43 @@ class MultiStagePipeline(BasePipeline):
         Returns:
             Dictionary with outputs from all stages
         """
-        # Move batch to device
-        batch = self._move_to_device(batch)
-        
-        # Execute based on global mode
-        if self.mode == ExecutionMode.SEQUENTIAL:
-            return self._forward_sequential(batch)
-        elif self.mode == ExecutionMode.PARALLEL:
-            return self._forward_parallel(batch)
-        elif self.mode == ExecutionMode.CONDITIONAL:
-            return self._forward_conditional(batch)
-        elif self.mode == ExecutionMode.HYBRID:
-            return self._forward_hybrid(batch)
-        else:
-            raise NotImplementedError(f"Mode {self.mode} not implemented")
+        batch = move_to_device(batch, self.device)
+        return self._execute_stages(batch)
     
-    def _forward_sequential(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute stages sequentially."""
-        all_outputs = {}
-        
+    def _execute_stages(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Run every active stage, collecting pipeline outputs.
+
+        Each stage's condition (if any) is evaluated to decide whether
+        to run it.  Within a stage each pipeline is executed and its
+        output stored keyed by ``pipeline_<i>``.
+
+        The previous four separate methods (_forward_sequential,
+        _forward_parallel, _forward_conditional, _forward_hybrid) were
+        identical in practice.  This single method replaces all four.
+        True parallel execution can be added here later without changing
+        the public API.
+
+        Args:
+            batch: Device-resident input batch.
+
+        Returns:
+            Nested dict: ``{stage_name: {pipeline_i: outputs}}``.
+        """
+        all_outputs: Dict[str, Any] = {}
+
         for stage in self.stages:
-            # Skip if condition fails
-            if stage.condition and not stage.condition(batch, all_outputs):
+            # Evaluate optional condition
+            if stage.condition is not None and not stage.condition(batch, all_outputs):
                 continue
-            
-            stage_outputs = {}
+
+            stage_outputs: Dict[str, Any] = {}
             for i, pipeline in enumerate(stage.pipelines):
                 outputs = pipeline.forward(batch)
                 stage_outputs[f"pipeline_{i}"] = outputs
-            
+
             all_outputs[stage.name] = stage_outputs
-        
+
         return all_outputs
-    
-    def _forward_parallel(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute all stages in parallel (memory permitting)."""
-        # Note: True parallelization would require multi-threading/processing
-        # For T4 GPU, we run sequentially but aggregate losses
-        # Future: Could use torch.nn.parallel for multi-GPU
-        
-        all_outputs = {}
-        
-        for stage in self.stages:
-            if stage.condition and not stage.condition(batch, all_outputs):
-                continue
-            
-            stage_outputs = {}
-            for i, pipeline in enumerate(stage.pipelines):
-                outputs = pipeline.forward(batch)
-                stage_outputs[f"pipeline_{i}"] = outputs
-            
-            all_outputs[stage.name] = stage_outputs
-        
-        return all_outputs
-    
-    def _forward_conditional(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute stages based on conditions."""
-        all_outputs = {}
-        
-        for stage in self.stages:
-            # Evaluate condition
-            if stage.condition is None:
-                # No condition = always run
-                should_run = True
-            else:
-                should_run = stage.condition(batch, all_outputs)
-            
-            if should_run:
-                stage_outputs = {}
-                for i, pipeline in enumerate(stage.pipelines):
-                    outputs = pipeline.forward(batch)
-                    stage_outputs[f"pipeline_{i}"] = outputs
-                
-                all_outputs[stage.name] = stage_outputs
-        
-        return all_outputs
-    
-    def _forward_hybrid(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute stages in their individual modes."""
-        all_outputs = {}
-        
-        for stage in self.stages:
-            if stage.condition and not stage.condition(batch, all_outputs):
-                continue
-            
-            # Execute based on stage-level mode
-            if stage.mode == ExecutionMode.PARALLEL:
-                # Run all pipelines in stage
-                stage_outputs = {}
-                for i, pipeline in enumerate(stage.pipelines):
-                    outputs = pipeline.forward(batch)
-                    stage_outputs[f"pipeline_{i}"] = outputs
-                all_outputs[stage.name] = stage_outputs
-            
-            elif stage.mode == ExecutionMode.SEQUENTIAL:
-                # Run pipelines one by one
-                stage_outputs = {}
-                for i, pipeline in enumerate(stage.pipelines):
-                    outputs = pipeline.forward(batch)
-                    stage_outputs[f"pipeline_{i}"] = outputs
-                all_outputs[stage.name] = stage_outputs
-            
-            else:
-                # Fallback to parallel
-                stage_outputs = {}
-                for i, pipeline in enumerate(stage.pipelines):
-                    outputs = pipeline.forward(batch)
-                    stage_outputs[f"pipeline_{i}"] = outputs
-                all_outputs[stage.name] = stage_outputs
-        
-        return all_outputs
-    
-    def _move_to_device(self, data: Any) -> Any:
-        """Move tensors to device recursively."""
-        if isinstance(data, torch.Tensor):
-            return data.to(self.device)
-        if isinstance(data, dict):
-            return {k: self._move_to_device(v) for k, v in data.items()}
-        if isinstance(data, list):
-            return [self._move_to_device(v) for v in data]
-        if isinstance(data, tuple):
-            return tuple(self._move_to_device(v) for v in data)
-        return data
     
     def compute_loss(self, outputs: Dict[str, Any]) -> torch.Tensor:
         """

@@ -234,6 +234,15 @@ class ConfigManager:
             logger.warning("auto_student.enable=true requested but auto_student is disabled in manual mode")
         auto_student_cfg["enable"] = False
 
+        # Multi-platform adapter configuration
+        adapter_cfg = normalized.setdefault("adapters", {})
+        if not isinstance(adapter_cfg, dict):
+            adapter_cfg = {}
+            normalized["adapters"] = adapter_cfg
+        adapter_cfg.setdefault("auto_detect", False)
+        adapter_cfg.setdefault("teacher_type", "auto")
+        adapter_cfg.setdefault("student_type", "auto")
+
         return normalized
 
     def _load_and_resolve(self):

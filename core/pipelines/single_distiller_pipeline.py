@@ -9,11 +9,13 @@ This allows existing distillers to work seamlessly in the new pipeline system.
 """
 
 from typing import Any, Dict, Optional
+import inspect
 import torch
 import torch.nn as nn
 
 from .base_pipeline import BasePipeline, PipelineMetrics
 from core.distillers.base_distiller import BaseDistiller
+from core.utils.device_utils import move_to_device
 
 
 class SingleDistillerPipeline(BasePipeline):
@@ -118,19 +120,17 @@ class SingleDistillerPipeline(BasePipeline):
     
     def _move_to_device(self, data: Any) -> Any:
         """Move tensors to device recursively."""
-        if isinstance(data, torch.Tensor):
-            return data.to(self.device)
-        if isinstance(data, dict):
-            return {k: self._move_to_device(v) for k, v in data.items()}
-        if isinstance(data, list):
-            return [self._move_to_device(v) for v in data]
-        if isinstance(data, tuple):
-            return tuple(self._move_to_device(v) for v in data)
-        return data
+        return move_to_device(data, self.device)
     
     def compute_loss(self, outputs: Dict[str, Any]) -> torch.Tensor:
         """
         Compute distillation loss using the wrapped distiller.
+        
+        Uses ``inspect.signature`` to determine which arguments the
+        distiller's ``compute_loss`` method actually accepts, then
+        builds call kwargs accordingly.  This replaces the previous
+        ``try/except TypeError`` chain which silently swallowed real
+        errors.
         
         Args:
             outputs: Dictionary from forward()
@@ -142,33 +142,57 @@ class SingleDistillerPipeline(BasePipeline):
         student_outputs = outputs['student_outputs']
         batch = outputs['batch']
         
-        # Call distiller's compute_loss method
-        # Different distillers have different signatures, handle gracefully
+        # Build the pool of available arguments
+        available = {
+            'teacher_outputs': teacher_outputs,
+            'student_outputs': student_outputs,
+            'labels': batch.get('labels'),
+            'targets': batch.get('labels'),
+            'input_ids': batch.get('input_ids'),
+            'attention_mask': batch.get('attention_mask'),
+            'student_features': outputs.get('student_features', {}),
+            'teacher_features': outputs.get('teacher_features', {}),
+        }
+        
+        # Introspect the distiller's compute_loss signature
         try:
-            # Try full signature (teacher_outputs, student_outputs, labels, input_ids, ...)
+            sig = inspect.signature(self.distiller.compute_loss)
+        except (ValueError, TypeError):
+            # Fallback: call with the two required positional args
             loss = self.distiller.compute_loss(
-                teacher_outputs=teacher_outputs,
                 student_outputs=student_outputs,
-                labels=batch.get('labels'),
-                input_ids=batch.get('input_ids'),
-                attention_mask=batch.get('attention_mask'),
+                teacher_outputs=teacher_outputs,
             )
-        except TypeError:
-            # Fallback: try minimal signature
-            try:
-                loss = self.distiller.compute_loss(
-                    teacher_outputs=teacher_outputs,
-                    student_outputs=student_outputs,
-                )
-            except TypeError:
-                # Last resort: call with outputs dict
-                loss = self.distiller.compute_loss(outputs)
+            return loss if isinstance(loss, torch.Tensor) else loss[0]
+        
+        call_kwargs: Dict[str, Any] = {}
+        for name, param in sig.parameters.items():
+            if name == 'self':
+                continue
+            if param.kind == param.VAR_KEYWORD:  # **kwargs
+                continue
+            if param.kind == param.VAR_POSITIONAL:  # *args
+                continue
+            if name in available:
+                call_kwargs[name] = available[name]
+            elif param.default is inspect.Parameter.empty:
+                # Required param not in our pool — pass None and let
+                # the distiller raise a clear error if it matters.
+                call_kwargs[name] = None
+        
+        result = self.distiller.compute_loss(**call_kwargs)
+        
+        # Handle tuple return (loss, metrics_dict)
+        if isinstance(result, tuple):
+            loss = result[0]
+        else:
+            loss = result
         
         # Extract component losses if available
         if hasattr(self.distiller, 'last_component_losses'):
             self._component_losses = self.distiller.last_component_losses
-        elif hasattr(loss, 'component_losses'):
-            self._component_losses = loss.component_losses
+        elif isinstance(result, tuple) and len(result) > 1 and isinstance(result[1], dict):
+            self._component_losses = result[1]
         
         return loss
     
