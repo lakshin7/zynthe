@@ -418,7 +418,7 @@ class UnifiedTrainingRuntime:
     @staticmethod
     def _checkpoint_integrity_ok(path: Path) -> bool:
         try:
-            payload = torch.load(str(path), map_location="cpu")
+            payload = torch.load(str(path), map_location="cpu", weights_only=False)
         except Exception:
             return False
         if not isinstance(payload, dict):

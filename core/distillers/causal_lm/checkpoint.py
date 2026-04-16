@@ -217,7 +217,7 @@ def smart_load_checkpoint(
     strict_first: bool = True,
     allow_shape_mismatch_fallback: bool = True,
 ) -> Tuple[CheckpointLoadReport, TrainingState, Optional[CheckpointMeta]]:
-    checkpoint = torch.load(path, map_location=map_location or "cpu")
+    checkpoint = torch.load(path, map_location=map_location or "cpu", weights_only=False)
     model_state = checkpoint.get("model_state_dict")
     if not isinstance(model_state, dict):
         raise ValueError(f"Checkpoint missing model_state_dict: {path}")

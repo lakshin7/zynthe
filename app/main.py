@@ -1088,6 +1088,32 @@ def main():
                         f"max_grad_norm_diff={gate_report.max_grad_norm_diff:.6f}"
                     )
                 print("✅ RegressionGate passed")
+        
+        # ========== PIPELINE BUILDER ==========
+        # NEW: Build pipeline if config specifies it
+        pipeline = None
+        distil_cfg = cfg_manager.resolved_config.get('distillation', {})
+        pipeline_cfg = distil_cfg.get('pipeline', {})
+        
+        if pipeline_cfg and pipeline_cfg.get('type') in ['multi_stage', 'multistage', 'multi']:
+            # Config specifies pipeline - build it
+            print("[MAIN] Building distillation pipeline from configuration...")
+            try:
+                from core.pipelines import PipelineBuilder
+                pipeline = PipelineBuilder.from_config(
+                    cfg_manager.resolved_config,
+                    teacher,
+                    student,
+                    cfg_manager.device()
+                )
+                print(f"✅ Pipeline built: {pipeline.name}")
+                print(f"   Stages: {len(pipeline.stages) if hasattr(pipeline, 'stages') else 'N/A'}")
+                print(f"   Mode: {pipeline.mode.value if hasattr(pipeline, 'mode') else 'N/A'}")
+            except Exception as e:
+                print(f"⚠️  Failed to build pipeline: {e}")
+                print("   Falling back to traditional distiller mode")
+                pipeline = None
+        # ========== END PIPELINE BUILDER ==========
 
             trainer = SafeCausalLMTrainer(
                 teacher=teacher,
@@ -1106,7 +1132,8 @@ def main():
                 tokenizer=tokenizer,
                 config=cfg_manager.resolved_config,
                 device=cfg_manager.device(),
-                experiment_dir=cfg_manager.experiment_dir
+                experiment_dir=cfg_manager.experiment_dir,
+                pipeline=pipeline  # NEW: Pass pipeline if built
             )
 
         if args.load_checkpoint_path:

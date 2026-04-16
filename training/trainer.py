@@ -38,13 +38,24 @@ import numpy as np
 LOG = logging.getLogger(__name__)
 
 class Trainer:
-    def __init__(self, teacher, student, tokenizer, config, device, experiment_dir, websocket_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
+    def __init__(
+        self,
+        teacher,
+        student,
+        tokenizer,
+        config,
+        device,
+        experiment_dir,
+        websocket_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        pipeline=None,  # NEW: Optional pipeline parameter
+    ):
         self.teacher = teacher
         self.student = student
         self.tokenizer = tokenizer
         self.config = config
         self.device = device
         self.experiment_dir = experiment_dir
+        self._use_pipeline = pipeline is not None  # Track if using pipeline mode
         
         # ========== TEACHER MODEL VALIDATION ==========
         # Detect if teacher is a base (untrained) model vs task-specific fine-tuned model
@@ -140,49 +151,92 @@ class Trainer:
                 raise ValueError(f"Invalid train.teacher_lr value: {raw_teacher_lr!r}")
             self.teacher_optimizer = AdamW(self.teacher.parameters(), lr=teacher_lr)
         
-        # Initialize distiller from registry
-        distil_cfg = self.config.get('distillation', {}) or {}
-        registry = DistillerRegistry()
-        distiller_type = distil_cfg.get('method') or distil_cfg.get('type') or 'kd_hinton'
-        distiller_aliases = {
-            'hinton': 'kd_hinton',
-            'kdhinton': 'kd_hinton',
-            'feature_distillation': 'feature',
-            'similarity_transfer': 'similarity',
-            'attention_transfer': 'attention',
-        }
-        distiller_type = distiller_aliases.get(str(distiller_type).lower(), str(distiller_type).lower())
-        self.distiller_type = distiller_type
-        
-        # Get distiller class and instantiate with proper parameters
-        distiller_class = registry.get(distiller_type)
-        
-        # Check if distiller_class is valid before instantiating
-        if distiller_class is None:
-            raise ValueError(f"Unknown distiller type: {distiller_type}")
-        
-        distiller_config = copy.deepcopy(distil_cfg.get('config', {}))
-        for key in ('temperature', 'alpha', 'label_smoothing', 'hint_enabled', 'confidence_scaling', 'min_confidence'):
-            if key in distil_cfg and key not in distiller_config:
-                distiller_config[key] = distil_cfg[key]
-        if isinstance(distil_cfg.get('kd_hinton'), dict) and 'kd_hinton' not in distiller_config:
-            distiller_config['kd_hinton'] = copy.deepcopy(distil_cfg['kd_hinton'])
+        # ========== PIPELINE / DISTILLER INITIALIZATION ==========
+        # NEW: Support both pipeline (new) and distiller (legacy) modes
+        if self._use_pipeline:
+            # Pipeline mode - use provided pipeline
+            self.pipeline = pipeline
+            self.distiller = None  # No direct distiller
+            print(f"[TRAINER] Using pipeline: {pipeline.name}")
+            
+            # Setup pipeline
+            if not pipeline._is_setup:
+                pipeline.setup()
+                pipeline._is_setup = True
+            
+            # For backward compatibility, assume no attention outputs needed in pipeline mode
+            self._requires_attention_outputs = False
+        else:
+            # Legacy distiller mode - build distiller from config
+            distil_cfg = self.config.get('distillation', {}) or {}
+            
+            # Check if config specifies pipeline
+            pipeline_cfg = distil_cfg.get('pipeline', {})
+            if pipeline_cfg and pipeline_cfg.get('type') in ['multi_stage', 'multistage', 'multi']:
+                # Config wants pipeline - build it
+                print("[TRAINER] Building pipeline from configuration...")
+                from core.pipelines import PipelineBuilder
+                self.pipeline = PipelineBuilder.from_config(
+                    self.config,
+                    self.teacher,
+                    self.student,
+                    self.device
+                )
+                self.distiller = None
+                self._use_pipeline = True
+                
+                # Setup pipeline
+                if not self.pipeline._is_setup:
+                    self.pipeline.setup()
+                    self.pipeline._is_setup = True
+                
+                self._requires_attention_outputs = False
+                print(f"[TRAINER] Pipeline built: {self.pipeline.name}")
+            else:
+                # Traditional single distiller mode
+                registry = DistillerRegistry()
+                distiller_type = distil_cfg.get('method') or distil_cfg.get('type') or 'kd_hinton'
+                distiller_aliases = {
+                    'hinton': 'kd_hinton',
+                    'kdhinton': 'kd_hinton',
+                    'feature_distillation': 'feature',
+                    'similarity_transfer': 'similarity',
+                    'attention_transfer': 'attention',
+                }
+                distiller_type = distiller_aliases.get(str(distiller_type).lower(), str(distiller_type).lower())
+                self.distiller_type = distiller_type
+                
+                # Get distiller class and instantiate with proper parameters
+                distiller_class = registry.get(distiller_type)
+                
+                # Check if distiller_class is valid before instantiating
+                if distiller_class is None:
+                    raise ValueError(f"Unknown distiller type: {distiller_type}")
+                
+                distiller_config = copy.deepcopy(distil_cfg.get('config', {}))
+                for key in ('temperature', 'alpha', 'label_smoothing', 'hint_enabled', 'confidence_scaling', 'min_confidence'):
+                    if key in distil_cfg and key not in distiller_config:
+                        distiller_config[key] = distil_cfg[key]
+                if isinstance(distil_cfg.get('kd_hinton'), dict) and 'kd_hinton' not in distiller_config:
+                    distiller_config['kd_hinton'] = copy.deepcopy(distil_cfg['kd_hinton'])
 
-        try:
-            self.distiller = distiller_class(
-                teacher=self.teacher,
-                student=self.student,
-                config=distiller_config,
-                device=self.device,
-            )
-        except TypeError:
-            self.distiller = distiller_class(
-                teacher=self.teacher,
-                student=self.student,
-                device=self.device,
-                **distiller_config,
-            )
-        self._requires_attention_outputs = self._distiller_needs_attention_outputs()
+                try:
+                    self.distiller = distiller_class(
+                        teacher=self.teacher,
+                        student=self.student,
+                        config=distiller_config,
+                        device=self.device,
+                    )
+                except TypeError:
+                    self.distiller = distiller_class(
+                        teacher=self.teacher,
+                        student=self.student,
+                        device=self.device,
+                        **distiller_config,
+                    )
+                self._requires_attention_outputs = self._distiller_needs_attention_outputs()
+                self.pipeline = None
+        # ========== END PIPELINE / DISTILLER INITIALIZATION ==========
         
         self.train_losses = []
         self.val_losses = []
@@ -646,6 +700,86 @@ class Trainer:
             'use_temporal_attention',
         )
         return any(hasattr(self.distiller, flag) for flag in attention_flags)
+    
+    def _compute_distillation_loss(
+        self,
+        student_outputs,
+        teacher_outputs,
+        batch: Dict[str, Any],
+        feature_payload: Optional[Dict[str, Any]] = None
+    ) -> tuple:
+        """
+        Compute distillation loss using either pipeline or distiller.
+        
+        Args:
+            student_outputs: Student model outputs
+            teacher_outputs: Teacher model outputs  
+            batch: Input batch
+            feature_payload: Optional feature dict for legacy distillers
+        
+        Returns:
+            (loss, metrics_dict) tuple
+        """
+        labels = batch.get('labels', None)
+        
+        if self._use_pipeline:
+            # NEW: Pipeline mode - use pipeline interface
+            pipeline_batch = {
+                'input_ids': batch.get('input_ids'),
+                'attention_mask': batch.get('attention_mask'),
+                'labels': labels,
+            }
+            
+            # Create outputs dict for pipeline
+            outputs = {
+                'teacher_outputs': teacher_outputs,
+                'student_outputs': student_outputs,
+                'batch': pipeline_batch,
+            }
+            
+            # Compute loss through pipeline
+            loss = self.pipeline.compute_loss(outputs)
+            
+            # Get metrics from pipeline
+            try:
+                metrics = self.pipeline.get_metrics()
+                metrics_dict = {
+                    'pipeline_metrics': metrics.to_dict(),
+                    'total_loss': loss.item() if hasattr(loss, 'item') else float(loss),
+                }
+                
+                # Extract component losses if available
+                if metrics.component_losses:
+                    metrics_dict.update(metrics.component_losses)
+                
+            except Exception as e:
+                LOG.debug(f"Failed to get pipeline metrics: {e}")
+                metrics_dict = {}
+            
+            return loss, metrics_dict
+        
+        else:
+            # Legacy distiller mode
+            if feature_payload is None:
+                feature_payload = self._collect_distiller_features()
+            
+            result = self.distiller.compute_loss(
+                student_outputs=student_outputs,
+                teacher_outputs=teacher_outputs,
+                targets=labels,
+                student_features=feature_payload.get('student_features'),
+                teacher_features=feature_payload.get('teacher_features'),
+            )
+            
+            # Handle tuple return (loss, metrics_dict)
+            if isinstance(result, tuple):
+                loss, metrics_dict = result
+            else:
+                # Fallback if distiller returns only loss
+                loss = result
+                metrics_dict = {}
+            
+            return loss, metrics_dict
 
     def _build_forward_runtime_kwargs(self, model_params) -> Dict[str, Any]:
         """Build runtime kwargs compatible with the model forward signature."""
@@ -663,6 +797,10 @@ class Trainer:
 
     def _prepare_distiller_batch(self) -> None:
         """Allow distillers to clear transient caches before a new forward pass."""
+        if self._use_pipeline:
+            # Pipeline mode - no preparation needed (pipelines are stateless)
+            return
+        
         prepare_fn = getattr(self.distiller, 'prepare_for_forward_pass', None)
         if callable(prepare_fn):
             try:
@@ -672,6 +810,10 @@ class Trainer:
 
     def _collect_distiller_features(self) -> Dict[str, Dict[str, Any]]:
         """Collect optional hook/extractor features from the active distiller."""
+        if self._use_pipeline:
+            # Pipeline mode - pipelines handle feature extraction internally
+            return {'student_features': {}, 'teacher_features': {}}
+        
         def _coerce_feature(value: Any) -> Any:
             if isinstance(value, torch.Tensor):
                 return value
@@ -825,21 +967,13 @@ class Trainer:
                     labels = batch.get('labels', None)
                     feature_payload = self._collect_distiller_features()
                     try:
-                        result = self.distiller.compute_loss(
+                        # Use unified loss computation method
+                        loss, metrics_dict = self._compute_distillation_loss(
                             student_outputs=student_outputs,
                             teacher_outputs=teacher_outputs,
-                            targets=labels,
-                            student_features=feature_payload.get('student_features'),
-                            teacher_features=feature_payload.get('teacher_features'),
+                            batch=batch,
+                            feature_payload=feature_payload
                         )
-                        
-                        # Handle tuple return (loss, metrics_dict)
-                        if isinstance(result, tuple):
-                            loss, metrics_dict = result
-                        else:
-                            # Fallback if distiller returns only loss
-                            loss = result
-                            metrics_dict = {}
                         
                         # Scale loss for gradient accumulation
                         loss = loss / self.gradient_accumulation_steps
@@ -862,21 +996,14 @@ class Trainer:
                 labels = batch.get('labels', None)
                 feature_payload = self._collect_distiller_features()
                 try:
-                    result = self.distiller.compute_loss(
+                    # Use unified loss computation method
+                    loss, metrics_dict = self._compute_distillation_loss(
                         student_outputs=student_outputs,
                         teacher_outputs=teacher_outputs,
-                        targets=labels,
-                        student_features=feature_payload.get('student_features'),
-                        teacher_features=feature_payload.get('teacher_features'),
+                        batch=batch,
+                        feature_payload=feature_payload
                     )
 
-                    if isinstance(result, tuple):
-                        loss, metrics_dict = result
-                    else:
-                        # Fallback if distiller returns only loss
-                        loss = result
-                        metrics_dict = {}
-                    
                     # Scale loss for gradient accumulation
                     loss = loss / self.gradient_accumulation_steps
                 except Exception as e:
@@ -1101,21 +1228,13 @@ class Trainer:
                 labels = batch.get('labels', None)
                 feature_payload = self._collect_distiller_features()
                 try:
-                    result = self.distiller.compute_loss(
+                    # Use unified loss computation method
+                    loss, metrics_dict = self._compute_distillation_loss(
                         student_outputs=student_outputs,
                         teacher_outputs=teacher_outputs,
-                        targets=labels,
-                        student_features=feature_payload.get('student_features'),
-                        teacher_features=feature_payload.get('teacher_features'),
+                        batch=batch,
+                        feature_payload=feature_payload
                     )
-                    
-                    # Handle tuple return (loss, metrics_dict)
-                    if isinstance(result, tuple):
-                        loss, metrics_dict = result
-                    else:
-                        # Fallback if distiller returns only loss
-                        loss = result
-                        metrics_dict = {}
                         
                 except Exception as e:
                     print(f"[WARNING] Loss computation failed at batch {batch_idx} during evaluation: {e}")

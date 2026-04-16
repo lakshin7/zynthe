@@ -262,7 +262,7 @@ def run_checkpoint_stress_tests(device: Optional[torch.device] = None) -> Checkp
         model_a = _ToyModel(vocab=32).to(use_device)
         optim_a = torch.optim.AdamW(model_a.parameters(), lr=1e-3)
         scheduler_a = torch.optim.lr_scheduler.LambdaLR(optim_a, lr_lambda=lambda _: 1.0)
-        scaler_a = torch.cuda.amp.GradScaler(enabled=use_device.type == "cuda")
+        scaler_a = torch.amp.GradScaler("cuda", enabled=use_device.type == "cuda")
 
         save_training_checkpoint(
             path=str(ckpt),
@@ -278,7 +278,7 @@ def run_checkpoint_stress_tests(device: Optional[torch.device] = None) -> Checkp
         model_strict = _ToyModel(vocab=32).to(use_device)
         optim_strict = torch.optim.AdamW(model_strict.parameters(), lr=1e-3)
         sched_strict = torch.optim.lr_scheduler.LambdaLR(optim_strict, lr_lambda=lambda _: 1.0)
-        scaler_strict = torch.cuda.amp.GradScaler(enabled=use_device.type == "cuda")
+        scaler_strict = torch.amp.GradScaler("cuda", enabled=use_device.type == "cuda")
         report_strict, _, _ = smart_load_checkpoint(
             path=str(ckpt),
             model=model_strict,
@@ -384,7 +384,7 @@ def run_checkpoint_stress_tests(device: Optional[torch.device] = None) -> Checkp
 
         # 6) Parameter reorder/key rename simulation
         altered_ckpt = root / "altered.pt"
-        raw_payload = torch.load(str(ckpt), map_location="cpu")
+        raw_payload = torch.load(str(ckpt), map_location="cpu", weights_only=False)
         model_state = dict(raw_payload.get("model_state_dict", {}))
         if model_state:
             first_key = next(iter(model_state.keys()))

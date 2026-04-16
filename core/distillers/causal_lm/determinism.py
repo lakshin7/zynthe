@@ -134,7 +134,7 @@ def trace_from_trainer(
         with torch.no_grad():
             t_out = trainer.teacher(**inputs)
 
-        with torch.cuda.amp.autocast(enabled=trainer.use_amp):
+        with torch.amp.autocast("cuda", enabled=trainer.use_amp):
             s_out = trainer.student(**inputs)
             d_out = trainer.distill_engine.compute_total_loss(
                 student_outputs=s_out,
