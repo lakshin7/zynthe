@@ -4,7 +4,7 @@ Validates models before downloading/loading them
 """
 
 import torch
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from huggingface_hub import HfApi, model_info
 from huggingface_hub.errors import RepositoryNotFoundError, HfHubHTTPError
 import logging

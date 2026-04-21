@@ -4,7 +4,6 @@ Identifies issues with teacher model performance and label alignment.
 """
 
 import sys
-import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -25,7 +24,7 @@ def diagnose_model(model_path: str, val_path: str = "data/imdb_val.jsonl", max_s
         max_samples: Number of samples to test
     """
     print(f"\n{'='*60}")
-    print(f"🔍 TEACHER MODEL DIAGNOSTICS")
+    print("🔍 TEACHER MODEL DIAGNOSTICS")
     print(f"{'='*60}\n")
     
     # Device setup

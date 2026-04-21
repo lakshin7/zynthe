@@ -169,7 +169,7 @@ def run_advanced_pipeline(raw_samples: List[Dict[str, Any]], tokenizer, config: 
         mean_len = sum(lengths) / len(lengths)
         p95 = lengths_sorted[int(0.95 * len(lengths_sorted))]
         p99 = lengths_sorted[int(0.99 * len(lengths_sorted))]
-        over_max = sum(1 for l in lengths if l > max_seq_len)
+        over_max = sum(1 for length in lengths if length > max_seq_len)
         LOG.info("[ADV-PRE] Length stats (%s) count=%d mean=%.1f max=%d p95=%d p99=%d >max=%d", role, len(lengths), mean_len, max(lengths), p95, p99, over_max)
 
     # ----- Optional curriculum -----

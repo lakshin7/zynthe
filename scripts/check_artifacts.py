@@ -2,10 +2,8 @@
 """
 Check and summarize generated visualization artifacts from distillation experiment.
 """
-import os
 import sys
 from pathlib import Path
-from glob import glob
 
 def check_artifacts(experiment_dir):
     """
@@ -95,7 +93,7 @@ def check_artifacts(experiment_dir):
         all_ok = False
     
     if found['student_confusion']:
-        print(f"  ✅ Confusion matrix: student_confusion/confusion_matrix.png")
+        print("  ✅ Confusion matrix: student_confusion/confusion_matrix.png")
     else:
         print("  ⚠️  No student confusion matrix found")
     
@@ -120,7 +118,7 @@ def check_artifacts(experiment_dir):
         print("  ⚠️  No teacher_training_curves.png found")
     
     if found['teacher_confusion']:
-        print(f"  ✅ Confusion matrix: teacher_confusion/confusion_matrix.png")
+        print("  ✅ Confusion matrix: teacher_confusion/confusion_matrix.png")
     else:
         print("  ⚠️  No teacher confusion matrix found")
     

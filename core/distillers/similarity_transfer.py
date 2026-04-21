@@ -118,7 +118,7 @@ class SimilarityTransfer(BaseDistiller):
         # Now call super().__init__() which will call _register_hooks()
         super().__init__(teacher, student)
         
-        print(f"🧬 Similarity Transfer initialized:")
+        print("🧬 Similarity Transfer initialized:")
         print(f"   Metric: {self.similarity_metric}")
         print(f"   Layers: {self.layers}")
         print(f"   Progressive: {self.progressive}")
@@ -171,7 +171,7 @@ class SimilarityTransfer(BaseDistiller):
         if strategy in ('first', 'head'):
             return [f'hidden:{idx}' for idx in range(count)]
         if strategy == 'mixed':
-            layers = [f'hidden:0', f'hidden:-1']
+            layers = ['hidden:0', 'hidden:-1']
             if count > 2:
                 mid = count - 2
                 layers.extend([f'hidden:-{idx + 2}' for idx in range(mid)])

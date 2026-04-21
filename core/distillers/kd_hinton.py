@@ -29,15 +29,13 @@ Reference:
 - Romero et al., "FitNets: Hints for Thin Deep Nets" (2015)
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Dict, List, Optional, Tuple, Any
 import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import warnings
 import math
-from collections import OrderedDict
 
 from .base_distiller import BaseDistiller
 

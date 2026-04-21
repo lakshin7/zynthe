@@ -14,7 +14,7 @@ Detection priority:
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Type
+from typing import Dict, Type
 
 import torch.nn as nn
 

@@ -288,6 +288,14 @@ def create_dataloaders(cfg: Mapping[str, Any], tokenizer) -> Tuple[DataLoader, D
     train_cfg = cfg.get("train", {})
     model_cfg = cfg.get("model", {})
 
+    # Route vision/image configurations through the universal image dataloader.
+    modality = str(data_cfg.get("modality", model_cfg.get("type", ""))).lower()
+    image_dataset = str(data_cfg.get("image_dataset", "")).strip()
+    if image_dataset or modality == "vision" or str(data_cfg.get("type", "")).lower() == "image":
+        from .image_dataloaders import create_image_dataloaders
+
+        return create_image_dataloaders(cfg, tokenizer=tokenizer)
+
     train_path = data_cfg.get("train_path")
     val_path = data_cfg.get("val_path")
     if not train_path or not val_path:

@@ -182,7 +182,7 @@ class StudentValidator:
             LOG.info(f"✓ Memory feasible: {total_memory:.2f} GB <= {available_memory_gb:.2f} GB")
         else:
             LOG.warning(f"⚠ Memory may be tight: {total_memory:.2f} GB > {available_memory_gb:.2f} GB")
-            LOG.warning(f"  Consider reducing batch_size or seq_length")
+            LOG.warning("  Consider reducing batch_size or seq_length")
         
         return is_feasible, total_memory
     

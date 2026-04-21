@@ -11,11 +11,10 @@ Automatic detection of:
 Author: Zynthe Team
 """
 
-import numpy as np
 import json
 from pathlib import Path
 from collections import Counter
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Optional, Any
 import logging
 
 LOG = logging.getLogger(__name__)
@@ -79,7 +78,7 @@ class DataLeakageDetector:
             LOG.error(f"❌ DATA LEAKAGE DETECTED! {results['exact_overlap_count']} samples "
                      f"({results['exact_overlap_pct']:.2f}%) overlap between train and val")
         else:
-            LOG.info(f"✓ No exact overlap detected between train and val")
+            LOG.info("✓ No exact overlap detected between train and val")
         
         return results
     
@@ -123,7 +122,7 @@ class DataLeakageDetector:
         if results['is_severely_imbalanced']:
             LOG.warning(f"⚠️  {dataset_name}: SEVERE class imbalance detected! "
                        f"Ratio: {imbalance_ratio:.2f}:1")
-            LOG.warning(f"   Consider using class weights or oversampling")
+            LOG.warning("   Consider using class weights or oversampling")
         elif not results['is_balanced']:
             LOG.warning(f"⚠️  {dataset_name}: Class imbalance detected. Ratio: {imbalance_ratio:.2f}:1")
         
@@ -268,7 +267,7 @@ class OverfitUnderfitDetector:
         }
         
         summary = f"\n{'='*80}\n"
-        summary += f"TRAINING HEALTH SUMMARY\n"
+        summary += "TRAINING HEALTH SUMMARY\n"
         summary += f"{'='*80}\n\n"
         summary += f"Status: {status_emoji.get(analysis['status'], '?')} {analysis['status'].upper().replace('_', ' ')}\n"
         
@@ -280,14 +279,14 @@ class OverfitUnderfitDetector:
         else:
             summary += f"Confidence: {confidence_pct:.1f}%\n\n"
         
-        summary += f"Latest Metrics:\n"
+        summary += "Latest Metrics:\n"
         summary += f"  Train Loss: {analysis['train_loss']:.4f}\n"
         summary += f"  Val Loss:   {analysis['val_loss']:.4f}\n"
         summary += f"  Gap:        {analysis['loss_gap']:.4f} ({analysis['loss_gap_pct']:.1f}%)\n"
         summary += f"  Trend:      {analysis['val_loss_trend']}\n\n"
         
         if analysis['recommendations']:
-            summary += f"Recommendations:\n"
+            summary += "Recommendations:\n"
             for i, rec in enumerate(analysis['recommendations'], 1):
                 summary += f"  {i}. {rec}\n"
         
@@ -378,19 +377,19 @@ class DataValidator:
             )
         
         # Log summary
-        LOG.info(f"\nValidation Summary:")
+        LOG.info("\nValidation Summary:")
         LOG.info(f"  Train: {len(train_data)} samples, {train_balance['num_classes']} classes")
         LOG.info(f"  Val:   {len(val_data)} samples, {val_balance['num_classes']} classes")
         LOG.info(f"  Leakage: {'❌ DETECTED' if leakage_results['has_exact_leakage'] else '✓ None'}")
         LOG.info(f"  Status: {'✓ PASSED' if results['validation_passed'] else '❌ FAILED'}")
         
         if results['errors']:
-            LOG.error(f"\nErrors:")
+            LOG.error("\nErrors:")
             for error in results['errors']:
                 LOG.error(f"  - {error}")
         
         if results['warnings']:
-            LOG.warning(f"\nWarnings:")
+            LOG.warning("\nWarnings:")
             for warning in results['warnings']:
                 LOG.warning(f"  - {warning}")
         

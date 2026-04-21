@@ -16,7 +16,6 @@ Designed to be imported and used by scripts that wire together models/distillers
 from __future__ import annotations
 import os
 import yaml
-import json
 import uuid
 import shutil
 import logging
@@ -488,7 +487,7 @@ class ConfigManager:
             missing.append(f"Validation data: {val_path}")
         
         if missing:
-            raise ConfigError(f"Missing required data files:\n" + "\n".join(f"  - {m}" for m in missing))
+            raise ConfigError("Missing required data files:\n" + "\n".join(f"  - {m}" for m in missing))
         
         logger.info("All required data paths validated successfully")
     

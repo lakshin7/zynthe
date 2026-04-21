@@ -4,7 +4,6 @@ Adds or corrects label2id and id2label mappings in existing model checkpoints.
 """
 
 import sys
-import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -63,7 +62,7 @@ def repair_model_labels(
         shutil.copy(config_path, backup_path)
     
     # Update config
-    print(f"\n🔄 Updating label mappings...")
+    print("\n🔄 Updating label mappings...")
     config['label2id'] = label2id
     config['id2label'] = id2label
     
@@ -71,7 +70,7 @@ def repair_model_labels(
     print(f"   New id2label: {id2label}")
     
     # Save updated config
-    print(f"\n💾 Saving updated config...")
+    print("\n💾 Saving updated config...")
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
     
@@ -121,10 +120,10 @@ def repair_experiment(experiment_dir: str):
         print("✅ EXPERIMENT REPAIRED")
         print(f"{'='*60}\n")
         print("Next steps:")
-        print(f"1. Re-run the comparison:")
+        print("1. Re-run the comparison:")
         print(f"   python3 examples/compare_teacher_student.py --exp {experiment_dir} --tokenizer-mode separate\n")
-        print(f"2. Check if teacher accuracy improves")
-        print(f"3. If accuracy is still poor, the teacher may need retraining\n")
+        print("2. Check if teacher accuracy improves")
+        print("3. If accuracy is still poor, the teacher may need retraining\n")
     
     return success
 

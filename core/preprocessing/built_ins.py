@@ -313,6 +313,26 @@ def register_defaults() -> None:
         {"task": "vision-classification", "modality": "vision", "num_labels": 10},
     )
     PreprocessRegistry.register_dataset(
+        "cifar100",
+        CIFAR10Adapter(),
+        {"task": "vision-classification", "modality": "vision", "num_labels": 100},
+    )
+    PreprocessRegistry.register_dataset(
+        "stl10",
+        CIFAR10Adapter(),
+        {"task": "vision-classification", "modality": "vision", "num_labels": 10},
+    )
+    PreprocessRegistry.register_dataset(
+        "imagenet",
+        CIFAR10Adapter(),
+        {"task": "vision-classification", "modality": "vision"},
+    )
+    PreprocessRegistry.register_dataset(
+        "image_folder",
+        CIFAR10Adapter(),
+        {"task": "vision-classification", "modality": "vision"},
+    )
+    PreprocessRegistry.register_dataset(
         PreprocessRegistry.GENERIC_DATASET_KEY,
         GenericTextAdapter(),
         {"task": "text-classification", "modality": "text", "fallback": True},

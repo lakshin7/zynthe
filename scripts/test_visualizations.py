@@ -20,7 +20,6 @@ def run_trainer_test():
     from core.models.model_loader import load_models
     from data.dataloaders import create_dataloaders
     from training.trainer import Trainer
-    import torch
     
     print("\n" + "="*70)
     print("🎨 VISUALIZATION PIPELINE TEST")

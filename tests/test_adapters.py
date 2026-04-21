@@ -14,7 +14,6 @@ import pytest
 import torch
 import torch.nn as nn
 from types import SimpleNamespace
-from typing import Dict, Any
 
 
 # ── Mock Models ───────────────────────────────────────────────────────
@@ -254,7 +253,7 @@ class TestHookableLayers:
         adapter = TextModelAdapter()
         model = MockTextModel()
         layers = adapter.get_hookable_layers(model)
-        matching = [l for l in layers if "encoder.layer" in l]
+        matching = [lyr for lyr in layers if "encoder.layer" in lyr]
         assert len(matching) > 0
 
     def test_vision_adapter_finds_encoder_layers(self):
@@ -262,7 +261,7 @@ class TestHookableLayers:
         adapter = VisionModelAdapter()
         model = MockVisionModel()
         layers = adapter.get_hookable_layers(model)
-        matching = [l for l in layers if "encoder.layer" in l]
+        matching = [lyr for lyr in layers if "encoder.layer" in lyr]
         assert len(matching) > 0
 
     def test_vlm_adapter_finds_all_components(self):
@@ -270,8 +269,8 @@ class TestHookableLayers:
         adapter = VLMModelAdapter()
         model = MockVLMModel()
         layers = adapter.get_hookable_layers(model)
-        assert any("vision_tower" in l for l in layers)
-        assert any("language_model" in l for l in layers)
+        assert any("vision_tower" in lyr for lyr in layers)
+        assert any("language_model" in lyr for lyr in layers)
 
 
 # ── Test: Dimension alignment ─────────────────────────────────────────

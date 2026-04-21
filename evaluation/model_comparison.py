@@ -5,9 +5,8 @@ Compare Teacher and Student models side-by-side with comprehensive metrics and v
 
 import torch
 import json
-import os
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from torch.utils.data import DataLoader
 import numpy as np
@@ -70,7 +69,7 @@ class ModelComparator:
         self.student_params = sum(p.numel() for p in self.student.parameters())
         self.compression_ratio = self.teacher_params / self.student_params
         
-        print(f"\n📊 Model Statistics:")
+        print("\n📊 Model Statistics:")
         print(f"   Teacher: {self.teacher_params:,} parameters")
         print(f"   Student: {self.student_params:,} parameters")
         print(f"   Compression: {self.compression_ratio:.2f}x smaller")
@@ -238,7 +237,7 @@ class ModelComparator:
         save_dir_path = Path(save_dir)
         save_dir_path.mkdir(parents=True, exist_ok=True)
         
-        print(f"\n📊 Creating comparison visualizations...")
+        print("\n📊 Creating comparison visualizations...")
         
         # 1. Metrics Bar Chart
         self._plot_metrics_comparison(teacher_results, student_results, save_dir_path)
@@ -293,7 +292,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'metrics_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"   ✓ Saved: metrics_comparison.png")
+        print("   ✓ Saved: metrics_comparison.png")
     
     def _plot_confusion_matrices(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot confusion matrices side-by-side."""
@@ -318,7 +317,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'confusion_matrices_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"   ✓ Saved: confusion_matrices_comparison.png")
+        print("   ✓ Saved: confusion_matrices_comparison.png")
     
     def _plot_per_class_metrics(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot per-class performance metrics."""
@@ -350,7 +349,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'per_class_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"   ✓ Saved: per_class_comparison.png")
+        print("   ✓ Saved: per_class_comparison.png")
     
     def _plot_efficiency_chart(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot model efficiency (size vs performance)."""
@@ -362,7 +361,7 @@ class ModelComparator:
         colors = ['#2E86AB', '#A23B72']
         
         # Scatter plot with size representing accuracy
-        scatter = ax.scatter(params, accuracies, s=[a*1000 for a in accuracies], 
+        _ = ax.scatter(params, accuracies, s=[a*1000 for a in accuracies], 
                            c=colors, alpha=0.6, edgecolors='black', linewidth=2)
         
         # Add labels
@@ -390,7 +389,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'efficiency_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"   ✓ Saved: efficiency_comparison.png")
+        print("   ✓ Saved: efficiency_comparison.png")
     
     def _create_comparison_table(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Create detailed comparison table as image."""
@@ -438,7 +437,7 @@ class ModelComparator:
         
         plt.savefig(save_dir / 'comparison_table.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"   ✓ Saved: comparison_table.png")
+        print("   ✓ Saved: comparison_table.png")
     
     def save_results(
         self,
@@ -539,7 +538,7 @@ class ModelComparator:
         report.append(f"The student model achieves **{compression:.2f}x compression** ")
         report.append(f"with only **{abs(acc_diff):.2f}%** accuracy difference, ")
         report.append(f"making it a {('viable' if abs(acc_diff) < 3 else 'reasonable')} ")
-        report.append(f"candidate for deployment in resource-constrained environments.\n")
+        report.append("candidate for deployment in resource-constrained environments.\n")
         
         # Save report
         report_path = save_dir_path / 'COMPARISON_REPORT.md'

@@ -4,7 +4,6 @@ Run comprehensive comparison between trained teacher and student models.
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add parent directory to path

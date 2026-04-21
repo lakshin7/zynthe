@@ -16,7 +16,7 @@ All pipeline implementations must extend this class.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 from dataclasses import dataclass, field
@@ -158,7 +158,6 @@ class BasePipeline(ABC, nn.Module):
         
         Must be implemented by subclasses.
         """
-        pass
     
     @abstractmethod
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
@@ -177,7 +176,6 @@ class BasePipeline(ABC, nn.Module):
         
         Must be implemented by subclasses.
         """
-        pass
     
     @abstractmethod
     def compute_loss(self, outputs: Dict[str, Any]) -> torch.Tensor:
@@ -192,7 +190,6 @@ class BasePipeline(ABC, nn.Module):
         
         Must be implemented by subclasses.
         """
-        pass
     
     def get_metrics(self) -> PipelineMetrics:
         """

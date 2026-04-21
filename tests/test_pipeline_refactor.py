@@ -9,12 +9,11 @@ These tests use the existing TinyModel from conftest.py and do NOT require
 GPU or large models — safe to run on a low-end laptop or Colab CPU.
 """
 
-import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from types import SimpleNamespace
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # ── Lightweight Mocks ────────────────────────────────────────────────
 
@@ -262,7 +261,7 @@ class TestBaseDistillerProperties:
     def test_modality_type_default(self):
         teacher = TinyModel()
         student = TinyModel()
-        distiller = MiniDistiller(teacher, student)
+        MiniDistiller(teacher, student)
         # MiniDistiller doesn't extend BaseDistiller, but we test the base
         # concept: default should be "text" on any BaseDistiller subclass
         from core.distillers.base_distiller import BaseDistiller
@@ -274,3 +273,35 @@ class TestBaseDistillerProperties:
         result = BaseDistiller.normalize_outputs(raw)
         assert "logits" in result
         assert result["logits"] is not None
+
+
+class TestVisionPipelineRouting:
+    def test_create_dataloaders_routes_to_image_factory(self, monkeypatch):
+        from data import dataloaders as text_dataloaders
+        import data.image_dataloaders as image_dataloaders
+
+        sentinel_train = object()
+        sentinel_val = object()
+        calls: Dict[str, Any] = {}
+
+        def _fake_image_factory(cfg, tokenizer=None):
+            calls["cfg"] = cfg
+            calls["tokenizer"] = tokenizer
+            return sentinel_train, sentinel_val
+
+        monkeypatch.setattr(image_dataloaders, "create_image_dataloaders", _fake_image_factory)
+
+        cfg = {
+            "data": {
+                "type": "image",
+                "modality": "vision",
+                "image_dataset": "cifar10",
+            },
+            "train": {"batch_size": 2},
+            "model": {"name": "vit-base-patch16", "type": "vision"},
+        }
+
+        train_loader, val_loader = text_dataloaders.create_dataloaders(cfg, tokenizer=None)
+        assert train_loader is sentinel_train
+        assert val_loader is sentinel_val
+        assert calls["cfg"]["data"]["image_dataset"] == "cifar10"

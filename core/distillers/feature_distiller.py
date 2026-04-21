@@ -22,13 +22,12 @@ FeatureDistiller (extends BaseDistiller)
 Reference: Zynthe Feature Distillation Blueprint
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Dict, List, Optional, Tuple, Any, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import warnings
-from collections import OrderedDict
 
 from .base_distiller import BaseDistiller
 
@@ -197,21 +196,16 @@ class FeatureMetrics:
             fsp_t_flat = fsp_t.view(b_t, -1)  # [B, C1*C2]
             fsp_s_flat = fsp_s.view(b_s, -1)  # [B, C1*C2]
             
-            # If flattened sizes differ, use avg pooling to match
-            max_size = max(fsp_t_flat.shape[1], fsp_s_flat.shape[1])
-            min_size = min(fsp_t_flat.shape[1], fsp_s_flat.shape[1])
-            
             # Pad smaller one or pool larger one to match
             if fsp_t_flat.shape[1] > fsp_s_flat.shape[1]:
                 # Pool teacher to match student
-                pool_factor = fsp_t_flat.shape[1] // fsp_s_flat.shape[1]
+                pool_factor = fsp_t_flat.shape[1] // fsp_s_flat.shape[1]  # noqa: F841
                 fsp_t_flat = F.adaptive_avg_pool1d(
                     fsp_t_flat.unsqueeze(1), 
                     fsp_s_flat.shape[1]
                 ).squeeze(1)
             elif fsp_s_flat.shape[1] > fsp_t_flat.shape[1]:
                 # Pool student to match teacher
-                pool_factor = fsp_s_flat.shape[1] // fsp_t_flat.shape[1]
                 fsp_s_flat = F.adaptive_avg_pool1d(
                     fsp_s_flat.unsqueeze(1), 
                     fsp_t_flat.shape[1]
@@ -235,7 +229,6 @@ class FeatureMetrics:
         """
         # Compute binary activation boundaries (sign)
         ab_t = (f_t > 0).float()
-        ab_s = (f_s > 0).float()
         
         # Binary cross-entropy on activation boundaries
         return F.binary_cross_entropy_with_logits(
@@ -653,8 +646,8 @@ class FeatureDistiller(BaseDistiller):
                     s_layer1 = self.feat_layers[idx1]['student']
                     s_layer2 = self.feat_layers[idx2]['student']
 
-                    if all(l in teacher_features for l in [t_layer1, t_layer2]) and \
-                       all(l in student_features for l in [s_layer1, s_layer2]):
+                    if all(lyr in teacher_features for lyr in [t_layer1, t_layer2]) and \
+                       all(lyr in student_features for lyr in [s_layer1, s_layer2]):
                         fsp_loss = FeatureMetrics.fsp_loss(
                             (teacher_features[t_layer1], teacher_features[t_layer2]),
                             (student_features[s_layer1], student_features[s_layer2])

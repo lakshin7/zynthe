@@ -12,7 +12,6 @@ Three approaches are demonstrated:
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from torch.utils.data import DataLoader
 
 # Import Zynthe components
 from core.pipelines import PipelineBuilder

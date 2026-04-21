@@ -23,11 +23,8 @@ Reference: Zynthe Architecture Blueprint v2.0
 from typing import Any, Dict, Tuple, List, Optional, Callable, Union
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.optim import Optimizer, AdamW, SGD
 from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR
-from collections import OrderedDict
-import warnings
 
 from core.utils.device_utils import (
     auto_detect_device as _shared_auto_detect_device,
@@ -593,7 +590,6 @@ class BaseDistiller(nn.Module):
     
     def pre_forward_hook(self, inputs: Any, **kwargs) -> None:
         """Hook executed before forward pass. Override for custom preprocessing."""
-        pass
     
     def post_forward_hook(
         self,
@@ -603,7 +599,6 @@ class BaseDistiller(nn.Module):
         **kwargs
     ) -> None:
         """Hook executed after forward pass. Override for custom postprocessing."""
-        pass
     
     # ============================================================================
     # LOGGING & METRICS
@@ -673,5 +668,5 @@ class BaseDistiller(nn.Module):
         """Cleanup: remove hooks when distiller is destroyed."""
         try:
             self.remove_hooks()
-        except:
+        except Exception:
             pass  # Ignore errors during cleanup

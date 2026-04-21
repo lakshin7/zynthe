@@ -30,7 +30,6 @@ import yaml
 import json
 from datetime import datetime
 import warnings
-from collections import defaultdict
 from copy import deepcopy
 import time
 
@@ -1144,7 +1143,7 @@ class MultiStageDistiller:
         
         if report.get('final_metrics'):
             final = report['final_metrics']
-            print(f"\n🎯 Final Results:")
+            print("\n\ud83c\udfaf Final Results:")
             print(f"  Final Accuracy: {final['final_accuracy']:.2f}%")
             print(f"  Total Gain: {final['total_accuracy_gain']:.2f}%")
     

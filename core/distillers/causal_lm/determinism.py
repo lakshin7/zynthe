@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import platform
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List
 
 import numpy as np
 import torch

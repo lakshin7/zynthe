@@ -14,7 +14,6 @@ import tempfile
 import warnings
 from types import SimpleNamespace
 
-import pytest
 import torch
 import torch.nn as nn
 

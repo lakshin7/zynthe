@@ -15,7 +15,6 @@ Author: Zynthe Team
 License: MIT
 """
 
-import torch
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
@@ -29,7 +28,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     LambdaLR
 )
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 import logging
 import math
 

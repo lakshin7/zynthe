@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import torch
 
 from core.config.config_manager import ConfigManager
 from core.distillers.causal_lm import run_checkpoint_stress_tests

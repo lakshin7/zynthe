@@ -12,7 +12,7 @@ This agent automatically:
 import torch
 from transformers import (
     AutoModel, AutoTokenizer, AutoModelForSequenceClassification,
-    AutoModelForCausalLM, AutoConfig, pipeline
+    AutoModelForCausalLM
 )
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass

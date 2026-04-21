@@ -8,7 +8,6 @@ with actual Hugging Face transformer models.
 
 import sys
 import os
-import yaml
 
 # Add project root to path
 project_root = os.path.abspath(os.path.dirname(__file__))

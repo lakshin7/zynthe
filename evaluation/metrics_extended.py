@@ -6,8 +6,7 @@ Advanced distillation-specific metrics and KPIs
 import torch
 import torch.nn.functional as F
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score
-from typing import Dict, Optional, Tuple, List, Any
+from typing import Dict, Optional, List, Any
 import time
 
 

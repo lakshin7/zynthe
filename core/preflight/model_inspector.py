@@ -18,12 +18,10 @@ Supports:
 - Video: TimeSformer, VideoMAE, ViViT
 """
 
-from typing import Dict, List, Tuple, Optional, Any
-import torch
+from typing import Dict, List, Optional, Any
 import torch.nn as nn
 from collections import defaultdict
 import numpy as np
-import warnings
 
 
 class ModelInspector:
@@ -519,7 +517,7 @@ class ModelInspector:
             Dictionary with recommended strategy
         """
         ratio = self._compute_compression_ratio()
-        t_type = self.teacher_info.get('type', 'unknown')
+        self.teacher_info.get('type', 'unknown')
         t_arch = self.teacher_info.get('architecture_family', 'unknown')
         s_arch = self.student_info.get('architecture_family', 'unknown')
         

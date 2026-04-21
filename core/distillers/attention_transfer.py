@@ -1136,7 +1136,6 @@ class AttentionTransferDistiller(BaseDistiller):
         """
         try:
             import matplotlib.pyplot as plt
-            import numpy as np
         except ImportError:
             warnings.warn("matplotlib not available, skipping visualization")
             return None
@@ -1298,7 +1297,6 @@ class AttentionTransferDistiller(BaseDistiller):
             device = next(self.student.parameters()).device
         
         all_alignment_scores = []
-        all_interpretability_scores = []
         
         with torch.no_grad():
             for batch in dataloader:

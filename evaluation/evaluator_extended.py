@@ -5,16 +5,16 @@ Supports side-by-side teacher-student evaluation with extended metrics
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Tuple, List, Any, Callable
+from typing import Dict, Optional, Any, Callable
 import numpy as np
 import time
 from evaluation.metrics import compute_all_metrics
 from evaluation.metrics_extended import (
     compute_extended_metrics,
-    CompressionAwareScore,
     DistillationEfficacyIndex,
     PerformanceProfiler
 )
+from evaluation.evaluation_report import EvaluationReport
 
 
 class DualEvaluator:
@@ -28,6 +28,7 @@ class DualEvaluator:
                  student: nn.Module,
                  dataloader,
                  device: str,
+                 modality: str = "text",
                  temperature: float = 2.0,
                  compute_features: bool = False,
                  progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -38,6 +39,7 @@ class DualEvaluator:
             student: Student model
             dataloader: Validation/test dataloader
             device: Device (cpu/cuda/mps)
+            modality: Data modality (text/vision/multimodal)
             temperature: Temperature for KL divergence
             compute_features: Whether to extract and compare features
             progress_callback: Optional callback for real-time progress updates
@@ -47,6 +49,7 @@ class DualEvaluator:
         self.student = student
         self.dataloader = dataloader
         self.device = device
+        self.modality = modality
         self.temperature = temperature
         self.compute_features = compute_features
         
@@ -62,7 +65,7 @@ class DualEvaluator:
         self.teacher.eval()
         self.student.eval()
     
-    def evaluate(self, profile_performance: bool = False) -> Dict:
+    def evaluate(self, profile_performance: bool = False) -> EvaluationReport:
         """
         Run dual evaluation with extended metrics.
         
@@ -259,57 +262,68 @@ class DualEvaluator:
                 'student_latency_ms': avg_student_time,
             }
         
-        # Compile results
-        results = {
-            'teacher': {
-                'accuracy': teacher_acc,
-                'metrics': teacher_metrics,
-                'predictions': teacher_preds,
-                'params': teacher_params
-            },
-            'student': {
-                'accuracy': student_acc,
-                'metrics': student_metrics,
-                'predictions': student_preds,
-                'params': student_params
-            },
-            'comparison': {
-                'prediction_agreement': prediction_agreement,
-                'accuracy_retention': student_acc / teacher_acc if teacher_acc > 0 else 0,
-                'accuracy_gap': teacher_acc - student_acc,
-                'compression_ratio': teacher_params / student_params
-            },
-            'extended_metrics': {
-                'kl_divergence': {
-                    'mean': float(np.mean(kl_divs)),
-                    'std': float(np.std(kl_divs)),
-                    'min': float(np.min(kl_divs)),
-                    'max': float(np.max(kl_divs))
-                },
-                'js_divergence': {
-                    'mean': float(np.mean(js_divs)),
-                    'std': float(np.std(js_divs))
-                },
-                'confidence_correlation': {
-                    'mean': float(np.mean(confidence_corrs)),
-                    'std': float(np.std(confidence_corrs))
-                },
-                **global_metrics
-            },
-            'dei': dei_result,
-            'cas': cas_result,
-            'performance': perf_comparison,
-            'labels': all_labels
+        # Build EvaluationReport
+        core_metrics = {
+            'accuracy': student_acc,
+            'teacher_accuracy': teacher_acc,
+            'prediction_agreement': prediction_agreement,
+            'accuracy_retention': student_acc / teacher_acc if teacher_acc > 0 else 0,
+            'accuracy_gap': teacher_acc - student_acc,
+            **student_metrics
         }
         
-        print(f"[DUAL EVAL] Evaluation complete!")
+        per_class_metrics = {}
+        if 'precision_per_class' in student_metrics:
+            per_class_metrics['precision'] = student_metrics['precision_per_class']
+        if 'recall_per_class' in student_metrics:
+            per_class_metrics['recall'] = student_metrics['recall_per_class']
+        if 'f1_per_class' in student_metrics:
+            per_class_metrics['f1'] = student_metrics['f1_per_class']
+            
+        dist_metrics = {
+            'kl_divergence': float(np.mean(kl_divs)),
+            'js_divergence': float(np.mean(js_divs)),
+            'confidence_correlation': float(np.mean(confidence_corrs)),
+            'dei': dei_result['dei'],
+            'cas': cas_result['cas']
+        }
+        
+        metadata = {
+            'teacher_params': teacher_params,
+            'student_params': student_params,
+            'compression_ratio': teacher_params / student_params,
+            'speedup': perf_comparison.get('speedup', 0),
+            'teacher_latency_ms': perf_comparison.get('teacher_latency_ms', 0),
+            'student_latency_ms': perf_comparison.get('student_latency_ms', 0),
+        }
+        
+        report = EvaluationReport(
+            loss=None,
+            metrics=core_metrics,
+            diagnostics={},
+            runtime={
+                'teacher_latency_ms': perf_comparison.get('teacher_latency_ms', 0),
+                'student_latency_ms': perf_comparison.get('student_latency_ms', 0),
+                'speedup': perf_comparison.get('speedup', 0),
+            },
+            calibration=None,
+            explainability=None,
+            model_name=self.student.__class__.__name__,
+            modality=self.modality,
+            task_type='classification',
+            per_class_metrics=per_class_metrics if per_class_metrics else None,
+            distillation_metrics=dist_metrics,
+            metadata=metadata,
+        )
+        
+        print("[DUAL EVAL] Evaluation complete!")
         print(f"  Teacher Acc: {teacher_acc:.4f} | Student Acc: {student_acc:.4f}")
         print(f"  Agreement: {prediction_agreement:.4f} | DEI: {dei_result['dei']:.4f}")
         print(f"  CAS: {cas_result['cas']:.4f} | Speedup: {perf_comparison.get('speedup', 0):.2f}x")
         
-        return results
+        return report
     
-    def quick_eval(self, max_batches: Optional[int] = None) -> Dict:
+    def quick_eval(self, max_batches: Optional[int] = None) -> EvaluationReport:
         """
         Quick evaluation on subset of data for rapid feedback.
         

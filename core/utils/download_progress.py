@@ -4,9 +4,7 @@ Tracks model download progress and reports via ProgressTracker
 """
 
 import os
-from typing import Optional, Dict, Any
-from transformers import PreTrainedModel, PreTrainedTokenizer
-from transformers.utils import logging as hf_logging
+from typing import Optional, Any
 from pathlib import Path
 
 from core.utils.progress_tracker import ProgressTracker, ProgressStage

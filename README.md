@@ -51,7 +51,7 @@ pip install -r requirements.txt
 
 #### 2. Run Your First Distillation
 ```bash
-python app/main.py --config configs/default.yaml
+python app/main.py distill --config configs/default.yaml
 ```
 
 This will distill **BERT-base** (110M params) → **DistilBERT** (66M params) on IMDB sentiment data.
@@ -60,7 +60,7 @@ This will distill **BERT-base** (110M params) → **DistilBERT** (66M params) on
 ```bash
 # Results saved in experiments/TIMESTAMP_HASH/
 ls experiments/$(ls experiments/ | tail -1)/
-# config.yaml  student_model/  teacher_model/  training_metrics.json  evaluation_report.json
+# config.yaml  student_model/  teacher_model/  training_curves.png  evaluation_dashboard.png
 ```
 
 #### 4. Compare Teacher vs Student
@@ -178,16 +178,25 @@ model:
 ### Basic CLI Usage
 ```bash
 # Default configuration
-python app/main.py
+python app/main.py distill
 
 # Custom configuration  
-python app/main.py --config configs/advanced.yaml
+python app/main.py distill --config configs/advanced.yaml
 
 # Override specific parameters
-python app/main.py --config configs/default.yaml --override train.epochs=1 train.batch_size=4
+python app/main.py distill --config configs/default.yaml --override train.epochs=1 train.batch_size=4
 
-# Dry run (validate config without training)
-python app/main.py --config configs/default.yaml --override --dry-run
+# Standalone Evaluation
+python app/main.py evaluate --load-model-dir experiments/.../student_model
+
+# Export Model
+python app/main.py export experiments/.../student_model --format onnx
+
+# Print configuration info
+python app/main.py info --config configs/default.yaml
+
+# Fast Synthetic CPU Test
+python app/main.py smoke
 ```
 
 ### Programmatic Usage

@@ -102,3 +102,53 @@ def sample_loaders() -> Tuple[DataLoader, DataLoader]:
     train_loader = DataLoader(train_dataset, batch_size=4, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False)
     return train_loader, val_loader
+
+
+@pytest.fixture()
+def tiny_models() -> Tuple[nn.Module, nn.Module]:
+    """Small teacher/student fixtures with optional HF-backed models."""
+
+    try:
+        from transformers import (
+            BertConfig,
+            BertForSequenceClassification,
+            DistilBertConfig,
+            DistilBertForSequenceClassification,
+        )
+
+        teacher = BertForSequenceClassification(
+            BertConfig(
+                vocab_size=97,
+                hidden_size=32,
+                num_hidden_layers=2,
+                num_attention_heads=4,
+                intermediate_size=64,
+                num_labels=2,
+            )
+        )
+        student = DistilBertForSequenceClassification(
+            DistilBertConfig(
+                vocab_size=97,
+                dim=32,
+                hidden_dim=64,
+                n_layers=2,
+                n_heads=4,
+                num_labels=2,
+            )
+        )
+        return teacher, student
+    except Exception:
+        # Fallback keeps tests runnable when transformers is unavailable.
+        return TinyModel(vocab_size=97, hidden_size=32, num_labels=2), TinyModel(
+            vocab_size=97,
+            hidden_size=24,
+            num_labels=2,
+        )
+
+
+@pytest.fixture()
+def mock_dataloader() -> DataLoader:
+    """Synthetic dataloader fixture for quick CPU-safe tests."""
+
+    dataset = RandomClassificationDataset(length=10, seq_len=8, offset=42)
+    return DataLoader(dataset, batch_size=2, shuffle=False)

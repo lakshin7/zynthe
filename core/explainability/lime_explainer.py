@@ -1,6 +1,5 @@
 from lime.lime_text import LimeTextExplainer
 import torch
-import numpy as np
 from typing import Any, Mapping, Optional, Sequence, Union
 
 class LimeTextExplainerWrapper:

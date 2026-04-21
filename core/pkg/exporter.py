@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .manifest import ArtifactRecord, Manifest, MANIFEST_FILENAME
 

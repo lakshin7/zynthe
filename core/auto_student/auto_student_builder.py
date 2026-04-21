@@ -100,7 +100,7 @@ class AutoStudentBuilder:
             Student configuration dict
         """
         LOG.info(f"\n{'='*70}")
-        LOG.info(f"Generating student architecture...")
+        LOG.info("Generating student architecture...")
         LOG.info(f"  Teacher: {self.teacher_name}")
         LOG.info(f"  Compression: {compression_ratio:.1%}")
         LOG.info(f"  Strategy: {strategy}")
@@ -140,7 +140,7 @@ class AutoStudentBuilder:
         
         # Log final config
         LOG.info(f"\n{'='*70}")
-        LOG.info(f"Generated Student Architecture:")
+        LOG.info("Generated Student Architecture:")
         LOG.info(f"{'='*70}")
         LOG.info(f"  Layers: {student_config['num_layers']} "
                 f"({student_config['num_layers']/self.teacher_config['num_layers']:.1%} of teacher)")
@@ -324,7 +324,7 @@ class AutoStudentBuilder:
             'epochs': epochs,
         }
         
-        LOG.info(f"\nTraining Estimates:")
+        LOG.info("\nTraining Estimates:")
         LOG.info(f"  Time: ~{total_time_min:.1f} minutes ({epochs} epochs)")
         LOG.info(f"  Memory: ~{memory_gb:.2f} GB")
         LOG.info(f"  Steps: {total_steps:,}")

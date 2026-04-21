@@ -14,7 +14,7 @@ Detects and profiles available hardware resources:
 import torch
 import platform
 import psutil
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 import warnings
 
 
@@ -205,9 +205,9 @@ class ResourceProbe:
             
             # BF16 support (Ampere and newer, or A100+)
             try:
-                test_tensor = torch.tensor([1.0], dtype=torch.bfloat16, device='cuda')
+                _ = torch.tensor([1.0], dtype=torch.bfloat16, device='cuda')
                 support['bf16'] = True
-            except:
+            except Exception:
                 support['bf16'] = False
             
             # TF32 support (Ampere and newer)
@@ -219,9 +219,9 @@ class ResourceProbe:
             support['fp16'] = True
             # MPS also supports BF16 on M1/M2
             try:
-                test_tensor = torch.tensor([1.0], dtype=torch.bfloat16, device='mps')
+                _ = torch.tensor([1.0], dtype=torch.bfloat16, device='mps')
                 support['bf16'] = True
-            except:
+            except Exception:
                 support['bf16'] = False
         
         # INT8 quantization support (via torch.quantization)
@@ -261,7 +261,7 @@ class ResourceProbe:
                 import torch.distributed as dist
                 capability['nccl_available'] = dist.is_nccl_available()
                 capability['distributed_available'] = True
-            except:
+            except Exception:
                 pass
         
         # Check AMP (Automatic Mixed Precision)
@@ -556,7 +556,7 @@ class ResourceProbe:
         lines.extend([
             "MEMORY",
             "-" * 70,
-            f"System RAM:",
+            "System RAM:",
             f"  Total: {memory['system']['total']:.2f} GB",
             f"  Available: {memory['system']['available']:.2f} GB",
             f"  Used: {memory['system']['used']:.2f} GB ({memory['system']['percent']:.1f}%)",

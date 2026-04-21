@@ -18,7 +18,7 @@ License: MIT
 import torch
 import torch.optim as optim
 from torch.optim import Optimizer
-from typing import Dict, List, Optional, Tuple, Any, DefaultDict
+from typing import Dict, List, Optional, Any, DefaultDict
 import logging
 import math
 from collections import defaultdict
@@ -457,7 +457,7 @@ class AdaptiveOptimizer:
                 actions['action'] = 'cas_boost'
                 actions['lr_changed'] = True
                 actions['new_lr'] = self._get_current_lr()
-                LOG.info(f"CAS improving rapidly, increasing LR by 10%")
+                LOG.info("CAS improving rapidly, increasing LR by 10%")
                 return actions
         
         # Rule 3: Standard plateau detection

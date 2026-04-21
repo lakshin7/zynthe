@@ -17,11 +17,11 @@ Supports:
 - Multimodal: VQA, Image Captioning, Video QA
 """
 
-from typing import Dict, List, Tuple, Optional, Any, Union
+from typing import Dict, List, Tuple, Optional, Any
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import numpy as np
-from collections import Counter, defaultdict
+from collections import Counter
 import warnings
 
 
@@ -279,14 +279,14 @@ class DataInspector:
                     labels = [s[label_key] for s in samples]
                     
                     # Check if labels are categorical
-                    if all(isinstance(l, (int, np.integer)) or 
-                          (isinstance(l, torch.Tensor) and l.numel() == 1) for l in labels):
+                    if all(isinstance(lbl, (int, np.integer)) or 
+                          (isinstance(lbl, torch.Tensor) and lbl.numel() == 1) for lbl in labels):
                         unique_labels = set()
-                        for l in labels:
-                            if isinstance(l, torch.Tensor):
-                                unique_labels.add(l.item())
+                        for lbl in labels:
+                            if isinstance(lbl, torch.Tensor):
+                                unique_labels.add(lbl.item())
                             else:
-                                unique_labels.add(l)
+                                unique_labels.add(lbl)
                         
                         if len(unique_labels) < dataset_len * 0.5:  # Likely classification
                             return 'classification'
@@ -314,11 +314,11 @@ class DataInspector:
                 labels = [s[1] for s in samples]
                 
                 # Categorical classification
-                if all(isinstance(l, (int, np.integer)) for l in labels):
+                if all(isinstance(lbl, (int, np.integer)) for lbl in labels):
                     return 'classification'
                 
                 # Regression
-                elif all(isinstance(l, (float, np.floating)) for l in labels):
+                elif all(isinstance(lbl, (float, np.floating)) for lbl in labels):
                     return 'regression'
         
         except Exception as e:
@@ -380,11 +380,11 @@ class DataInspector:
             if labels:
                 # Flatten if necessary
                 flat_labels = []
-                for l in labels:
-                    if isinstance(l, list):
-                        flat_labels.extend(l)
+                for lbl in labels:
+                    if isinstance(lbl, list):
+                        flat_labels.extend(lbl)
                     else:
-                        flat_labels.append(l)
+                        flat_labels.append(lbl)
                 
                 counter = Counter(flat_labels)
                 stats['class_distribution'] = dict(counter)
@@ -438,7 +438,7 @@ class DataInspector:
                     sample2 = self.dataset[1]
                     
                     # Check if structure matches
-                    if type(sample) != type(sample2):
+                    if type(sample) is not type(sample2):
                         errors.append("Inconsistent sample types across dataset")
                     
                     if isinstance(sample, dict) and isinstance(sample2, dict):

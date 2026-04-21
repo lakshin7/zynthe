@@ -4,7 +4,6 @@ Monitors model downloads and emits progress updates
 """
 
 import sys
-import os
 from typing import Optional, Callable, Dict, Any
 from pathlib import Path
 import threading
@@ -94,7 +93,7 @@ def monitor_cache_directory(model_id: str, role: str, timeout: int = 300):
     
     while True:
         if (time.time() - start_time) > timeout:
-            monitor.log_progress(0.99, f"Download taking longer than expected...", force=True)
+            monitor.log_progress(0.99, "Download taking longer than expected...", force=True)
             break
             
         try:
@@ -205,7 +204,7 @@ def install_progress_hooks():
     Call this before loading any models.
     """
     try:
-        from transformers import AutoModel, AutoTokenizer, AutoModelForSequenceClassification
+        from transformers import AutoModel, AutoModelForSequenceClassification
         
         # Patch AutoModel.from_pretrained
         for cls_name, cls in [
@@ -244,7 +243,7 @@ def install_progress_hooks():
 def uninstall_progress_hooks():
     """Restore original from_pretrained methods"""
     try:
-        from transformers import AutoModel, AutoTokenizer, AutoModelForSequenceClassification
+        from transformers import AutoModel, AutoModelForSequenceClassification
         
         for cls_name, cls in [
             ('AutoModel', AutoModel),

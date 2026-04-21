@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union, cast
@@ -168,6 +169,92 @@ class ModelLoader:
             bundle.student,
             bundle.tokenizer,
         )
+
+    def resume_from_checkpoint(
+        self,
+        checkpoint_dir: str,
+        *,
+        optimizer: Optional[Any] = None,
+        scheduler: Optional[Any] = None,
+        scaler: Optional[Any] = None,
+        strict: bool = True,
+        map_location: Optional[str] = None,
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+        """
+        Load model/tokenizer from a checkpoint directory and optionally restore
+        optimizer/scheduler/scaler state from a serialized training checkpoint.
+        """
+        checkpoint_path = Path(checkpoint_dir)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint directory {checkpoint_dir} does not exist.")
+
+        logger.info("Resuming model from checkpoint: %s", checkpoint_dir)
+
+        # Determine model class based on config
+        model_type = (self.model_cfg.get("type") or "").lower()
+        if model_type == "causal_lm":
+            model_class = AutoModelForCausalLM
+        elif model_type == "sequence_classification":
+            model_class = AutoModelForSequenceClassification
+        else:
+            model_class = AutoModel
+
+        resolved_location = map_location or str(self.device)
+        model = model_class.from_pretrained(str(checkpoint_path), torch_dtype=self.model_cfg.get("torch_dtype"))
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_path))
+        except Exception as e:
+            logger.warning("Failed to load tokenizer from checkpoint, falling back to base tokenizer: %s", e)
+            spec = self._build_spec(use_agent=False, data_samples=None)
+            tokenizer = self._load_tokenizer(spec)
+
+        resume_state: Dict[str, Any] = {
+            "restored_optimizer": False,
+            "restored_scheduler": False,
+            "restored_scaler": False,
+            "epoch": None,
+            "global_step": None,
+            "best_metric": None,
+        }
+
+        # Restore extended training state when present.
+        state_candidates = [
+            checkpoint_path / "checkpoint.pt",
+            checkpoint_path / "latest.pt",
+            checkpoint_path / "best.pt",
+            checkpoint_path / "training_state.pt",
+        ]
+        state_path = next((candidate for candidate in state_candidates if candidate.exists()), None)
+        if state_path is not None:
+            try:
+                from core.models.model_saver import load_checkpoint
+
+                payload, metadata = load_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    path=str(state_path),
+                    scheduler=scheduler,
+                    scaler=scaler,
+                    map_location=resolved_location,
+                    strict=strict,
+                )
+                resume_state["restored_optimizer"] = bool(optimizer is not None and "optimizer_state_dict" in payload)
+                resume_state["restored_scheduler"] = bool(scheduler is not None and "scheduler_state_dict" in payload)
+                resume_state["restored_scaler"] = bool(scaler is not None and "scaler_state_dict" in payload)
+                if metadata is not None:
+                    resume_state["epoch"] = int(metadata.epoch)
+                    resume_state["global_step"] = int(metadata.global_step)
+                    resume_state["best_metric"] = metadata.best_metric
+            except Exception as exc:
+                logger.warning("Checkpoint state restoration failed for %s: %s", state_path, exc)
+
+        self._last_resume_state = resume_state
+        return model, tokenizer
+
+    def get_last_resume_state(self) -> Dict[str, Any]:
+        """Return details about the last checkpoint resume attempt."""
+        return dict(getattr(self, "_last_resume_state", {}))
 
     # ------------------------------------------------------------------
     # Spec construction
@@ -625,3 +712,217 @@ def load_models(
 def model_summary(model: PreTrainedModel) -> Dict[str, Any]:
     """Expose the enhanced summary helper for external callers."""
     return _summarize_model(model)
+
+
+class ModelSaver:
+    """Interface for saving and exporting models."""
+
+    @staticmethod
+    def save_training_run(
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        save_dir: str,
+        *,
+        config: Optional[Dict[str, Any]] = None,
+        metrics_history: Optional[Dict[str, Any]] = None,
+        optimizer: Optional[Any] = None,
+        scheduler: Optional[Any] = None,
+        scaler: Optional[Any] = None,
+        epoch: Optional[int] = None,
+        global_step: Optional[int] = None,
+        best_metric: Optional[float] = None,
+        evaluation_report: Optional[Any] = None,
+        use_safetensors: bool = True,
+        push_to_hub: bool = False,
+        repo_id: Optional[str] = None,
+        commit_message: str = "Add model from training run",
+    ) -> str:
+        """
+        Save model artifacts and training metadata for a complete training run.
+        """
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        logger.info("Saving model and tokenizer to %s", save_path)
+        model.save_pretrained(str(save_path), safe_serialization=use_safetensors)
+        if tokenizer is not None:
+            tokenizer.save_pretrained(str(save_path))
+
+        if config is not None:
+            with (save_path / "training_config.json").open("w", encoding="utf-8") as handle:
+                json.dump(config, handle, indent=2)
+
+        if metrics_history is not None:
+            with (save_path / "metrics_history.json").open("w", encoding="utf-8") as handle:
+                json.dump(metrics_history, handle, indent=2)
+
+        if evaluation_report is not None:
+            report_path = save_path / "evaluation_report.json"
+            try:
+                if hasattr(evaluation_report, "save_json"):
+                    evaluation_report.save_json(report_path)
+                else:
+                    with report_path.open("w", encoding="utf-8") as handle:
+                        json.dump(evaluation_report, handle, indent=2)
+            except Exception as exc:
+                logger.warning("Failed to save evaluation report artifact: %s", exc)
+
+        if optimizer is not None or scheduler is not None or scaler is not None:
+            from core.models.model_saver import CheckpointMetadata, save_checkpoint
+
+            metadata = CheckpointMetadata(
+                epoch=int(epoch or 0),
+                global_step=int(global_step or 0),
+                best_metric=best_metric,
+            )
+            save_checkpoint(
+                model=model,
+                optimizer=optimizer,
+                path=str(save_path / "checkpoint.pt"),
+                scheduler=scheduler,
+                scaler=scaler,
+                metadata=metadata,
+            )
+
+        manifest = {
+            "model_dir": str(save_path),
+            "has_config": bool(config is not None),
+            "has_metrics_history": bool(metrics_history is not None),
+            "has_checkpoint": bool((save_path / "checkpoint.pt").exists()),
+            "has_evaluation_report": bool((save_path / "evaluation_report.json").exists()),
+            "safe_serialization": bool(use_safetensors),
+        }
+        with (save_path / "training_run_manifest.json").open("w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2)
+
+        if push_to_hub and repo_id:
+            logger.info("Pushing to hub: %s", repo_id)
+            model.push_to_hub(repo_id, commit_message=commit_message)
+            if tokenizer is not None:
+                tokenizer.push_to_hub(repo_id, commit_message=commit_message)
+
+        return str(save_path)
+
+    @staticmethod
+    def export_for_deployment(
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        save_dir: str,
+        export_format: str = "onnx",
+        **kwargs: Any,
+    ) -> str:
+        """
+        Export the model to deployment-friendly formats.
+
+        Supported formats:
+        - onnx
+        - torchscript
+        - safetensors
+        - gguf (metadata/package scaffold)
+        - bitnet (metadata/package scaffold)
+
+        Multiple formats can be requested with comma-separated values.
+        """
+        requested = [fmt.strip().lower() for fmt in str(export_format).split(',') if fmt.strip()]
+        if not requested:
+            raise ValueError("No export format requested")
+
+        if len(requested) > 1:
+            for single_fmt in requested:
+                ModelSaver.export_for_deployment(
+                    model=model,
+                    tokenizer=tokenizer,
+                    save_dir=save_dir,
+                    export_format=single_fmt,
+                    **kwargs,
+                )
+            return str(Path(save_dir))
+
+        fmt = requested[0]
+        save_path = Path(save_dir) / fmt
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        logger.info("Exporting model to %s format at %s", fmt, save_path)
+
+        if fmt == "onnx":
+            try:
+                from optimum.onnxruntime import ORTModelForSequenceClassification, ORTModelForCausalLM
+
+                # Save standard first
+                temp_dir = save_path / "temp_hf"
+                model.save_pretrained(str(temp_dir))
+                if tokenizer is not None:
+                    tokenizer.save_pretrained(str(temp_dir))
+
+                # We do a basic heuristic for sequence classification vs causal lm
+                if hasattr(model, "classifier") or "SequenceClassification" in model.__class__.__name__:
+                    ort_model = ORTModelForSequenceClassification.from_pretrained(str(temp_dir), export=True)
+                else:
+                    ort_model = ORTModelForCausalLM.from_pretrained(str(temp_dir), export=True)
+
+                ort_model.save_pretrained(str(save_path))
+                if tokenizer is not None:
+                    tokenizer.save_pretrained(str(save_path))
+                logger.info("ONNX export successful.")
+            except ImportError:
+                logger.warning("optimum package not found. Skipping ONNX export. Install optimum to enable.")
+                raise NotImplementedError("Install optimum for ONNX export: pip install optimum[onnxruntime]")
+
+        elif fmt == "torchscript":
+            from core.models.model_saver import export_torchscript
+
+            example_inputs = kwargs.get("example_inputs")
+            if example_inputs is None:
+                sample_text = kwargs.get("example_text", "hello world")
+                encoded = tokenizer(sample_text, return_tensors="pt")
+                input_ids = encoded.get("input_ids")
+                attention_mask = encoded.get("attention_mask")
+
+                class _TorchscriptWrapper(torch.nn.Module):
+                    def __init__(self, wrapped_model: PreTrainedModel):
+                        super().__init__()
+                        self.wrapped_model = wrapped_model
+
+                    def forward(self, ids: torch.Tensor, mask: Optional[torch.Tensor] = None):
+                        outputs = self.wrapped_model(input_ids=ids, attention_mask=mask)
+                        return outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                wrapper = _TorchscriptWrapper(model.eval())
+                example_inputs = (input_ids, attention_mask) if attention_mask is not None else (input_ids,)
+                export_torchscript(wrapper, str(save_path / "model.torchscript.pt"), example_inputs)
+            else:
+                export_torchscript(model.eval(), str(save_path / "model.torchscript.pt"), example_inputs)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(str(save_path))
+
+        elif fmt == "safetensors":
+            model.save_pretrained(str(save_path), safe_serialization=True)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(str(save_path))
+
+        elif fmt == "gguf":
+            # GGUF conversion generally requires llama.cpp tooling.
+            model.save_pretrained(str(save_path / "hf_source"), safe_serialization=True)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(str(save_path / "hf_source"))
+            with (save_path / "README_GGUF.txt").open("w", encoding="utf-8") as handle:
+                handle.write(
+                    "GGUF export scaffold generated. Convert hf_source with llama.cpp conversion tools.\n"
+                )
+
+        elif fmt == "bitnet":
+            model.save_pretrained(str(save_path / "hf_source"), safe_serialization=True)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(str(save_path / "hf_source"))
+            with (save_path / "README_BITNET.txt").open("w", encoding="utf-8") as handle:
+                handle.write(
+                    "BitNet export scaffold generated. Apply BitNet conversion/quantization tooling to hf_source.\n"
+                )
+
+        else:
+            raise ValueError(f"Unknown export format: {fmt}")
+
+        with (save_path / "export_metadata.json").open("w", encoding="utf-8") as handle:
+            json.dump({"format": fmt, "output_dir": str(save_path)}, handle, indent=2)
+
+        return str(save_path)

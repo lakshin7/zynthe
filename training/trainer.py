@@ -1,26 +1,27 @@
 import copy
 import csv
 from datetime import datetime
-from evaluation.metrics import compute_all_metrics
+from evaluation.metrics import compute_all_metrics, plot_metrics
 from evaluation.visualizer import (
     plot_training_curves,
     plot_teacher_student_comparison,
     plot_epoch_micro_series,
-    plot_metric_grid,
-    plot_calibration_curve,
-    plot_runtime_profile,
+    plot_evaluation_dashboard,
+    plot_distillation_gap,
 )
-from evaluation.metrics import plot_metrics
 from evaluation.metrics_extended import (
     compute_extended_metrics,
-    DistillationEfficacyIndex,
+    LossComponentTracker,
     CompressionAwareScore,
-    LossComponentTracker
+    DistillationEfficacyIndex,
+    PerformanceProfiler,
 )
-from core.distillers.multi_stage_distiller import DistillerRegistry
+from evaluation.evaluation_report import EvaluationReport
+from evaluation.diagnostics import build_eval_diagnostics
+from core.models.model_loader import ModelSaver
 from training.optimizer import OptimizerFactory, GradientManager, AdaptiveOptimizer
 from training.scheduler import SchedulerFactory
-from core.utils.data_validator import DataValidator, DataLeakageDetector, OverfitUnderfitDetector
+from core.utils.data_validator import DataValidator, OverfitUnderfitDetector
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -129,7 +130,6 @@ class Trainer:
         )
         
         # Create learning rate scheduler
-        num_epochs = int(train_cfg.get('num_epochs', train_cfg.get('epochs', 10)))
         # Estimate steps per epoch (will be updated in train())
         self.scheduler = None  # Will be initialized in train() with actual steps_per_epoch
         
@@ -178,7 +178,7 @@ class Trainer:
                 print(f"[TRAINER] Pipeline built: {self.pipeline.name}")
             else:
                 # Legacy distiller → auto-wrap in SingleDistillerPipeline
-                from core.distillers.multi_stage_distiller import DistillerRegistry
+                from core.distillers.multi_stage_distiller import DistillerRegistry  # noqa: F811
                 from core.pipelines.single_distiller_pipeline import SingleDistillerPipeline
                 
                 registry = DistillerRegistry()
@@ -253,6 +253,8 @@ class Trainer:
         self.batch_val_losses = []    # List[List[float]] per epoch
         self.batch_val_running_acc = []  # List[List[float]] per epoch
         self.best_val_loss = float('inf')
+        self.resume_epoch = 0
+        self.resume_global_step = 0
         self.best_model_state = None
         self.early_stop_patience = self.config['train'].get('early_stop_patience', 2)
         self.no_improve_epochs = 0
@@ -1145,7 +1147,7 @@ class Trainer:
         print(f"[TRAIN] Epoch training completed. Average Loss: {avg_loss:.4f}")
         return avg_loss
 
-    def evaluate(self, dataloader, compute_extended=True):
+    def evaluate(self, dataloader, compute_extended=True) -> EvaluationReport:
         self.student.eval()
         self.teacher.eval()
         total_loss = 0.0
@@ -1503,7 +1505,21 @@ class Trainer:
             'calibration': calibration_payload,
         }
 
-        return avg_loss, metrics, extended_metrics, details
+        # Build the evaluation report
+        report = EvaluationReport(
+            loss=avg_loss,
+            metrics=(metrics[0] if metrics else {}),
+            diagnostics=diagnostics,
+            runtime=runtime_snapshot or None,
+            calibration=calibration_payload,
+            explainability=None,
+            modality=self.config.get('data', {}).get('modality', 'text'),
+            model_name=self.student.__class__.__name__,
+            task_type=self.config.get('data', {}).get('task_type', 'classification'),
+            distillation_metrics=extended_metrics or None,
+            metadata={'details': details},
+        )
+        return report
 
     def _build_eval_diagnostics(
         self,
@@ -1513,51 +1529,17 @@ class Trainer:
         confidence_samples: List[float],
         probabilities: Optional[np.ndarray],
     ) -> Dict[str, Any]:
-        diagnostics: Dict[str, Any] = {}
-        warnings: List[str] = []
-
-        if avg_loss is not None:
-            diagnostics['eval_loss'] = float(avg_loss)
-
-        core_keys = ['accuracy', 'precision', 'recall', 'f1']
-        core_vals = [metrics.get(key) for key in core_keys]
-        numeric_vals = [float(val) for val in core_vals if isinstance(val, (int, float, np.floating))]
-        if numeric_vals:
-            spread = max(numeric_vals) - min(numeric_vals)
-            diagnostics['core_metric_spread'] = float(spread)
-            if spread < 0.01:
-                warnings.append('metrics_overlap')
-
-        if batch_losses:
-            losses_arr = np.asarray(batch_losses, dtype=np.float64)
-            diagnostics['loss_std'] = float(losses_arr.std())
-            diagnostics['loss_min'] = float(losses_arr.min())
-            diagnostics['loss_max'] = float(losses_arr.max())
-
-        if confidence_samples:
-            conf_arr = np.asarray(confidence_samples, dtype=np.float64)
-            diagnostics['confidence_mean'] = float(conf_arr.mean())
-            diagnostics['confidence_std'] = float(conf_arr.std())
-            diagnostics['confidence_min'] = float(conf_arr.min())
-            diagnostics['confidence_max'] = float(conf_arr.max())
-            if conf_arr.mean() > 0.95 and conf_arr.std() < 0.02:
-                warnings.append('confidence_collapse')
-
-        if probabilities is not None and probabilities.ndim >= 1:
-            try:
-                probs = probabilities
-                if probabilities.ndim == 1:
-                    probs = probabilities.reshape(-1, 1)
-                entropy = -np.sum(probs * np.log(np.clip(probs, 1e-9, 1.0)), axis=1)
-                diagnostics['prediction_entropy_mean'] = float(np.mean(entropy))
-                diagnostics['prediction_entropy_std'] = float(np.std(entropy))
-                if np.mean(entropy) < 0.2:
-                    warnings.append('low_entropy_predictions')
-            except Exception:
-                LOG.debug("Failed to compute entropy for diagnostics", exc_info=True)
-
-        diagnostics['warnings'] = warnings
-        return diagnostics
+        try:
+            return build_eval_diagnostics(
+                metrics=metrics,
+                avg_loss=avg_loss,
+                batch_losses=batch_losses,
+                confidence_samples=confidence_samples,
+                probabilities=probabilities,
+            )
+        except Exception:
+            LOG.debug("Failed to compute evaluation diagnostics", exc_info=True)
+            return {'warnings': ['diagnostics_failed']}
 
     def fit(self, train_loader, val_loader):
         # ========== DATA VALIDATION ==========
@@ -1641,7 +1623,7 @@ class Trainer:
             
             # FIX: Log scheduler initialization details
             warmup_steps = self.config['train'].get('warmup_steps', 0)
-            LOG.info(f"Initializing scheduler with:")
+            LOG.info("Initializing scheduler with:")
             LOG.info(f"  Steps per epoch: {steps_per_epoch}")
             LOG.info(f"  Total epochs: {num_epochs}")
             LOG.info(f"  Total training steps: {total_steps}")
@@ -1656,24 +1638,43 @@ class Trainer:
             initial_lr = self.optimizer.param_groups[0]['lr']
             LOG.info(f"  Initial learning rate: {initial_lr:.2e}")
         
+        # Resume from checkpoint if requested
+        resume_from = self.config.get('train', {}).get('resume_from_checkpoint')
+        if resume_from:
+            self.resume_from_checkpoint(resume_from)
+            
         self._init_mitigation_context(train_loader)
 
         # Optional: Train teacher first if configured
         if self.should_train_teacher:
-            print(f"\n{'='*70}")
-            print(f"PHASE 2.5: Fine-tuning Teacher Model")
-            print(f"{'='*70}\n")
+            print("\n" + "=" * 70)
+            print("PHASE 2.5: Fine-tuning Teacher Model")
+            print("=" * 70 + "\n")
             print(f"[INFO] Training teacher for {self.teacher_epochs} epochs before distillation...")
             self._train_teacher(train_loader, val_loader)
-            print(f"[INFO] Teacher training completed. Starting distillation...\n")
+            print("[INFO] Teacher training completed. Starting distillation...\n")
         
         metrics_history = []
         epochs = self.config['train']['epochs']
-        print(f"[INFO] Training started for {epochs} epochs.")
-        for epoch in range(epochs):
+        start_epoch = int(max(0, self.resume_epoch))
+        if start_epoch >= epochs:
+            print(f"[INFO] Resume epoch {start_epoch} is >= configured epochs ({epochs}); skipping training loop.")
+        else:
+            print(f"[INFO] Training started for {epochs} epochs (starting at epoch {start_epoch + 1}).")
+        for epoch in range(start_epoch, epochs):
             print(f"[INFO] Starting epoch {epoch+1}/{epochs}")
             train_loss = self.train_epoch(train_loader)
-            val_loss, val_metrics, extended, val_details = self.evaluate(val_loader, compute_extended=True)
+            val_report = self.evaluate(val_loader, compute_extended=True)
+            val_loss = val_report.loss if val_report.loss is not None else float(val_report.metrics.get('loss', 0.0))
+            val_metrics = [val_report.metrics]
+            extended = val_report.distillation_metrics
+            val_details = {
+                'metrics': val_report.metrics,
+                'diagnostics': val_report.diagnostics,
+                'runtime': val_report.runtime or {},
+                'calibration': val_report.calibration,
+            }
+            self.final_report = val_report
             if not isinstance(val_metrics, list):
                 val_metrics = []
             val_metrics_dict = val_metrics[0] if val_metrics else {}
@@ -1752,6 +1753,26 @@ class Trainer:
                 break
             if guard_triggered:
                 break
+                
+            # Per-epoch checkpointing
+            save_epochs = self.config.get('train', {}).get('save_epochs', 0)
+            if save_epochs > 0 and (epoch + 1) % save_epochs == 0:
+                ckpt_dir = os.path.join(self.experiment_dir, f'checkpoint_epoch_{epoch+1}')
+                ModelSaver.save_training_run(
+                    self.student,
+                    self.tokenizer,
+                    ckpt_dir,
+                    config=self.config,
+                    metrics_history=self.metrics_history,
+                    optimizer=self.optimizer,
+                    scheduler=self.scheduler,
+                    scaler=self.scaler,
+                    epoch=epoch + 1,
+                    global_step=(epoch + 1) * max(1, len(train_loader)),
+                    best_metric=(val_metrics_dict.get('accuracy') if isinstance(val_metrics_dict, dict) else None),
+                    evaluation_report=val_report,
+                )
+                print(f"[INFO] Saved epoch {epoch+1} checkpoint to {ckpt_dir}")
 
         # Final summary
         self._summarize_training(metrics_history)
@@ -1816,14 +1837,24 @@ class Trainer:
             
             # Save student model
             student_save_dir = os.path.join(self.experiment_dir, 'student_model')
-            self.student.save_pretrained(student_save_dir)
-            self.tokenizer.save_pretrained(student_save_dir)
+            ModelSaver.save_training_run(
+                self.student,
+                self.tokenizer,
+                student_save_dir,
+                config=self.config,
+                metrics_history=self.metrics_history,
+                evaluation_report=getattr(self, 'final_report', None),
+            )
             print(f'[INFO] Student model and tokenizer saved to {student_save_dir}')
             
             # Save teacher model for comparison
             teacher_save_dir = os.path.join(self.experiment_dir, 'teacher_model')
-            self.teacher.save_pretrained(teacher_save_dir)
-            self.tokenizer.save_pretrained(teacher_save_dir)
+            ModelSaver.save_training_run(
+                self.teacher,
+                self.tokenizer,
+                teacher_save_dir,
+                config=self.config,
+            )
             print(f'[INFO] Teacher model and tokenizer saved to {teacher_save_dir}')
         else:
             print('[WARNING] No best model state found to restore.')
@@ -1848,7 +1879,6 @@ class Trainer:
 
         # Confusion matrices for teacher and student (if predictions available)
         try:
-            from evaluation.metrics import plot_metrics, compute_all_metrics  # type: ignore
             # Student confusion matrix
             if self.last_preds and self.last_labels and len(self.last_preds) == len(self.last_labels):
                 student_cm_dir = os.path.join(self.experiment_dir, 'student_confusion')
@@ -1891,6 +1921,7 @@ class Trainer:
         # Teacher vs Student comparison plot (if enabled and data exists)
         if self.enable_comparison_plot and self.teacher_epoch_losses and self.train_losses:
             try:
+                # Legacy comparison plot
                 comparison_path = os.path.join(self.experiment_dir, 'teacher_student_comparison.png')
                 plot_teacher_student_comparison(
                     student_train_losses=self.train_losses,
@@ -1901,6 +1932,18 @@ class Trainer:
                     teacher_metrics={k: v for k, v in self.teacher_metrics_history.items()},
                     save_path=comparison_path
                 )
+                
+                # New Evaluation Dashboard
+                if hasattr(self, 'final_report') and self.final_report:
+                    dash_path = os.path.join(self.experiment_dir, 'evaluation_dashboard.png')
+                    plot_evaluation_dashboard(self.final_report, dash_path)
+                    
+                    gap_path = os.path.join(self.experiment_dir, 'distillation_gap.png')
+                    plot_distillation_gap(
+                        teacher_metrics={k: v[-1] if v else 0.0 for k, v in self.teacher_metrics_history.items()},
+                        student_metrics={k: v[-1] if v else 0.0 for k, v in self.metrics_history.items()},
+                        save_path=gap_path
+                    )
             except Exception as e:
                 print(f"[WARNING] Failed to plot teacher-student comparison: {e}")
 
@@ -2342,3 +2385,67 @@ class Trainer:
             })
 
         return False
+
+    def resume_from_checkpoint(self, checkpoint_dir: str):
+        """Resume training from a saved checkpoint."""
+        from pathlib import Path
+        from core.models.model_saver import load_checkpoint
+        from core.models.model_saver import CheckpointMetadata
+        
+        ckpt_path = Path(checkpoint_dir)
+        if not ckpt_path.exists():
+            print(f"[WARNING] Checkpoint directory {checkpoint_dir} does not exist. Starting from scratch.")
+            return
+            
+        print(f"[INFO] Resuming training from checkpoint: {checkpoint_dir}")
+        
+        # Load model/tokenizer artifacts if present.
+        try:
+            model_file = ckpt_path / "pytorch_model.bin"
+            if not model_file.exists():
+                model_file = ckpt_path / "model.safetensors"
+
+            if model_file.exists():
+                print(f"[INFO] Loading model weights from {model_file}")
+                self.student = self.student.__class__.from_pretrained(str(ckpt_path)).to(self.device)
+            else:
+                print(f"[WARNING] No model weights found in {checkpoint_dir}")
+        except Exception as e:
+            print(f"[WARNING] Failed to load model weights from checkpoint: {e}")
+
+        # Restore full optimizer/scheduler/scaler state when checkpoint payload exists.
+        state_candidates = [
+            ckpt_path / "checkpoint.pt",
+            ckpt_path / "latest.pt",
+            ckpt_path / "best.pt",
+        ]
+        state_path = next((candidate for candidate in state_candidates if candidate.exists()), None)
+        if state_path is not None:
+            try:
+                payload, metadata = load_checkpoint(
+                    model=self.student,
+                    optimizer=self.optimizer,
+                    path=str(state_path),
+                    scheduler=self.scheduler,
+                    scaler=self.scaler,
+                    map_location=str(self.device),
+                    strict=False,
+                )
+                print(f"[INFO] Restored optimizer/scheduler state from {state_path}")
+                if isinstance(metadata, CheckpointMetadata):
+                    self.best_val_loss = float(metadata.best_metric) if metadata.best_metric is not None else self.best_val_loss
+                    self.resume_epoch = int(max(0, metadata.epoch))
+                    self.resume_global_step = int(max(0, metadata.global_step))
+                    if metadata.epoch > 0:
+                        print(f"[INFO] Resumed metadata: epoch={metadata.epoch}, step={metadata.global_step}")
+                else:
+                    # Backward compatibility with legacy top-level checkpoint fields.
+                    if isinstance(payload, dict):
+                        self.resume_epoch = int(max(0, int(payload.get('epoch', 0) or 0)))
+                        self.resume_global_step = int(max(0, int(payload.get('global_step', 0) or 0)))
+                        best_metric = payload.get('best_metric')
+                        if isinstance(best_metric, (int, float)):
+                            self.best_val_loss = float(best_metric)
+            except Exception as e:
+                print(f"[WARNING] Failed to restore checkpoint training state: {e}")
+

@@ -6,14 +6,13 @@ import logging
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .checkpoint import (
-    CheckpointLoadReport,
     CheckpointMeta,
     TrainingState,
     save_training_checkpoint,

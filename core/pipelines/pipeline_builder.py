@@ -20,7 +20,6 @@ import copy
 from .base_pipeline import BasePipeline
 from .single_distiller_pipeline import SingleDistillerPipeline
 from .multi_stage_pipeline import MultiStagePipeline, ExecutionMode
-from .pipeline_registry import get_registry
 from core.distillers.multi_stage_distiller import DistillerRegistry
 
 

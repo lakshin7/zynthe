@@ -592,3 +592,222 @@ def plot_runtime_profile(runtime: Dict[str, Any], save_path: str) -> None:
     plt.close()
     print(f"[PLOT] Runtime profile saved to: {save_path}")
 
+
+def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
+    """Plot a comprehensive dashboard from an EvaluationReport."""
+    metrics = getattr(report, 'metrics', {}) or getattr(report, 'core_metrics', {}) or {}
+    dist_metrics = getattr(report, 'distillation_metrics', {}) or {}
+    runtime = getattr(report, 'runtime', None)
+    calibration = getattr(report, 'calibration', None)
+    metadata = getattr(report, 'metadata', {}) or {}
+    train_losses = metadata.get('train_losses', []) if isinstance(metadata, dict) else []
+    val_losses = metadata.get('val_losses', []) if isinstance(metadata, dict) else []
+    metric_history = metadata.get('metrics_history', {}) if isinstance(metadata, dict) else {}
+
+    panel_specs = ['core_metrics']
+    if isinstance(dist_metrics, dict) and dist_metrics:
+        panel_specs.append('distillation')
+    if isinstance(runtime, dict) and runtime:
+        panel_specs.append('runtime')
+    if isinstance(calibration, dict) and calibration.get('prob_true') is not None and calibration.get('prob_pred') is not None:
+        panel_specs.append('calibration')
+    if train_losses or val_losses:
+        panel_specs.append('training_curves')
+    if isinstance(metric_history, dict) and any(isinstance(v, (list, tuple)) and v for v in metric_history.values()):
+        panel_specs.append('metric_grid')
+
+    cols = 2
+    rows = max(1, math.ceil(len(panel_specs) / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(7.5 * cols, 4.5 * rows))
+    axes = np.atleast_1d(axes).flatten()
+    fig.suptitle(
+        f"Evaluation Dashboard: {getattr(report, 'model_name', 'model')} ({getattr(report, 'modality', 'text').capitalize()})",
+        fontsize=16,
+        fontweight='bold',
+    )
+
+    for ax, panel in zip(axes, panel_specs):
+        if panel == 'core_metrics':
+            numeric = {
+                k: v for k, v in metrics.items()
+                if isinstance(v, (int, float, np.floating))
+            }
+            if not numeric:
+                ax.text(0.5, 0.5, 'No core metrics', ha='center', va='center')
+                ax.axis('off')
+                continue
+            names = list(numeric.keys())
+            values = [float(numeric[name]) for name in names]
+            ax.bar(names, values, color='#1f77b4')
+            ax.set_title('Core Metrics')
+            ax.tick_params(axis='x', rotation=30)
+            ax.grid(axis='y', alpha=0.3)
+        elif panel == 'distillation':
+            numeric = {
+                k: v for k, v in dist_metrics.items()
+                if isinstance(v, (int, float, np.floating))
+            }
+            if not numeric:
+                ax.text(0.5, 0.5, 'No distillation metrics', ha='center', va='center')
+                ax.axis('off')
+                continue
+            ax.barh(list(numeric.keys()), [float(v) for v in numeric.values()], color='#ff7f0e')
+            ax.set_title('Distillation Metrics')
+            ax.grid(axis='x', alpha=0.3)
+        elif panel == 'runtime':
+            numeric = {
+                k: v for k, v in runtime.items()
+                if isinstance(v, (int, float, np.floating)) and k not in {'batches', 'batches_completed'}
+            }
+            if not numeric:
+                ax.text(0.5, 0.5, 'No runtime metrics', ha='center', va='center')
+                ax.axis('off')
+                continue
+            ax.bar(list(numeric.keys()), [float(v) for v in numeric.values()], color='#17becf')
+            ax.set_title('Runtime Profile')
+            ax.tick_params(axis='x', rotation=30)
+            ax.grid(axis='y', alpha=0.3)
+        elif panel == 'calibration':
+            prob_true = np.asarray(calibration.get('prob_true', []), dtype=float)
+            prob_pred = np.asarray(calibration.get('prob_pred', []), dtype=float)
+            if prob_true.size == 0 or prob_pred.size == 0:
+                ax.text(0.5, 0.5, 'No calibration data', ha='center', va='center')
+                ax.axis('off')
+                continue
+            ax.plot(prob_pred, prob_true, marker='o', label='Model')
+            ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal')
+            ax.set_xlabel('Predicted Probability')
+            ax.set_ylabel('Observed Frequency')
+            ax.set_title('Calibration')
+            ax.legend(loc='best')
+            ax.grid(alpha=0.3)
+        elif panel == 'training_curves':
+            if train_losses:
+                ax.plot(range(1, len(train_losses) + 1), train_losses, marker='o', label='Train Loss')
+            if val_losses:
+                ax.plot(range(1, len(val_losses) + 1), val_losses, marker='s', label='Val Loss')
+            ax.set_title('Training Curves')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.legend(loc='best')
+            ax.grid(alpha=0.3)
+        elif panel == 'metric_grid':
+            plotted = False
+            for key, values in metric_history.items():
+                if isinstance(values, (list, tuple)) and values:
+                    ax.plot(range(1, len(values) + 1), values, label=str(key))
+                    plotted = True
+            if not plotted:
+                ax.text(0.5, 0.5, 'No metric history', ha='center', va='center')
+                ax.axis('off')
+                continue
+            ax.set_title('Metric History')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Value')
+            ax.legend(loc='best', fontsize=8)
+            ax.grid(alpha=0.3)
+
+    for ax in axes[len(panel_specs):]:
+        ax.axis('off')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    out_dir = os.path.dirname(save_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[PLOT] Evaluation dashboard saved to: {save_path}")
+
+def plot_distillation_gap(teacher_metrics: Dict, student_metrics: Dict, save_path: str):
+    """Plot the gap between teacher and student performance."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    common_keys = set(teacher_metrics.keys()).intersection(set(student_metrics.keys()))
+    plot_keys = [k for k in common_keys if isinstance(teacher_metrics[k], (int, float))]
+    
+    if not plot_keys:
+        return
+        
+    teacher_vals = [teacher_metrics[k] for k in plot_keys]
+    student_vals = [student_metrics[k] for k in plot_keys]
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    x = np.arange(len(plot_keys))
+    width = 0.35
+    
+    ax.bar(x - width/2, teacher_vals, width, label='Teacher', color='#2E86AB')
+    ax.bar(x + width/2, student_vals, width, label='Student', color='#A23B72')
+    
+    ax.set_ylabel('Score')
+    ax.set_title('Teacher vs Student Performance Gap')
+    ax.set_xticks(x)
+    ax.set_xticklabels([k.capitalize() for k in plot_keys])
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+    
+    # Add gap labels
+    for i in range(len(plot_keys)):
+        gap = teacher_vals[i] - student_vals[i]
+        ax.annotate(f"-{gap:.3f}", 
+                    xy=(i, max(teacher_vals[i], student_vals[i])),
+                    xytext=(0, 5), textcoords="offset points", ha='center', fontsize=9, color='red')
+                    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[PLOT] Distillation gap saved to: {save_path}")
+
+def plot_extended_metrics(report: "EvaluationReport", save_path: str):
+    """Plot extended/custom distillation metrics."""
+    metrics = getattr(report, 'distillation_metrics', None)
+    if not isinstance(metrics, dict) or not metrics:
+        print("[PLOT] No extended metrics available; skipping extended metrics plot.")
+        return
+
+    scalar_metrics = {
+        key: value for key, value in metrics.items()
+        if isinstance(value, (int, float, np.floating))
+    }
+    series_metrics = {
+        key: value for key, value in metrics.items()
+        if isinstance(value, (list, tuple)) and value
+    }
+
+    if not scalar_metrics and not series_metrics:
+        print("[PLOT] Extended metrics contain no plottable values; skipping.")
+        return
+
+    fig, axes = plt.subplots(1, 2 if scalar_metrics and series_metrics else 1, figsize=(12, 4.5))
+    axes = np.atleast_1d(axes)
+    idx = 0
+
+    if scalar_metrics:
+        ax = axes[idx]
+        idx += 1
+        names = list(scalar_metrics.keys())
+        vals = [float(scalar_metrics[name]) for name in names]
+        ax.bar(names, vals, color='#9467bd')
+        ax.set_title('Extended Scalars')
+        ax.tick_params(axis='x', rotation=30)
+        ax.grid(axis='y', alpha=0.3)
+
+    if series_metrics:
+        ax = axes[idx]
+        for key, values in series_metrics.items():
+            ax.plot(range(1, len(values) + 1), values, marker='o', label=str(key))
+        ax.set_title('Extended Trends')
+        ax.set_xlabel('Step')
+        ax.set_ylabel('Value')
+        ax.legend(loc='best', fontsize=8)
+        ax.grid(alpha=0.3)
+
+    plt.tight_layout()
+    out_dir = os.path.dirname(save_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[PLOT] Extended metrics saved to: {save_path}")

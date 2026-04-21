@@ -13,7 +13,6 @@ import torch
 import torch.nn as nn
 
 from .base_pipeline import BasePipeline
-from .single_distiller_pipeline import SingleDistillerPipeline
 
 
 class PipelineRegistry:

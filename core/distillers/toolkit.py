@@ -143,7 +143,29 @@ class DistillationToolkit:
             device=self._resolve_device(),
             output_dir=output_dir,
         )
-        return orchestrator.run()
+        report = orchestrator.run()
+        
+        # Determine the best model path (the last stage's student model)
+        # Note: MultiStageDistiller's orchestrator saves to output_dir
+        best_model_path = str(Path(output_dir) / "student_model")
+        # In case the orchestrator saves in subdirectories, we could enhance this
+        
+        # Add best model path to report
+        report['best_model_path'] = best_model_path
+        return report
+
+    def train(
+        self,
+        train_loader,
+        val_loader,
+        goal: Optional[str] = None,
+        preset: Optional[str] = None,
+        output_dir: str = "experiments/auto_suite",
+    ) -> str:
+        """Alias for run() that returns only the path to the best model."""
+        plan = self.build_plan(goal=goal, preset=preset)
+        report = self.run(plan=plan, train_loader=train_loader, val_loader=val_loader, output_dir=output_dir)
+        return report.get('best_model_path', output_dir)
 
     def save_plan(self, plan: Dict[str, Any], path: str | Path) -> Path:
         """Persist a plan to JSON for auditing or later reuse."""

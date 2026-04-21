@@ -17,7 +17,6 @@ from pathlib import Path
 import json
 import logging
 from datasets import load_dataset, Dataset, DatasetDict
-from datasets.splits import Split
 
 LOG = logging.getLogger(__name__)
 
@@ -151,7 +150,7 @@ class HuggingFaceDatasetLoader:
                 elif isinstance(dataset, Dataset):
                     dataset = dataset.select(range(min(len(dataset), max_samples)))
             
-            LOG.info(f"✓ Dataset loaded successfully")
+            LOG.info("✓ Dataset loaded successfully")
             if isinstance(dataset, DatasetDict):
                 for split_name, ds in dataset.items():
                     LOG.info(f"  {split_name}: {len(ds)} samples")
@@ -248,9 +247,9 @@ class HuggingFaceDatasetLoader:
             ... )
             >>> print(paths['train'])  # data/imdb/train.jsonl
         """
-        LOG.info(f"="*80)
+        LOG.info("="*80)
         LOG.info(f"PREPARING HUGGINGFACE DATASET: {dataset_id}")
-        LOG.info(f"="*80)
+        LOG.info("="*80)
         
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -285,7 +284,7 @@ class HuggingFaceDatasetLoader:
             LOG.error(f"Failed to load dataset: {e}")
             raise
         
-        LOG.info(f"✓ Dataset loaded successfully")
+        LOG.info("✓ Dataset loaded successfully")
         
         output_paths = {}
         
@@ -385,7 +384,7 @@ class HuggingFaceDatasetLoader:
                 output_paths[split_name] = output_file
         
         LOG.info(f"\n{'='*80}")
-        LOG.info(f"DATASET PREPARATION COMPLETE")
+        LOG.info("DATASET PREPARATION COMPLETE")
         LOG.info(f"{'='*80}")
         LOG.info(f"Output directory: {output_dir}")
         for split_name, path in output_paths.items():

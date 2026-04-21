@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .base_adapter import ModelAdapter
 from core.utils.device_utils import normalize_model_output

@@ -11,7 +11,6 @@ This allows existing distillers to work seamlessly in the new pipeline system.
 from typing import Any, Dict, Optional
 import inspect
 import torch
-import torch.nn as nn
 
 from .base_pipeline import BasePipeline, PipelineMetrics
 from core.distillers.base_distiller import BaseDistiller
@@ -88,7 +87,6 @@ class SingleDistillerPipeline(BasePipeline):
         """
         # Distillers are self-contained and setup in __init__
         # No additional setup needed
-        pass
     
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
