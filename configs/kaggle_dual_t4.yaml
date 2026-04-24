@@ -1,51 +1,44 @@
 # configs/kaggle_dual_t4.yaml
 # Dual T4 GPU configuration for Kaggle testing
 # Uses CUDA:0 for teacher, CUDA:1 for student for maximum efficiency
+# Testing: GPT-2-medium → GPT-2-small on CodeSearchNet with Feature Distillation
 
 model:
-  name: "bert-base-uncased"  # Teacher: 110M params
-  student_name: "distilbert-base-uncased"  # Student: 66M params
-  type: "transformer"
-  tokenizer_name: "bert-base-uncased"
+  name: "gpt2-medium"  # Teacher: 355M params
+  student_name: "gpt2"  # Student: 124M params
+  type: "causallm"
+  tokenizer_name: "gpt2"
 
 data:
-  dataset: "imdb"
-  max_length: 256
-  batch_size: 16  # Per GPU, total effective batch = 32
-  train_samples: 1000  # Quick test
+  dataset: "code_search_net"  # CodeSearchNet for code understanding
+  max_length: 512
+  batch_size: 8
+  train_samples: 1000
   val_samples: 200
 
 distillation:
-  method: "kd_hinton"
-  temperature: 2.0
-  alpha: 0.5
+  method: "feature_distillation"  # Match hidden layer representations
+  gamma: 1e-3
+  temperature: 3.0
+  alpha: 0.6
 
 train:
   engine: "legacy"
   epochs: 2
-  batch_size: 16
+  batch_size: 8
   learning_rate: 5e-5
-  gradient_accumulation_steps: 2  # Effective batch = 16 * 2 * 2 = 64
+  gradient_accumulation_steps: 4
   warmup_ratio: 0.1
   save_checkpoints: true
-  save_best_only: true
 
 device:
-  cuda_device: 0  # Primary GPU for runtime
-  teacher_device: 0  # Teacher on CUDA:0
-  student_device: 1  # Student on CUDA:1
-  use_multi_gpu: false  # Single-process dual GPU mode
+  cuda_device: 0
+  teacher_device: 0
+  student_device: 1
   pin_memory: true
-  deterministic: false
 
 runtime:
   seed: 42
   memory_management:
     gradient_checkpointing: true
-    max_memory_gb: 14  # Leave 2GB headroom per GPU
-
-# Multi-GPU settings
-distributed:
-  enabled: false  # Set true for >2 GPUs
-  backend: "nccl"
-  init_method: "env://"
+    max_memory_gb: 14

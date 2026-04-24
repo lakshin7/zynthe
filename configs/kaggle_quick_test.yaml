@@ -1,22 +1,27 @@
 # configs/kaggle_quick_test.yaml
-# Quick validation config for Kaggle - runs in ~3 minutes
-# BERT-tiny → BERT-tiny (same model, tests pipeline)
+# Quick validation config for Kaggle - runs in ~2 minutes
+# Testing: DistilGPT2 self-distillation on wikitext with Multi-Stage
 
 model:
-  name: "prajjwal1/bert-tiny"  # Tiny model for quick test (4M params)
-  student_name: "prajjwal1/bert-tiny"
-  type: "transformer"
-  tokenizer_name: "prajjwal1/bert-tiny"
+  name: "distilgpt2"  # Teacher: 66M params
+  student_name: "distilgpt2"
+  type: "causallm"
+  tokenizer_name: "distilgpt2"
 
 data:
-  dataset: "imdb"
+  dataset: "wikitext"  # wikitext-2-v1 for language modeling
   max_length: 128
   batch_size: 32
-  train_samples: 100
-  val_samples: 50
+  train_samples: 50
+  val_samples: 20
 
 distillation:
-  method: "kd_hinton"
+  method: "multi_stage"  # Multi-stage distillation
+  strategies:
+    - name: "feature_distillation"
+      gamma: 1e-3
+    - name: "attention_transfer"
+      beta: 1e-4
   temperature: 2.0
   alpha: 0.5
 
