@@ -1,9 +1,11 @@
+from __future__ import annotations
 import math
 import os
 from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from evaluation.evaluation_report import EvaluationReport
 
 def plot_teacher_student_comparison(
     student_train_losses: List[float],
@@ -597,8 +599,8 @@ def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
     """Plot a comprehensive dashboard from an EvaluationReport."""
     metrics = getattr(report, 'metrics', {}) or getattr(report, 'core_metrics', {}) or {}
     dist_metrics = getattr(report, 'distillation_metrics', {}) or {}
-    runtime = getattr(report, 'runtime', None)
-    calibration = getattr(report, 'calibration', None)
+    runtime = getattr(report, 'runtime', None) or {}
+    calibration = getattr(report, 'calibration', None) or {}
     metadata = getattr(report, 'metadata', {}) or {}
     train_losses = metadata.get('train_losses', []) if isinstance(metadata, dict) else []
     val_losses = metadata.get('val_losses', []) if isinstance(metadata, dict) else []

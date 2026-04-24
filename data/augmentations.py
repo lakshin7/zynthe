@@ -264,7 +264,7 @@ def build_text_augmenter(config: Mapping[str, object], *, split: str = "train") 
 	"""Create a :class:`TextAugmenter` from a nested configuration."""
 
 	preprocessing = config.get("preprocessing", {}) if isinstance(config, Mapping) else {}
-	augment_cfg = {}
+	augment_cfg: dict = {}
 	if isinstance(preprocessing, Mapping):
 		augment_cfg = preprocessing.get("augment") or {}
 

@@ -64,9 +64,9 @@ class _VisionDatasetWrapper(Dataset):
             raise ValueError("Unsupported vision sample format; expected dict or (image, label)")
 
         if hasattr(label, "item"):
-            label = int(label.item())
+            label = int(label.item())  # type: ignore[union-attr]
         else:
-            label = int(label)
+            label = int(label)  # type: ignore[arg-type]
         return image, label
 
     def __getitem__(self, index: int) -> Dict[str, Any]:

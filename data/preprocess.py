@@ -86,7 +86,7 @@ def _coerce_normalization_form(value: object) -> Optional[NormalizationForm]:
 
 def build_preprocess_config(config: Mapping[str, object], *, split: str = "train") -> PreprocessConfig:
 	preprocessing = config.get("preprocessing", {}) if isinstance(config, Mapping) else {}
-	basic_cfg = {}
+	basic_cfg: dict = {}
 	if isinstance(preprocessing, Mapping):
 		basic_cfg = preprocessing.get("basic") or {}
 

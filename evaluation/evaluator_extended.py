@@ -12,7 +12,8 @@ from evaluation.metrics import compute_all_metrics
 from evaluation.metrics_extended import (
     compute_extended_metrics,
     DistillationEfficacyIndex,
-    PerformanceProfiler
+    PerformanceProfiler,
+    CompressionAwareScore
 )
 from evaluation.evaluation_report import EvaluationReport
 

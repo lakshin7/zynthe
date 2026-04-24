@@ -135,13 +135,13 @@ class JsonlDataset(Dataset):
         return False
 
     def _resolve_cache_config(self) -> int:
-        cache_cfg = {}
+        cache_cfg: dict = {}
         prep_cfg = self.config.get("preprocessing", {})
         if isinstance(prep_cfg, Mapping):
             cache_cfg = prep_cfg.get("cache") or {}
         size = cache_cfg.get("token_cache_size", cache_cfg.get("size", DEFAULT_CACHE_SIZE))
         try:
-            size_int = int(size)
+            size_int = int(size)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             size_int = DEFAULT_CACHE_SIZE
         return max(0, size_int)
