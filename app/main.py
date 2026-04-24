@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 import json
 
 import typer
@@ -24,10 +24,6 @@ from core.models.model_loader import load_models, model_summary
 from app.cli_helpers import (
     convert_to_serializable,
     parse_overrides,
-    load_config,
-    detect_device,
-    format_device_info,
-    validate_config_path,
     use_teacher_agent,
 )
 
