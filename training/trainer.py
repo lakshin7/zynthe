@@ -12,9 +12,6 @@ from evaluation.visualizer import (
 from evaluation.metrics_extended import (
     compute_extended_metrics,
     LossComponentTracker,
-    CompressionAwareScore,
-    DistillationEfficacyIndex,
-    PerformanceProfiler,
 )
 from evaluation.evaluation_report import EvaluationReport
 from evaluation.diagnostics import build_eval_diagnostics
