@@ -72,6 +72,21 @@ python examples/compare_teacher_student.py
 jupyter notebook examples/Teacher_vs_Student_Comparison.ipynb
 ```
 
+### Local Development (CPU-Only)
+
+For Latitude 7490 or similar hardware (8GB RAM, no GPU):
+
+```bash
+# Setup virtual environment
+./scripts/setup-venv.sh
+source .venv/bin/activate
+
+# Run CPU-safe smoke test
+python app/main.py smoke --config configs/quick_test_minilm.yaml
+```
+
+**Note:** Full distillation training requires GPU. Use Kaggle notebooks for GPU validation.
+
 ## 🏗️ What You Get
 
 **Teacher-Student Model Pairs** ready for Mac M2:
