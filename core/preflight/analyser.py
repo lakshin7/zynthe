@@ -90,7 +90,7 @@ class PreflightAnalyzer:
         self.resource_probe = ResourceProbe()
         
         # Results storage
-        self.results = {}
+        self.results: Dict[str, Any] = {}
     
     def validate_config(self) -> Dict[str, Any]:
         """
@@ -101,7 +101,7 @@ class PreflightAnalyzer:
         Returns:
             Validation report with errors and warnings
         """
-        validation = {
+        validation: Dict[str, Any] = {
             'is_valid': True,
             'errors': [],
             'warnings': [],
@@ -320,7 +320,7 @@ class PreflightAnalyzer:
         Returns:
             Optimized configuration
         """
-        optimization = {
+        optimization: Dict[str, Any] = {
             'device': None,
             'precision': None,
             'batch_size': None,
@@ -448,7 +448,7 @@ class PreflightAnalyzer:
                 'rationale': rationale or [f"Heuristic selection for data type {data_type}."]
             }
         except KeyError:
-            if list_presets:
+            if list_presets:  # type: ignore[truthy-function]
                 available = list_presets()
                 return {
                     'name': preset_choice,
@@ -501,7 +501,7 @@ class PreflightAnalyzer:
         Returns:
             Decision with reasoning
         """
-        decision = {
+        decision: Dict[str, Any] = {
             'can_proceed': True,
             'blockers': [],
             'warnings': [],
@@ -885,9 +885,9 @@ class PreflightAnalyzer:
         data_report = self.results.get('data', {})
         model_report = self.results.get('model', {})
 
-        actions: List[str] = []
-        monitor: List[str] = []
-        ready: List[str] = []
+        actions: List[str] = []  # type: ignore[var-annotated]
+        monitor: List[str] = []  # type: ignore[var-annotated]
+        ready: List[str] = []  # type: ignore[var-annotated]
 
         if not decision.get('can_proceed', False):
             actions.extend(decision.get('blockers', []) or ["Resolve blockers before proceeding."])
