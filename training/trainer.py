@@ -205,7 +205,7 @@ class Trainer:
                     distiller_config['kd_hinton'] = copy.deepcopy(distil_cfg['kd_hinton'])
                 
                 # Instantiate distiller using signature introspection
-                _distiller_sig = inspect.signature(distiller_class.__init__)
+                _distiller_sig = inspect.signature(distiller_class.__init__)  # type: ignore[misc]
                 _distiller_params = set(_distiller_sig.parameters.keys()) - {'self'}
                 
                 if 'config' in _distiller_params:
@@ -242,21 +242,21 @@ class Trainer:
         self._requires_attention_outputs = self._distiller_needs_attention_outputs()
         # ========== END PIPELINE / DISTILLER INITIALIZATION ==========
         
-        self.train_losses = []
-        self.val_losses = []
-        self.metrics_history = {'accuracy': [], 'f1': [], 'precision': [], 'recall': []}
+        self.train_losses: List[float] = []
+        self.val_losses: List[float] = []
+        self.metrics_history: Dict[str, List[float]] = {'accuracy': [], 'f1': [], 'precision': [], 'recall': []}
         # Optional batch-level tracking for detailed visualization
-        self.batch_train_losses = []  # List[List[float]] per epoch
-        self.batch_val_losses = []    # List[List[float]] per epoch
-        self.batch_val_running_acc = []  # List[List[float]] per epoch
+        self.batch_train_losses: List[List[float]] = []  # List[List[float]] per epoch
+        self.batch_val_losses: List[List[float]] = []    # List[List[float]] per epoch
+        self.batch_val_running_acc: List[List[float]] = []  # List[List[float]] per epoch
         self.best_val_loss = float('inf')
         self.resume_epoch = 0
         self.resume_global_step = 0
         self.best_model_state = None
         self.early_stop_patience = self.config['train'].get('early_stop_patience', 2)
         self.no_improve_epochs = 0
-        self.last_preds = []
-        self.last_labels = []
+        self.last_preds: List[Any] = []
+        self.last_labels: List[Any] = []
 
         # Overfitting guard configuration ensures we automatically react if
         # validation loss starts diverging sharply from training loss.
@@ -278,7 +278,7 @@ class Trainer:
             'mode': guard_mode,
             'confidence_threshold': max(0.0, min(1.0, guard_conf_threshold))
         }
-        self.overfit_guard_state = {
+        self.overfit_guard_state: Dict[str, Any] = {
             'triggered': False,
             'epoch': None,
             'status': None,
@@ -322,7 +322,7 @@ class Trainer:
             mitigation_config = mitigation_defaults.copy()
 
         self.overfit_mitigation_config = mitigation_config
-        self.overfit_mitigation_state = {
+        self.overfit_mitigation_state: Dict[str, Any] = {
             'intervention_count': 0,
             'history': [],
             'last_epoch': None,
@@ -349,7 +349,7 @@ class Trainer:
         
         # Extended metrics tracking
         self.loss_tracker = LossComponentTracker()
-        self.extended_metrics_history = {
+        self.extended_metrics_history: Dict[str, List[float]] = {
             'kl_divergence': [],
             'js_divergence': [],
             'prediction_agreement': [],
@@ -390,7 +390,7 @@ class Trainer:
                 self.csv_logging = False
 
         # Teacher metrics history for comparison plot later
-        self.teacher_metrics_history = {'accuracy': [], 'f1': [], 'precision': [], 'recall': []}
+        self.teacher_metrics_history: Dict[str, List[float]] = {'accuracy': [], 'f1': [], 'precision': [], 'recall': []}
 
     # ------------------------------------------------------------------
     # Internal helper: Batch logging (console + optional CSV)
