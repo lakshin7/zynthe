@@ -46,7 +46,7 @@ def convert_to_serializable(obj):
         return obj
 
 def parse_overrides(override_list: List[str]) -> Dict[str, Any]:
-    overrides = {}
+    overrides = {}  # type: ignore[var-annotated]
     for override in override_list:
         if '=' not in override:
             rprint(f"[yellow]WARNING: Invalid override format '{override}', expected KEY=VALUE[/yellow]")
@@ -54,11 +54,11 @@ def parse_overrides(override_list: List[str]) -> Dict[str, Any]:
         key, value = override.split('=', 1)
         try:
             if '.' not in value and value.isdigit():
-                value = int(value)
+                value = int(value)  # type: ignore[assignment]
             elif value.replace('.', '').replace('-', '').isdigit():
-                value = float(value)
+                value = float(value)  # type: ignore[assignment]
             elif value.lower() in ('true', 'false'):
-                value = value.lower() == 'true'
+                value = value.lower() == 'true'  # type: ignore[assignment]
         except ValueError:
             pass
         keys = key.split('.')
