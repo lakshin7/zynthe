@@ -35,7 +35,7 @@ class AttentionExtractor:
         # Storage for extracted features and attentions
         self.feature_maps: Dict[str, torch.Tensor] = {}
         self.attention_scores: Dict[str, torch.Tensor] = {}
-        self.hooks = []
+        self.hooks: List[Any] = []
         
         self._register_hooks()
     
@@ -484,12 +484,12 @@ class AttentionTransferDistiller(BaseDistiller):
         if self.teacher_layers:
             self.teacher_extractor = AttentionExtractor(teacher, self.teacher_layers)
         else:
-            self.teacher_extractor = None
+            self.teacher_extractor = None  # type: ignore[assignment]
         
         if self.student_layers:
             self.student_extractor = AttentionExtractor(student, self.student_layers)
         else:
-            self.student_extractor = None
+            self.student_extractor = None  # type: ignore[assignment]
         
         # Initialize matcher
         interp_mode = parsed_config.get('interpolation_mode', 'bilinear')
@@ -1185,7 +1185,7 @@ class AttentionTransferDistiller(BaseDistiller):
         return_features: bool = False,
         return_loss: bool = False,
         **kwargs
-    ) -> Union[Tuple[Any, Any], Tuple[Any, Any, Dict[str, Any], Dict[str, Any]], torch.Tensor, Dict[str, Any]]:  # type: ignore[override]
+    ) -> Any:  # type: ignore[override]
         """
         Forward pass with comprehensive attention-based distillation.
         

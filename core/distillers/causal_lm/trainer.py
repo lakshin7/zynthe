@@ -10,7 +10,7 @@ import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
 import torch
@@ -103,10 +103,10 @@ class SafeCausalLMTrainer:
 
         self.runtime = TrainerRuntimeState(epoch=0, global_step=0, best_val_token_loss=float("inf"))
         self.health = DistillationHealthMetrics()
-        self.train_losses = []
-        self.val_losses = []
-        self.metrics_history = {"token_loss": [], "perplexity": [], "token_accuracy": []}
-        self.step_loss_history = []
+        self.train_losses: List[float] = []
+        self.val_losses: List[float] = []
+        self.metrics_history: Dict[str, List[float]] = {"token_loss": [], "perplexity": [], "token_accuracy": []}
+        self.step_loss_history: List[float] = []
         self.metric_stability = MetricStabilityMonitor(
             freeze_window=int(train_cfg.get("frozen_loss_window", 10)),
             freeze_tolerance=float(train_cfg.get("frozen_loss_tolerance", 1e-7)),

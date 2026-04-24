@@ -580,7 +580,7 @@ class FeatureDistiller(BaseDistiller):
         - Attention-weighted losses (if enabled)
         """
         total_loss = torch.zeros((), device=self.device)
-        loss_dict: Dict[str, float] = {}
+        loss_dict: Dict[str, Any] = {}
 
         # Supervised loss - handle dict, object with logits attr, or tensor
         if targets is not None:
@@ -600,10 +600,10 @@ class FeatureDistiller(BaseDistiller):
                     loss_ce = torch.zeros((), device=self.device)
                 else:
                     loss_ce = F.cross_entropy(flat_logits, flat_targets)
-                loss_dict['task_type'] = 'causal_lm'
+                loss_dict['task_type'] = 'causal_lm'  # type: ignore[index]
             else:
                 loss_ce = F.cross_entropy(logits, targets)
-                loss_dict['task_type'] = 'classification'
+                loss_dict['task_type'] = 'classification'  # type: ignore[index]
             total_loss = total_loss + loss_ce
             loss_dict['supervised'] = loss_ce.item()
 
@@ -723,8 +723,8 @@ class LegacyFeatureDistiller:
         self.student = student_model
         self.feature_layers = feature_layers
         self.loss_fn = loss_fn
-        self.teacher_features = {}
-        self.student_features = {}
+        self.teacher_features: Dict[str, torch.Tensor] = {}
+        self.student_features: Dict[str, torch.Tensor] = {}
         self._register_hooks()
 
     def _register_hooks(self):

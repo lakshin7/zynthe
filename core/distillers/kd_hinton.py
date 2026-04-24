@@ -85,14 +85,14 @@ class HintRegressor(nn.Module):
             self.regressor = nn.Sequential(*layers)
         
         elif regressor_type == 'linear':
-            layers: List[nn.Module] = [nn.Linear(student_dim, teacher_dim, bias=not use_bn)]
+            linear_layers: List[nn.Module] = [nn.Linear(student_dim, teacher_dim, bias=not use_bn)]
             if use_bn:
-                layers.append(nn.BatchNorm1d(teacher_dim))
+                linear_layers.append(nn.BatchNorm1d(teacher_dim))
             if activation == 'relu':
-                layers.append(nn.ReLU(inplace=True))
+                linear_layers.append(nn.ReLU(inplace=True))
             elif activation == 'gelu':
-                layers.append(nn.GELU())
-            self.regressor = nn.Sequential(*layers)
+                linear_layers.append(nn.GELU())
+            self.regressor = nn.Sequential(*linear_layers)
         
         elif regressor_type == 'mlp':
             hidden_dim = (student_dim + teacher_dim) // 2

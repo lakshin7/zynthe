@@ -105,11 +105,11 @@ class SimilarityTransfer(BaseDistiller):
         self.current_layers = [self.layers[0]] if self.progressive and self.layers else self.layers
         
         # Feature extraction hooks
-        self.teacher_features = {}
-        self.student_features = {}
+        self.teacher_features: Dict[str, torch.Tensor] = {}
+        self.student_features: Dict[str, torch.Tensor] = {}
         
         # Metrics tracking
-        self.structural_alignment_scores = []
+        self.structural_alignment_scores: List[float] = []
         
         if (not self.layers) and self.auto_layer_strategy:
             self.layers = self._infer_auto_layers(self.auto_layer_strategy, self.auto_layer_count)

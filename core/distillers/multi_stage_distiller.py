@@ -50,7 +50,7 @@ except ImportError:
     warnings.warn("AttentionTransfer not available")
 
 try:
-    from ..quant.qat import QATDistiller  # type: ignore[import]
+    from ..quant.qat import QATDistiller  # type: ignore[import, attr-defined]
     HAS_QAT = True
 except ImportError:
     HAS_QAT = False
@@ -68,8 +68,8 @@ class StageController:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.current_stage = 0
-        self.stage_history = []
-        self.checkpoints = {}
+        self.stage_history: List[Dict[str, Any]] = []
+        self.checkpoints: Dict[int, Path] = {}
     
     def get_next_stage(self) -> Optional[Dict]:
         """Get next stage configuration."""
@@ -196,7 +196,7 @@ class AdaptiveLossScheduler:
         self.weights = initial_weights.copy()
         self.initial_weights = initial_weights.copy()
         self.schedule_type = schedule_type
-        self.history = []
+        self.history: List[Dict[str, float]] = []
     
     def update(self, stage_idx: int, total_stages: int, metrics: Dict[str, float]):
         """Update weights based on progress and metrics."""
@@ -345,8 +345,8 @@ class MultiStageDistiller:
         )
         
         # Stage tracking
-        self.stage_metrics = []
-        self.knowledge_bank = []  # For knowledge replay
+        self.stage_metrics: List[Dict[str, float]] = []
+        self.knowledge_bank: List[List[torch.Tensor]] = []  # type: ignore[type-arg]  # For knowledge replay
         
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -426,7 +426,7 @@ class MultiStageDistiller:
 
     def _validate_stage(self, stage: Dict[str, Any], stage_idx: int) -> None:
         """Validate stage config and emit actionable warnings."""
-        stage_type = stage.get('type')
+        stage_type = stage.get('type') or ''
         if self.registry.get(stage_type) is None:
             warnings.warn(
                 f"Stage {stage_idx} uses unknown distiller type '{stage_type}'. "
@@ -775,7 +775,7 @@ class MultiStageDistiller:
                         total_loss += loss.item() # Should be float, but being safe
                 else:
                     # Fallback if return format implies direct loss
-                     total_loss += float(loss_dict)
+                     total_loss += float(loss_dict)  # type: ignore[arg-type]
 
                 num_batches += 1
                 
