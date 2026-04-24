@@ -286,11 +286,11 @@ class ModelLoader:
             runtime.get("compile_roles", ["student"]),
         )
         if isinstance(compile_roles_cfg, str):
-            compile_roles = (compile_roles_cfg.lower(),)
+            compile_roles = (compile_roles_cfg.lower(),)  # type: ignore[assignment]
         elif isinstance(compile_roles_cfg, Iterable):
-            compile_roles = tuple(str(role).lower() for role in compile_roles_cfg)
+            compile_roles = tuple(str(role).lower() for role in compile_roles_cfg)  # type: ignore[assignment]
         else:
-            compile_roles = ("student",)
+            compile_roles = ("student",)  # type: ignore[assignment]
 
         spec = ModelLoadSpec(
             teacher_name=teacher_name,
@@ -362,7 +362,8 @@ class ModelLoader:
             for mdl in (teacher, student):
                 try:
                     mdl.gradient_checkpointing_enable()  # type: ignore[attr-defined]
-                    metadata.setdefault("features", []).append("gradient_checkpointing")
+                    features = metadata.setdefault("features", [])  # type: ignore[assignment]
+                    features.append("gradient_checkpointing")  # type: ignore[attr-defined]
                 except AttributeError:
                     logger.warning("Gradient checkpointing requested but model does not support it")
 
@@ -389,7 +390,8 @@ class ModelLoader:
                     compiled_roles.append("student")
                 student = maybe_student
             if compiled_roles:
-                metadata.setdefault("features", []).append("torch.compile")
+                features = metadata.setdefault("features", [])  # type: ignore[assignment]
+                features.append("torch.compile")  # type: ignore[attr-defined]
                 metadata["compiled_roles"] = compiled_roles
 
         if spec.adapter_path:
@@ -529,7 +531,7 @@ class ModelLoader:
             spec.model_type,
             self.device,
         )
-        model = model_class.from_pretrained(name, **role_kwargs)
+        model = model_class.from_pretrained(name, **role_kwargs)  # type: ignore[attr-defined]
 
         # With quantized loaders the dispatch is often handled by backend/device_map.
         is_quantized = bool(role_kwargs.get("load_in_8bit") or role_kwargs.get("load_in_4bit"))
