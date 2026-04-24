@@ -57,7 +57,7 @@ class ProgressTracker:
         self.current_stage = ProgressStage.INITIALIZING
         self.start_time = time.time()
         self.stage_start_time = time.time()
-        self.history = []
+        self.history: list[dict[str, Any]] = []
         
     def update(
         self,

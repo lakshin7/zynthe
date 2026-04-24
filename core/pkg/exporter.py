@@ -146,7 +146,7 @@ class PackageExporter:
 					archive.write(file_path, file_path.relative_to(self.staging_dir).as_posix())
 		elif self.compression in {"tar", "tar.gz", "tgz"}:
 			mode = "w:gz" if self.compression != "tar" else "w"
-			with tarfile.open(package_path, mode) as archive:
+			with tarfile.open(str(package_path), mode) as archive:  # type: ignore[call-overload]
 				for file_path in self.staging_dir.rglob("*"):
 					archive.add(file_path, arcname=file_path.relative_to(self.staging_dir))
 		else:
@@ -200,7 +200,7 @@ class PackageVerifier:
 						return
 		else:
 			mode = "r:gz" if self.package_path.suffix in {".gz", ".tgz"} else "r"
-			with tarfile.open(self.package_path, mode) as archive:
+			with tarfile.open(str(self.package_path), mode) as archive:  # type: ignore[call-overload]
 				try:
 					archive.extract(MANIFEST_FILENAME, destination)
 				except KeyError:
@@ -212,7 +212,7 @@ class PackageVerifier:
 				archive.extractall(destination)
 		else:
 			mode = "r:gz" if self.package_path.suffix in {".gz", ".tgz"} else "r"
-			with tarfile.open(self.package_path, mode) as archive:
+			with tarfile.open(str(self.package_path), mode) as archive:  # type: ignore[call-overload]
 				archive.extractall(destination)
 
 

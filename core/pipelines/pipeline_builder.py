@@ -117,7 +117,7 @@ class PipelineBuilder:
             # No explicit stage - create default stage
             self.add_stage('default_stage', weight=1.0)
         
-        self._current_stage['distillers'].append({
+        self._current_stage['distillers'].append({  # type: ignore[index]
             'type': distiller_type,
             'config': distiller_config,
         })

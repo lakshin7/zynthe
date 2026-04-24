@@ -189,29 +189,29 @@ class TeacherModelAgent:
         recommendations = []
         for candidate in candidates:
             # Adjust confidence based on resource constraints
-            confidence = candidate["confidence"]
+            confidence: float = candidate["confidence"]  # type: ignore[assignment]
             if resource_constraint == "low":
                 # Prefer smaller models on low resources
-                if "66M" in candidate["size"] or "110M" in candidate["size"]:
+                if "66M" in str(candidate["size"]) or "110M" in str(candidate["size"]):
                     confidence *= 1.1  # Boost smaller models
-                elif "340M" in candidate["size"] or "355M" in candidate["size"]:
+                elif "340M" in str(candidate["size"]) or "355M" in str(candidate["size"]):
                     confidence *= 0.7  # Penalize large models
             elif resource_constraint == "high":
                 # Prefer larger models on high resources
-                if "340M" in candidate["size"] or "355M" in candidate["size"]:
+                if "340M" in str(candidate["size"]) or "355M" in str(candidate["size"]):
                     confidence *= 1.1
             
             # Determine if fine-tuning is needed
             requires_finetuning = dataset_size and dataset_size < 5000
             
             rec = TeacherRecommendation(
-                model_name=candidate["name"],
-                confidence=min(confidence, 1.0),  # Cap at 1.0
-                reasoning=candidate["reason"],
-                estimated_size=candidate["size"],
-                task_fit=candidate["confidence"],
-                download_size=candidate["download"],
-                requires_finetuning=requires_finetuning
+                model_name=str(candidate["name"]),  # type: ignore[arg-type]
+                confidence=min(float(confidence), 1.0),  # Cap at 1.0
+                reasoning=str(candidate["reason"]),  # type: ignore[arg-type]
+                estimated_size=str(candidate["size"]),  # type: ignore[arg-type]
+                task_fit=float(candidate["confidence"]),  # type: ignore[arg-type]
+                download_size=str(candidate["download"]),  # type: ignore[arg-type]
+                requires_finetuning=bool(requires_finetuning) if requires_finetuning else False
             )
             recommendations.append(rec)
         

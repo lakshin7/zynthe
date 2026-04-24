@@ -404,7 +404,7 @@ class AdaptiveOptimizer:
         
         self.best_metric = float('-inf')
         self.wait_count = 0
-        self.history = []
+        self.history: list[float] = []
     
     def auto_tune(
         self,

@@ -34,7 +34,7 @@ class DownloadProgressCallback:
         self.model_name = model_name
         self.cache_dir = Path.home() / ".cache" / "huggingface"
         self.initial_cache_size = self._get_cache_size()
-        self.expected_size_mb = None
+        self.expected_size_mb: float | None = None
         
     def _get_cache_size(self) -> float:
         """Get current cache size in MB"""

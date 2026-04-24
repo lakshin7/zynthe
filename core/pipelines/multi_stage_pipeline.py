@@ -120,11 +120,11 @@ class MultiStagePipeline(BasePipeline):
         self._stage_metrics: Dict[str, PipelineMetrics] = {}
         
         # Loss aggregation
-        self.normalize_weights = config.get('normalize_weights', True)
+        self.normalize_weights = (config or {}).get('normalize_weights', True)
         self._total_weight = 0.0
         
         # Memory optimization for T4
-        self.checkpoint_gradients = config.get('checkpoint_gradients', False)
+        self.checkpoint_gradients = (config or {}).get('checkpoint_gradients', False)
         if self.checkpoint_gradients:
             print("[MultiStagePipeline] Gradient checkpointing enabled (saves memory)")
     

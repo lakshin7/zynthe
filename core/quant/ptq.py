@@ -118,7 +118,7 @@ class PTQRunner:
             max_samples = None
         else:
             try:
-                max_samples = int(raw_max_samples)
+                max_samples = int(raw_max_samples) if raw_max_samples is not None else None
             except (TypeError, ValueError):
                 LOG.warning("Invalid calibration.max_samples=%s; using default", raw_max_samples)
                 max_samples = None

@@ -24,7 +24,7 @@ class DownloadProgressMonitor:
         self.model_id = model_id
         self.role = role  # "teacher" or "student"
         self.start_time = time.time()
-        self.last_log_time = 0
+        self.last_log_time: float = 0.0
         self.log_interval = 0.5  # Log every 0.5 seconds minimum
         
     def log_progress(self, progress: float, message: str, force: bool = False):

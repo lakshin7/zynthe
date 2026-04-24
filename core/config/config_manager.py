@@ -15,7 +15,7 @@ Designed to be imported and used by scripts that wire together models/distillers
 
 from __future__ import annotations
 import os
-import yaml
+import yaml  # type: ignore[import-untyped]
 import uuid
 import shutil
 import logging
@@ -466,7 +466,7 @@ class ConfigManager:
         current = self.resolved_config
         for key in keys:
             if isinstance(current, dict):
-                current = current.get(key)
+                current = current.get(key)  # type: ignore[assignment]
                 if current is None:
                     return default
             else:

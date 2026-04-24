@@ -14,9 +14,9 @@ from datetime import datetime
 
 
 def repair_model_labels(
-    model_path: str,
-    label2id: dict = None,
-    id2label: dict = None,
+    model_path: Path | str,
+    label2id: dict | None = None,
+    id2label: dict | None = None,
     backup: bool = True
 ):
     """
@@ -90,9 +90,9 @@ def repair_model_labels(
     return True
 
 
-def repair_experiment(experiment_dir: str):
+def repair_experiment(experiment_dir: Path | str):
     """Repair both teacher and student models in an experiment directory."""
-    experiment_dir = Path(experiment_dir)
+    experiment_dir = Path(experiment_dir) if isinstance(experiment_dir, str) else experiment_dir
     
     print(f"\n{'='*60}")
     print(f"🔧 REPAIRING EXPERIMENT: {experiment_dir.name}")

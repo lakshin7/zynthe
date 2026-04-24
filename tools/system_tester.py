@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import importlib
+import importlib.util
 import json
 import os
 import platform
@@ -19,7 +20,10 @@ import tempfile
 import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from core.config.config_manager import ConfigManager
 
 import numpy as np
 import torch
@@ -259,16 +263,16 @@ class TinyCausalLM(nn.Module):
 class ZyntheSystemTester:
     def __init__(self, config_path: str):
         self.config_path = str(config_path)
-        self.cfg_manager = None
+        self.cfg_manager: Optional[ConfigManager] = None
         self.cfg: Dict[str, Any] = {}
         self.device = torch.device("cpu")
 
-        self.tokenizer = None
-        self.teacher = None
-        self.student = None
+        self.tokenizer: Optional[TinyTokenizer] = None
+        self.teacher: Optional[TinyCausalLM] = None
+        self.student: Optional[TinyCausalLM] = None
 
-        self.train_loader = None
-        self.val_loader = None
+        self.train_loader: Optional[Any] = None
+        self.val_loader: Optional[Any] = None
         self.sample_batch: Optional[Dict[str, torch.Tensor]] = None
 
     # -----------------------------
@@ -320,7 +324,7 @@ class ZyntheSystemTester:
             from core.config.config_manager import ConfigManager
 
             self.cfg_manager = ConfigManager(config_path=self.config_path)
-            self.cfg = dict(self.cfg_manager.resolved_config)
+            self.cfg = dict(self.cfg_manager.resolved_config)  # type: ignore[union-attr]
             self.device = torch.device("cpu")
 
             required_keys = ["train", "model", "data", "distillation"]
@@ -347,7 +351,7 @@ class ZyntheSystemTester:
             report.status = "PASS"
             report.details = {
                 "config_path": self.config_path,
-                "experiment_dir": self.cfg_manager.experiment_dir,
+                "experiment_dir": self.cfg_manager.experiment_dir if self.cfg_manager else "",  # type: ignore[union-attr]
                 "normalization_checks": normalization_checks,
             }
         except Exception as exc:
@@ -403,8 +407,8 @@ class ZyntheSystemTester:
 
             report.status = "PASS"
             report.details = {
-                "train_batches": int(len(self.train_loader)),
-                "val_batches": int(len(self.val_loader)),
+                "train_batches": int(len(self.train_loader)),  # type: ignore[arg-type]
+                "val_batches": int(len(self.val_loader)),  # type: ignore[arg-type]
                 "data_loader_type": "torch.utils.data.DataLoader",
                 "batch_shapes": {k: list(v.shape) for k, v in self.sample_batch.items()},
             }
@@ -433,19 +437,19 @@ class ZyntheSystemTester:
             self.teacher, self.student = teacher, student
             model_source = "synthetic_tiny_cpu"
 
-            self.teacher.to(self.device)
-            self.student.to(self.device)
-            self.teacher.eval()
-            self.student.eval()
+            teacher.to(self.device)
+            student.to(self.device)
+            teacher.eval()
+            student.eval()
 
             if self.sample_batch is None:
-                vocab = int(getattr(self.student.config, "vocab_size", 128)) if hasattr(self.student, "config") else 128
+                vocab = int(getattr(student.config, "vocab_size", 128)) if hasattr(student, "config") else 128
                 self.sample_batch = _build_synthetic_batch(vocab_size=max(vocab, 16))
 
             with torch.no_grad():
                 inputs = {k: v.to(self.device) for k, v in self.sample_batch.items() if k in {"input_ids", "attention_mask", "labels"}}
-                t_out = self.teacher(**inputs)
-                s_out = self.student(**inputs)
+                t_out = teacher(**inputs)
+                s_out = student(**inputs)
 
             t_logits = t_out["logits"] if isinstance(t_out, dict) else t_out.logits
             s_logits = s_out["logits"] if isinstance(s_out, dict) else s_out.logits
@@ -458,8 +462,8 @@ class ZyntheSystemTester:
             report.status = "PASS"
             report.details = {
                 "model_source": model_source,
-                "teacher_params": int(sum(p.numel() for p in self.teacher.parameters())),
-                "student_params": int(sum(p.numel() for p in self.student.parameters())),
+                "teacher_params": int(sum(p.numel() for p in teacher.parameters())),
+                "student_params": int(sum(p.numel() for p in student.parameters())),
                 "teacher_logits_shape": list(t_logits.shape),
                 "student_logits_shape": list(s_logits.shape),
             }

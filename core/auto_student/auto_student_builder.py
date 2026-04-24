@@ -24,7 +24,7 @@ import os
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import json
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from .heuristics import StudentSizingHeuristics
 from .validator import StudentValidator
@@ -66,7 +66,7 @@ class AutoStudentBuilder:
             self.teacher_config = teacher_config
             LOG.info(f"Using provided teacher config: {teacher_config.get('total_params', 'unknown')} params")
         else:
-            self.teacher_config = StudentSizingHeuristics.get_teacher_config(teacher_name)
+            self.teacher_config = StudentSizingHeuristics.get_teacher_config(teacher_name)  # type: ignore[assignment]
             if not self.teacher_config:
                 raise ValueError(
                     f"Unknown teacher model: {teacher_name}. "
