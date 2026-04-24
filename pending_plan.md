@@ -51,11 +51,12 @@ Track implementation progress against the foundation plan and keep only actionab
 - [x] Add tests/test_evaluation_report.py (serialization, markdown, dashboard resilience).
 - [x] Expand tests/test_model_saver.py for bundle structure and export paths.
 - [x] Add vision-route coverage in tests/test_pipeline_refactor.py.
-- [x] Add integration notebooks: notebooks/test_distillation_colab.ipynb and notebooks/test_vision_colab.ipynb.
+- [ ] Add integration notebooks: notebooks/test_distillation_colab.ipynb and notebooks/test_vision_colab.ipynb.
 
 ## Remaining Work
 1. Run strict lint and mypy baselines after broader repo cleanup (current repo has many pre-existing style/type issues outside this change set).
 2. Refactor CLI shared helpers to reduce duplication between app/main.py and app/main_new.py.
+3. Add and verify the missing Colab notebook artifacts, then expand them into full text and vision end-to-end distillation runs once the runtime inputs are finalized.
 
 ## Completion Criteria
 - Lint and type checks pass for touched modules.

@@ -21,6 +21,15 @@ if str(project_root) not in sys.path:
 
 from core.config.config_manager import ConfigManager, ConfigError
 from core.models.model_loader import load_models, model_summary
+from app.cli_helpers import (
+    convert_to_serializable,
+    parse_overrides,
+    load_config,
+    detect_device,
+    format_device_info,
+    validate_config_path,
+    use_teacher_agent,
+)
 
 app = typer.Typer(name="zyn", help="Zynthe / Knowledge-distillation Toolkit CLI")
 
@@ -29,50 +38,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-
-def convert_to_serializable(obj):
-    import numpy as np
-    if isinstance(obj, dict):
-        return {key: convert_to_serializable(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_to_serializable(item) for item in obj]
-    elif isinstance(obj, tuple):
-        return tuple(convert_to_serializable(item) for item in obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, np.generic):
-        return obj.item()
-    else:
-        return obj
-
-def parse_overrides(override_list: List[str]) -> Dict[str, Any]:
-    overrides = {}  # type: ignore[var-annotated]
-    for override in override_list:
-        if '=' not in override:
-            rprint(f"[yellow]WARNING: Invalid override format '{override}', expected KEY=VALUE[/yellow]")
-            continue
-        key, value = override.split('=', 1)
-        try:
-            if '.' not in value and value.isdigit():
-                value = int(value)  # type: ignore[assignment]
-            elif value.replace('.', '').replace('-', '').isdigit():
-                value = float(value)  # type: ignore[assignment]
-            elif value.lower() in ('true', 'false'):
-                value = value.lower() == 'true'  # type: ignore[assignment]
-        except ValueError:
-            pass
-        keys = key.split('.')
-        current = overrides
-        for k in keys[:-1]:
-            if k not in current:
-                current[k] = {}
-            current = current[k]
-        current[keys[-1]] = value
-    return overrides
-
-def _use_teacher_agent(config: Dict[str, Any]) -> bool:
-    agentic_cfg = config.get('agentic', {}) if isinstance(config, dict) else {}
-    return bool(agentic_cfg.get('enable_teacher_agent', False))
 
 @app.command("distill")
 def distill(
@@ -103,7 +68,7 @@ def distill(
         save_model_dir=save_model_dir,
         save_checkpoint=save_checkpoint,
         checkpoint_path=checkpoint_path,
-        use_teacher_agent=_use_teacher_agent(cfg_manager.resolved_config),
+        use_teacher_agent=use_teacher_agent(cfg_manager.resolved_config),
     )
     
     try:
