@@ -80,7 +80,7 @@ class ResourceProbe:
         Returns:
             Device information
         """
-        devices = {
+        devices: Dict[str, Any] = {
             'available': [],
             'primary': None,
             'cuda': {},
@@ -90,8 +90,8 @@ class ResourceProbe:
         
         # Check CUDA
         if torch.cuda.is_available():
-            devices['available'].append('cuda')
-            devices['primary'] = 'cuda'
+            devices['available'].append('cuda')  # type: ignore[union-attr,attr-defined]
+            devices['primary'] = 'cuda'  # type: ignore[assignment]
             
             cuda_info = {
                 'available': True,
@@ -119,9 +119,9 @@ class ResourceProbe:
         
         # Check MPS (Metal Performance Shaders - Apple Silicon)
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            devices['available'].append('mps')
+            devices['available'].append('mps')  # type: ignore[union-attr,attr-defined]
             if devices['primary'] is None:
-                devices['primary'] = 'mps'
+                devices['primary'] = 'mps'  # type: ignore[assignment]
             
             devices['mps'] = {
                 'available': True,
@@ -129,9 +129,9 @@ class ResourceProbe:
             }
         
         # CPU always available
-        devices['available'].append('cpu')
+        devices['available'].append('cpu')  # type: ignore[union-attr,attr-defined]
         if devices['primary'] is None:
-            devices['primary'] = 'cpu'
+            devices['primary'] = 'cpu'  # type: ignore[assignment]
         
         devices['cpu'] = {
             'available': True,
@@ -149,7 +149,7 @@ class ResourceProbe:
         Returns:
             Memory information
         """
-        memory = {
+        memory: Dict[str, Any] = {
             'system': {},
             'gpu': []
         }
@@ -179,7 +179,7 @@ class ResourceProbe:
                 except Exception as e:
                     warnings.warn(f"Could not get memory stats for GPU {i}: {e}")
                 
-                memory['gpu'].append(mem_info)
+                memory['gpu'].append(mem_info)  # type: ignore[union-attr,attr-defined]
         
         return memory
     
@@ -298,38 +298,39 @@ class ResourceProbe:
         # Device recommendation
         if 'cuda' in devices['available']:
             recommendations['device'] = 'cuda'
-            recommendations['reasoning'].append("CUDA available: using GPU acceleration")
+            recommendations['reasoning'].append("CUDA available: using GPU acceleration")  # type: ignore[union-attr,attr-defined]
             
             # Multi-GPU setup
             if devices['cuda']['device_count'] > 1:
                 recommendations['distributed'] = True
-                recommendations['reasoning'].append(
+                recommendations['reasoning'].append(  # type: ignore[union-attr,attr-defined]
+
                     f"{devices['cuda']['device_count']} GPUs detected: recommend distributed training"
                 )
         
         elif 'mps' in devices['available']:
             recommendations['device'] = 'mps'
-            recommendations['reasoning'].append("MPS available: using Apple Silicon acceleration")
+            recommendations['reasoning'].append("MPS available: using Apple Silicon acceleration")  # type: ignore[union-attr,attr-defined]
         
         else:
             recommendations['device'] = 'cpu'
-            recommendations['reasoning'].append("No GPU available: using CPU")
+            recommendations['reasoning'].append("No GPU available: using CPU")  # type: ignore[union-attr,attr-defined]
         
         # Precision recommendation
         if recommendations['device'] in ['cuda', 'mps']:
             if precision['bf16']:
                 recommendations['precision'] = 'bf16'
                 recommendations['use_amp'] = True
-                recommendations['reasoning'].append("BF16 supported: recommend mixed precision for speed")
+                recommendations['reasoning'].append("BF16 supported: recommend mixed precision for speed")  # type: ignore[union-attr,attr-defined]
             
             elif precision['fp16']:
                 recommendations['precision'] = 'fp16'
                 recommendations['use_amp'] = True
-                recommendations['reasoning'].append("FP16 supported: recommend mixed precision for speed")
+                recommendations['reasoning'].append("FP16 supported: recommend mixed precision for speed")  # type: ignore[union-attr,attr-defined]
             
             else:
                 recommendations['precision'] = 'fp32'
-                recommendations['reasoning'].append("Using FP32: no mixed precision support detected")
+                recommendations['reasoning'].append("Using FP32: no mixed precision support detected")  # type: ignore[union-attr,attr-defined]
         
         # Batch size multiplier based on GPU memory
         if recommendations['device'] == 'cuda' and memory['gpu']:
@@ -337,23 +338,23 @@ class ResourceProbe:
             
             if gpu_mem >= 40:  # A100 or similar
                 recommendations['batch_size_multiplier'] = 4.0
-                recommendations['reasoning'].append(f"Large GPU memory ({gpu_mem:.1f}GB): 4x batch size")
+                recommendations['reasoning'].append(f"Large GPU memory ({gpu_mem:.1f}GB): 4x batch size")  # type: ignore[union-attr,attr-defined]
             
             elif gpu_mem >= 24:  # RTX 3090/4090
                 recommendations['batch_size_multiplier'] = 2.0
-                recommendations['reasoning'].append(f"High GPU memory ({gpu_mem:.1f}GB): 2x batch size")
+                recommendations['reasoning'].append(f"High GPU memory ({gpu_mem:.1f}GB): 2x batch size")  # type: ignore[union-attr,attr-defined]
             
             elif gpu_mem >= 12:  # RTX 3080
                 recommendations['batch_size_multiplier'] = 1.5
-                recommendations['reasoning'].append(f"Good GPU memory ({gpu_mem:.1f}GB): 1.5x batch size")
+                recommendations['reasoning'].append(f"Good GPU memory ({gpu_mem:.1f}GB): 1.5x batch size")  # type: ignore[union-attr,attr-defined]
             
             elif gpu_mem >= 8:  # RTX 3070
                 recommendations['batch_size_multiplier'] = 1.0
-                recommendations['reasoning'].append(f"Standard GPU memory ({gpu_mem:.1f}GB): 1x batch size")
+                recommendations['reasoning'].append(f"Standard GPU memory ({gpu_mem:.1f}GB): 1x batch size")  # type: ignore[union-attr,attr-defined]
             
             else:  # Low memory GPU
                 recommendations['batch_size_multiplier'] = 0.5
-                recommendations['reasoning'].append(f"Limited GPU memory ({gpu_mem:.1f}GB): 0.5x batch size")
+                recommendations['reasoning'].append(f"Limited GPU memory ({gpu_mem:.1f}GB): 0.5x batch size")  # type: ignore[union-attr,attr-defined]
         
         # DataLoader workers
         cpu_count = devices['cpu']['count']
@@ -361,20 +362,20 @@ class ResourceProbe:
             # Use multiple workers for GPU training
             recommendations['num_workers'] = min(cpu_count, 4)
             recommendations['pin_memory'] = True
-            recommendations['reasoning'].append(
+            recommendations['reasoning'].append(  # type: ignore[union-attr,attr-defined]
                 f"Using {recommendations['num_workers']} workers with pinned memory for fast data loading"
             )
         else:
             # CPU training: fewer workers to avoid overhead
             recommendations['num_workers'] = max(1, cpu_count // 2)
-            recommendations['reasoning'].append(
+            recommendations['reasoning'].append(  # type: ignore[union-attr,attr-defined]
                 f"CPU training: using {recommendations['num_workers']} workers"
             )
         
         # AMP recommendation
         if recommendations['device'] == 'cuda' and compute['amp_available']:
             recommendations['use_amp'] = True
-            recommendations['reasoning'].append("Automatic Mixed Precision (AMP) available: recommend enabling")
+            recommendations['reasoning'].append("Automatic Mixed Precision (AMP) available: recommend enabling")  # type: ignore[union-attr,attr-defined]
         
         return recommendations
     

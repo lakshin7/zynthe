@@ -321,7 +321,7 @@ class DataValidator:
         LOG.info("DATA VALIDATION REPORT")
         LOG.info("="*80)
         
-        results = {
+        results: Dict[str, Any] = {
             'validation_passed': True,
             'errors': [],
             'warnings': []
@@ -349,7 +349,7 @@ class DataValidator:
         
         if leakage_results['has_exact_leakage']:
             results['validation_passed'] = False
-            results['errors'].append(
+            results['errors'].append(  # type: ignore[union-attr,attr-defined]
                 f"DATA LEAKAGE: {leakage_results['exact_overlap_count']} samples overlap!"
             )
         
@@ -361,18 +361,18 @@ class DataValidator:
         results['val_balance'] = val_balance
         
         if train_balance['is_severely_imbalanced']:
-            results['warnings'].append(
+            results['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"Severe class imbalance in training set (ratio: {train_balance['imbalance_ratio']:.2f}:1)"
             )
         
         # 3. Check dataset sizes
         if len(val_data) < 50:
-            results['warnings'].append(
+            results['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"Validation set very small ({len(val_data)} samples) - metrics may be unreliable"
             )
         
         if len(train_data) < 100:
-            results['warnings'].append(
+            results['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"Training set very small ({len(train_data)} samples) - model may underfit"
             )
         

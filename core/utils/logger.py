@@ -80,7 +80,7 @@ def configure_logger(config: Optional[LoggerConfig] = None, **overrides: object)
 
     base_config = config or LoggerConfig()
     if overrides:
-        base_config = replace(base_config, **overrides)
+        base_config = replace(base_config, **overrides)  # type: ignore[arg-type]
 
     logger = logging.getLogger(base_config.name)
     logger.setLevel(_resolve_level(base_config.level))

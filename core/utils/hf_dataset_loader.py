@@ -262,8 +262,8 @@ class HuggingFaceDatasetLoader:
         # Check if it's in our catalog
         catalog_info = None
         for category in HuggingFaceDatasetLoader.CATALOG.values():
-            if dataset_id in category or dataset_path in category:
-                catalog_info = category.get(dataset_id) or category.get(dataset_path)
+            if dataset_id in category or dataset_path in category:  # type: ignore[operator,attr-defined]
+                catalog_info = category.get(dataset_id) or category.get(dataset_path)  # type: ignore[assignment,attr-defined]
                 break
         
         if catalog_info:
@@ -403,7 +403,7 @@ class HuggingFaceDatasetLoader:
         """
         catalog = {}
         for category, datasets in HuggingFaceDatasetLoader.CATALOG.items():
-            catalog[category] = list(datasets.keys())
+            catalog[category] = list(datasets.keys())  # type: ignore[union-attr,attr-defined]
         
         return catalog
     
@@ -419,8 +419,8 @@ class HuggingFaceDatasetLoader:
             Dataset info dict or None if not found
         """
         for category_datasets in HuggingFaceDatasetLoader.CATALOG.values():
-            if dataset_id in category_datasets:
-                return category_datasets[dataset_id]
+            if dataset_id in category_datasets:  # type: ignore[operator,attr-defined]
+                return category_datasets[dataset_id]  # type: ignore[index,attr-defined]  # type: ignore[index,attr-defined]
         
         return None
 

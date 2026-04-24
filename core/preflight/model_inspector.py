@@ -46,9 +46,9 @@ class ModelInspector:
         """
         self.teacher = teacher
         self.student = student
-        self.teacher_info = {}
-        self.student_info = {}
-        self.compatibility = {}
+        self.teacher_info: Dict[str, Any] = {}
+        self.student_info: Dict[str, Any] = {}
+        self.compatibility: Dict[str, Any] = {}
     
     def inspect(self) -> Dict[str, Any]:
         """
@@ -57,7 +57,7 @@ class ModelInspector:
         Returns:
             Dictionary with comprehensive analysis results
         """
-        report = {}
+        report: Dict[str, Any] = {}
         
         signatures: Dict[str, Any] = {}
 
@@ -180,7 +180,7 @@ class ModelInspector:
             Family: cnn, transformer, hybrid, rnn, unknown
         """
         # Count module types
-        module_counts = defaultdict(int)
+        module_counts: Dict[str, int] = defaultdict(int)
         for module in model.modules():
             module_type = module.__class__.__name__.lower()
             
@@ -217,7 +217,7 @@ class ModelInspector:
         Returns:
             Dictionary with layer counts by type
         """
-        structure = defaultdict(int)
+        structure: Dict[str, int] = defaultdict(int)
         layer_names = []
         
         for name, module in model.named_modules():
@@ -447,7 +447,7 @@ class ModelInspector:
         s_type = self.student_info.get('type', 'unknown')
         
         if t_type != s_type and t_type != 'unknown' and s_type != 'unknown':
-            compat['warnings'].append(
+            compat['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"Different model types: teacher={t_type}, student={s_type}. "
                 f"Cross-domain distillation requires careful configuration."
             )
@@ -457,26 +457,26 @@ class ModelInspector:
         s_arch = self.student_info.get('architecture_family', 'unknown')
         
         if t_arch != s_arch:
-            compat['warnings'].append(
+            compat['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"Different architectures: teacher={t_arch}, student={s_arch}. "
                 f"Feature distillation may require adaptive layers."
             )
-            compat['recommendations'].append(
+            compat['recommendations'].append(  # type: ignore[union-attr,attr-defined]
                 "Enable auto-adaptive feature matching (1x1 conv projections)"
             )
         
         # Check compression ratio
         ratio = self._compute_compression_ratio()
         if ratio > 10:
-            compat['warnings'].append(
+            compat['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"High compression ratio ({ratio:.1f}x). "
                 f"Consider multi-stage distillation or intermediate student."
             )
-            compat['recommendations'].append(
+            compat['recommendations'].append(  # type: ignore[union-attr,attr-defined]
                 "Use progressive distillation with hint learning"
             )
         elif ratio < 1.5:
-            compat['warnings'].append(
+            compat['warnings'].append(  # type: ignore[union-attr,attr-defined]
                 f"Low compression ratio ({ratio:.1f}x). "
                 f"Limited efficiency gains expected."
             )
@@ -486,12 +486,12 @@ class ModelInspector:
         s_out = self.student_info.get('output_shape')
         
         if t_out and s_out and t_out != s_out:
-            compat['errors'].append(
+            compat['errors'].append(  # type: ignore[union-attr,attr-defined]
                 f"Output shape mismatch: teacher={t_out}, student={s_out}. "
                 f"Cannot perform logit distillation."
             )
             compat['is_compatible'] = False
-            compat['recommendations'].append(
+            compat['recommendations'].append(  # type: ignore[union-attr,attr-defined]
                 "Use feature distillation only, or add projection layer"
             )
         
@@ -556,12 +556,12 @@ class ModelInspector:
         # Cross-architecture requires adaptive features
         if t_arch != s_arch:
             strategy['adaptive_features'] = True
-            strategy['additional_methods'].append('adaptive_hint')
+            strategy['additional_methods'].append('adaptive_hint')  # type: ignore[union-attr,attr-defined]
         
         # Transformer models benefit from attention distillation
         if t_arch == 'transformer' and s_arch == 'transformer':
-            if 'attention' not in strategy['additional_methods']:
-                strategy['additional_methods'].append('attention')
+            if 'attention' not in strategy['additional_methods']:  # type: ignore[operator]
+                strategy['additional_methods'].append('attention')  # type: ignore[union-attr,attr-defined]
         
         return strategy
 

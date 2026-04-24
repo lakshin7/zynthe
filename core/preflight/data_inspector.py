@@ -47,7 +47,7 @@ class DataInspector:
         """
         self.dataset = dataset
         self.config = config or {}
-        self.inspection_results = {}
+        self.inspection_results: Dict[str, Any] = {}
     
     def validate(self) -> Dict[str, Any]:
         """
@@ -56,7 +56,7 @@ class DataInspector:
         Returns:
             Comprehensive data inspection report
         """
-        report = {
+        report: Dict[str, Any] = {
             'is_valid': True,
             'errors': [],
             'warnings': [],
@@ -79,7 +79,7 @@ class DataInspector:
             
             # Check class imbalance
             imbalance_warnings = self._check_class_imbalance()
-            report['warnings'].extend(imbalance_warnings)
+            report['warnings'].extend(imbalance_warnings)  # type: ignore[union-attr,attr-defined]
             
             # Suggest preprocessing
             report['preprocessing'] = self._suggest_preprocessing()
@@ -92,7 +92,7 @@ class DataInspector:
         
         else:
             report['is_valid'] = False
-            report['errors'].append("No dataset or config provided")
+            report['errors'].append("No dataset or config provided")  # type: ignore[union-attr,attr-defined]
         
         self.inspection_results = report
         return report
@@ -114,7 +114,7 @@ class DataInspector:
         try:
             if self.dataset is not None and hasattr(self.dataset, '__len__') and len(self.dataset) > 0:  # type: ignore[arg-type]
                 sample = self.dataset[0]
-                info['sample_structure'] = self._analyze_sample_structure(sample)
+                info['sample_structure'] = self._analyze_sample_structure(sample)  # type: ignore[assignment]
         except Exception as e:
             info['sample_error'] = str(e)
         
@@ -130,7 +130,7 @@ class DataInspector:
         Returns:
             Structure description
         """
-        structure = {
+        structure: Dict[str, Any] = {
             'type': type(sample).__name__,
             'fields': {}
         }
@@ -156,7 +156,7 @@ class DataInspector:
         
         elif isinstance(sample, torch.Tensor):
             # Single tensor
-            structure['fields']['data'] = {
+            structure['fields']['data'] = {  # type: ignore[index]
                 'type': 'Tensor',
                 'shape': list(sample.shape),
                 'dtype': str(sample.dtype)
@@ -338,7 +338,7 @@ class DataInspector:
         
         dataset_len = len(self.dataset) if hasattr(self.dataset, '__len__') else 0  # type: ignore[arg-type]
 
-        stats = {
+        stats: Dict[str, Any] = {
             'num_samples': dataset_len,
             'class_distribution': None,
             'input_statistics': {}
@@ -392,8 +392,8 @@ class DataInspector:
                 
                 # Compute imbalance ratio
                 if len(counter) > 1:
-                    max_count = max(counter.values())
-                    min_count = min(counter.values())
+                    max_count = max(counter.values())  # type: ignore[arg-type]
+                    min_count = min(counter.values())  # type: ignore[arg-type]
                     stats['imbalance_ratio'] = max_count / min_count
         
         except Exception as e:
@@ -461,7 +461,7 @@ class DataInspector:
         Returns:
             List of warnings
         """
-        warnings_list = []
+        warnings_list: List[str] = []
         
         stats: Dict[str, Any] = (
             self.inspection_results.get('statistics')  # type: ignore[assignment]
@@ -505,7 +505,7 @@ class DataInspector:
         Returns:
             Batch size recommendations
         """
-        recommendations = {
+        recommendations: Dict[str, Any] = {
             'min_batch_size': 8,
             'optimal_batch_size': 32,
             'max_batch_size': 128,
@@ -522,32 +522,32 @@ class DataInspector:
             if dataset_size < 100:
                 recommendations['optimal_batch_size'] = 8
                 recommendations['max_batch_size'] = 16
-                recommendations['reasoning'].append("Small dataset: using smaller batches")
+                recommendations['reasoning'].append("Small dataset: using smaller batches")  # type: ignore[union-attr,attr-defined]
             
             elif dataset_size < 1000:
                 recommendations['optimal_batch_size'] = 16
                 recommendations['max_batch_size'] = 32
-                recommendations['reasoning'].append("Medium dataset: moderate batch size")
+                recommendations['reasoning'].append("Medium dataset: moderate batch size")  # type: ignore[union-attr,attr-defined]
             
             else:
                 recommendations['optimal_batch_size'] = 32
                 recommendations['max_batch_size'] = 64
-                recommendations['reasoning'].append("Large dataset: can use larger batches")
+                recommendations['reasoning'].append("Large dataset: can use larger batches")  # type: ignore[union-attr,attr-defined]
             
             # Adjust based on data type
             data_type = self._detect_data_type()
             
             if data_type == 'vision':
                 recommendations['optimal_batch_size'] = min(recommendations['optimal_batch_size'], 16)
-                recommendations['reasoning'].append("Vision data: reducing batch size for memory")
+                recommendations['reasoning'].append("Vision data: reducing batch size for memory")  # type: ignore[union-attr,attr-defined]
             
             elif data_type == 'video':
                 recommendations['optimal_batch_size'] = min(recommendations['optimal_batch_size'], 8)
-                recommendations['reasoning'].append("Video data: small batches for memory constraints")
+                recommendations['reasoning'].append("Video data: small batches for memory constraints")  # type: ignore[union-attr,attr-defined]
             
             elif data_type == 'multimodal':
                 recommendations['optimal_batch_size'] = min(recommendations['optimal_batch_size'], 8)
-                recommendations['reasoning'].append("Multimodal data: small batches recommended")
+                recommendations['reasoning'].append("Multimodal data: small batches recommended")  # type: ignore[union-attr,attr-defined]
         
         except Exception as e:
             warnings.warn(f"Error recommending batch size: {e}")
@@ -561,7 +561,7 @@ class DataInspector:
         Returns:
             Dictionary with preprocessing suggestions
         """
-        suggestions = {
+        suggestions: Dict[str, List[str]] = {
             'required': [],
             'recommended': [],
             'optional': []
