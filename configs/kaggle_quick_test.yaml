@@ -1,0 +1,37 @@
+# configs/kaggle_quick_test.yaml
+# Quick validation config for Kaggle - runs in ~3 minutes
+# BERT-tiny → BERT-tiny (same model, tests pipeline)
+
+model:
+  name: "prajjwal1/bert-tiny"  # Tiny model for quick test (4M params)
+  student_name: "prajjwal1/bert-tiny"
+  type: "transformer"
+  tokenizer_name: "prajjwal1/bert-tiny"
+
+data:
+  dataset: "imdb"
+  max_length: 128
+  batch_size: 32
+  train_samples: 100
+  val_samples: 50
+
+distillation:
+  method: "kd_hinton"
+  temperature: 2.0
+  alpha: 0.5
+
+train:
+  engine: "legacy"
+  epochs: 1
+  batch_size: 32
+  learning_rate: 3e-5
+
+device:
+  cuda_device: 0
+  teacher_device: 0
+  student_device: 0
+
+runtime:
+  seed: 42
+  memory_management:
+    gradient_checkpointing: true

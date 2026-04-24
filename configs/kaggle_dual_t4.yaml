@@ -1,0 +1,51 @@
+# configs/kaggle_dual_t4.yaml
+# Dual T4 GPU configuration for Kaggle testing
+# Uses CUDA:0 for teacher, CUDA:1 for student for maximum efficiency
+
+model:
+  name: "bert-base-uncased"  # Teacher: 110M params
+  student_name: "distilbert-base-uncased"  # Student: 66M params
+  type: "transformer"
+  tokenizer_name: "bert-base-uncased"
+
+data:
+  dataset: "imdb"
+  max_length: 256
+  batch_size: 16  # Per GPU, total effective batch = 32
+  train_samples: 1000  # Quick test
+  val_samples: 200
+
+distillation:
+  method: "kd_hinton"
+  temperature: 2.0
+  alpha: 0.5
+
+train:
+  engine: "legacy"
+  epochs: 2
+  batch_size: 16
+  learning_rate: 5e-5
+  gradient_accumulation_steps: 2  # Effective batch = 16 * 2 * 2 = 64
+  warmup_ratio: 0.1
+  save_checkpoints: true
+  save_best_only: true
+
+device:
+  cuda_device: 0  # Primary GPU for runtime
+  teacher_device: 0  # Teacher on CUDA:0
+  student_device: 1  # Student on CUDA:1
+  use_multi_gpu: false  # Single-process dual GPU mode
+  pin_memory: true
+  deterministic: false
+
+runtime:
+  seed: 42
+  memory_management:
+    gradient_checkpointing: true
+    max_memory_gb: 14  # Leave 2GB headroom per GPU
+
+# Multi-GPU settings
+distributed:
+  enabled: false  # Set true for >2 GPUs
+  backend: "nccl"
+  init_method: "env://"
