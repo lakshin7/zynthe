@@ -62,9 +62,18 @@ class OptimizerFactory:
         Returns:
             Configured optimizer
         """
-        optimizer_name = config.get('optimizer', 'adamw').lower()
-        lr = config.get('learning_rate', config.get('lr', 2e-5))
-        weight_decay = config.get('weight_decay', 0.01)
+        optimizer_name = str(config.get('optimizer', 'adamw')).lower()
+        raw_lr = config.get('learning_rate', config.get('lr', 2e-5))
+        try:
+            lr = float(raw_lr)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid learning rate value: {raw_lr!r}") from exc
+
+        raw_weight_decay = config.get('weight_decay', 0.01)
+        try:
+            weight_decay = float(raw_weight_decay)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid weight_decay value: {raw_weight_decay!r}") from exc
         
         # Phase-aware learning rate adjustment
         phase_lr_multipliers = {
@@ -90,8 +99,8 @@ class OptimizerFactory:
             optimizer = optim.AdamW(
                 param_groups,
                 lr=lr,
-                betas=(config.get('beta1', 0.9), config.get('beta2', 0.999)),
-                eps=config.get('eps', 1e-8),
+                betas=(float(config.get('beta1', 0.9)), float(config.get('beta2', 0.999))),
+                eps=float(config.get('eps', 1e-8)),
                 weight_decay=weight_decay
             )
             
@@ -99,8 +108,8 @@ class OptimizerFactory:
             optimizer = optim.Adam(
                 param_groups,
                 lr=lr,
-                betas=(config.get('beta1', 0.9), config.get('beta2', 0.999)),
-                eps=config.get('eps', 1e-8),
+                betas=(float(config.get('beta1', 0.9)), float(config.get('beta2', 0.999))),
+                eps=float(config.get('eps', 1e-8)),
                 weight_decay=weight_decay
             )
             
@@ -108,7 +117,7 @@ class OptimizerFactory:
             optimizer = optim.SGD(
                 param_groups,
                 lr=lr,
-                momentum=config.get('momentum', 0.9),
+                momentum=float(config.get('momentum', 0.9)),
                 weight_decay=weight_decay,
                 nesterov=config.get('nesterov', True)
             )
@@ -120,12 +129,12 @@ class OptimizerFactory:
                 optimizer = Lion(
                     param_groups,
                     lr=lr * 0.3,  # Lion uses ~3x smaller LR
-                    betas=(config.get('beta1', 0.9), config.get('beta2', 0.99)),
+                    betas=(float(config.get('beta1', 0.9)), float(config.get('beta2', 0.99))),
                     weight_decay=weight_decay
                 )
                 LOG.info("Using Lion optimizer (memory efficient)")
             except ImportError:
-                LOG.warning("Lion optimizer not available, falling back to AdamW")
+                LOG.warning("Lion optimizer not available; install 'lion-pytorch'. Falling back to AdamW")
                 optimizer = optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
                 
         elif optimizer_name == 'adamw8bit':
@@ -135,8 +144,8 @@ class OptimizerFactory:
                 optimizer = bnb.optim.AdamW8bit(
                     param_groups,
                     lr=lr,
-                    betas=(config.get('beta1', 0.9), config.get('beta2', 0.999)),
-                    eps=config.get('eps', 1e-8),
+                    betas=(float(config.get('beta1', 0.9)), float(config.get('beta2', 0.999))),
+                    eps=float(config.get('eps', 1e-8)),
                     weight_decay=weight_decay
                 )
                 LOG.info("Using 8-bit AdamW optimizer")

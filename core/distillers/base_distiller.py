@@ -322,6 +322,16 @@ class BaseDistiller(nn.Module):
         Returns:
             Tuple of (optimizer, scheduler)
         """
+        try:
+            lr = float(lr)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid optimizer lr value: {lr!r}") from exc
+
+        try:
+            weight_decay = float(weight_decay)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid optimizer weight_decay value: {weight_decay!r}") from exc
+
         # Get student parameters
         params = [p for p in self.student.parameters() if p.requires_grad]
         

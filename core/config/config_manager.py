@@ -32,6 +32,15 @@ logger.addHandler(logging.NullHandler())
 
 _DEFAULTS_FILENAME = "default.yaml"
 
+
+def _coerce_float(value: Any, default: float) -> float:
+    """Safely coerce config values to float with fallback."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning("Invalid float config value %r; using default=%s", value, default)
+        return float(default)
+
 class ConfigError(Exception):
     pass
 
@@ -311,7 +320,18 @@ class ConfigManager:
         merged_train["grad_accum_steps"] = int(merged_train.get("grad_accum_steps", 1))
         merged_train["early_stop_patience"] = int(merged_train.get("early_stop_patience", 2))
         merged_train["mixed_precision"] = bool(merged_train.get("mixed_precision", False))
-        merged_train["lr"] = float(merged_train.get("lr", 5e-5))
+        merged_train["lr"] = _coerce_float(merged_train.get("lr", 5e-5), 5e-5)
+
+        # Keep learning_rate/lr aliases in sync and always numeric.
+        # Some configs use learning_rate while legacy paths read lr.
+        if "learning_rate" in merged_train:
+            merged_train["learning_rate"] = _coerce_float(
+                merged_train.get("learning_rate"),
+                merged_train["lr"],
+            )
+            merged_train["lr"] = merged_train["learning_rate"]
+        else:
+            merged_train["learning_rate"] = merged_train["lr"]
 
         # explainability defaults (SHAP / LIME)
         explain_cfg = self.raw_config.get("explainability", {})

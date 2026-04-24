@@ -26,7 +26,8 @@ train:
   engine: "legacy"
   epochs: 2
   batch_size: 8
-  learning_rate: 5e-5
+  learning_rate: 5.0e-5
+  optimizer: "lion"
   gradient_accumulation_steps: 4
   warmup_ratio: 0.1
   save_checkpoints: true

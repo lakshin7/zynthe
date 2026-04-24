@@ -15,6 +15,23 @@ from core.config.config_manager import ConfigManager
 LOG = logging.getLogger(__name__)
 
 
+def _coerce_scalar_override(value: str) -> Any:
+    """Best-effort scalar coercion for CLI overrides.
+
+    Supports bools, ints, floats, and scientific notation floats (e.g. 3e-5).
+    """
+    lowered = value.lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+
+    try:
+        if any(ch in value for ch in (".", "e", "E")):
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
+
+
 def convert_to_serializable(obj: Any) -> Any:
     """Convert numpy types to JSON-serializable Python types."""
     if isinstance(obj, dict):
@@ -47,15 +64,7 @@ def parse_overrides(override_list: List[str]) -> Dict[str, Any]:
             LOG.warning(f"Invalid override format '{override}', expected KEY=VALUE")
             continue
         key, value = override.split('=', 1)
-        try:
-            if '.' not in value and value.isdigit():
-                value = int(value)  # type: ignore[assignment]
-            elif value.replace('.', '').replace('-', '').isdigit():
-                value = float(value)  # type: ignore[assignment]
-            elif value.lower() in ('true', 'false'):
-                value = value.lower() == 'true'  # type: ignore[assignment]
-        except ValueError:
-            pass
+        value = _coerce_scalar_override(value)
         keys = key.split('.')
         current = overrides
         for k in keys[:-1]:
