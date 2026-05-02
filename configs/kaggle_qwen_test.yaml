@@ -1,24 +1,45 @@
 train:
-  epochs: 3
-  batch_size: 16
-  lr: 2e-5
-  grad_accum_steps: 4
+  epochs: 2
+  batch_size: 1
+  lr: 1e-5
+  grad_accum_steps: 16
   mixed_precision: true
   optimizer: adamw
   weight_decay: 0.01
+  max_grad_norm: 1.0
 
 model:
-  name: "Qwen/Qwen2.5-0.5B"
-  student_name: "HuggingFaceTB/SmolLM2-135M" 
-  type: "transformer"
-  tokenizer_name: "Qwen/Qwen2.5-0.5B"
-  max_length: 256
+  name: "unsloth/Qwen2.5-1.5B-Instruct"
+  student_name: "unsloth/Qwen2.5-0.5B-Instruct"
+  type: "sequence_classification"
+  tokenizer_name: "unsloth/Qwen2.5-1.5B-Instruct"
+  max_length: 128
+  torch_dtype: "float16"
+  quantization:
+    type: "bnb-4bit"
+    target: "teacher"
+    safe_fallback: true
+  num_labels: 2
+  label2id:
+    negative: 0
+    positive: 1
+  id2label:
+    0: negative
+    1: positive
 
 distillation:
-  method: "kd_hinton"
-  temperature: 3.0
-  alpha: 0.5
+  method: "similarity_transfer"
   multi_stage: false
+  config:
+    similarity_transfer:
+      similarity_metric: "cosine"
+      weight: 0.7
+      kd_weight: 0.0
+      progressive: true
+      progressive_epochs: 2
+      auto_layers: "last"
+      auto_layer_count: 2
+      normalize: true
 
 data:
   train_path: "data/sst2_test/train.jsonl"
