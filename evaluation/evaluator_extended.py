@@ -191,7 +191,7 @@ class DualEvaluator:
                     print(f"[DUAL EVAL] Processed {batch_idx + 1}/{len(self.dataloader)} batches")
         
         # Compute standard metrics
-        teacher_metrics = compute_all_metrics(teacher_preds, all_labels)
+        compute_all_metrics(teacher_preds, all_labels)
         student_metrics = compute_all_metrics(student_preds, all_labels)
         
         # Aggregate extended metrics
@@ -203,7 +203,7 @@ class DualEvaluator:
         teacher_logits_cat = torch.cat(teacher_logits_all, dim=0)
         student_logits_cat = torch.cat(student_logits_all, dim=0)
         
-        global_metrics = compute_extended_metrics(
+        compute_extended_metrics(
             teacher_logits_cat, student_logits_cat,
             temperature=self.temperature
         )

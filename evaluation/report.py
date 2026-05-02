@@ -1,4 +1,5 @@
-import json, os
+import json
+import os
 from datetime import datetime
 
 def generate_report(summary, plots, config, output_path, fmt="md"):

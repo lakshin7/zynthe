@@ -737,7 +737,7 @@ class Trainer:
         Returns:
             (loss, metrics_dict) tuple
         """
-        labels = batch.get('labels', None)
+        batch.get('labels', None)
         pipeline_batch = {key: value for key, value in batch.items() if value is not None}
         
         # Build outputs dict for pipeline

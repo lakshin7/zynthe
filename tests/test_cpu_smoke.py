@@ -3,7 +3,6 @@
 CPU-safe smoke tests for Latitude 7490.
 These tests should complete in < 5 minutes on 8GB RAM CPU-only hardware.
 """
-import pytest
 import torch
 from pathlib import Path
 from core.config.config_manager import ConfigManager
@@ -35,7 +34,7 @@ class TestConfigLoading:
         # Check CPU-specific settings
         assert config["train"]["epochs"] == 1
         assert config["train"]["batch_size"] == 4
-        assert config["device"]["cpu_only"] == True
+        assert config["device"]["cpu_only"]
 
 
 class TestModelLoading:
