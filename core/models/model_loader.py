@@ -8,9 +8,13 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Un
 import torch
 from transformers import (
     AutoConfig,
+    AutoImageProcessor,
     AutoModel,
+    AutoModelForImageClassification,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
+    AutoProcessor,
+    CLIPModel,
     AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -59,7 +63,7 @@ class ModelBundle:
 
     teacher: PreTrainedModel
     student: PreTrainedModel
-    tokenizer: PreTrainedTokenizerBase
+    tokenizer: Any
     spec: ModelLoadSpec
     device: torch.device
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -161,7 +165,7 @@ class ModelLoader:
         use_agent: bool = False,
         data_samples: Optional[List[Dict[str, Any]]] = None,
         return_bundle: bool = False,
-    ) -> Union[Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizerBase], ModelBundle]:
+    ) -> Union[Tuple[PreTrainedModel, PreTrainedModel, Any], ModelBundle]:
         spec = self._build_spec(use_agent=use_agent, data_samples=data_samples)
         bundle = self._load_bundle(spec, data_samples=data_samples, use_agent=use_agent)
         return bundle if (return_bundle or spec.return_wrapped) else (
@@ -179,7 +183,7 @@ class ModelLoader:
         scaler: Optional[Any] = None,
         strict: bool = True,
         map_location: Optional[str] = None,
-    ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+    ) -> Tuple[PreTrainedModel, Any]:
         """
         Load model/tokenizer from a checkpoint directory and optionally restore
         optimizer/scheduler/scaler state from a serialized training checkpoint.
@@ -192,9 +196,13 @@ class ModelLoader:
 
         # Determine model class based on config
         model_type = (self.model_cfg.get("type") or "").lower()
-        if model_type == "causal_lm":
+        if model_type in {"causal_lm", "causallm", "causal-lm", "lm"}:
             model_class = AutoModelForCausalLM
-        elif model_type == "sequence_classification":
+        elif model_type in {"vision", "image", "image_classification", "image-classification"}:
+            model_class = AutoModelForImageClassification
+        elif model_type in {"multimodal", "clip"}:
+            model_class = CLIPModel
+        elif model_type in {"sequence_classification", "sequenceclassification", "classification"}:
             model_class = AutoModelForSequenceClassification
         else:
             model_class = AutoModel
@@ -203,7 +211,7 @@ class ModelLoader:
         model = model_class.from_pretrained(str(checkpoint_path), torch_dtype=self.model_cfg.get("torch_dtype"))
 
         try:
-            tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_path))
+            tokenizer = self._load_artifact_processor(str(checkpoint_path), model_type)
         except Exception as e:
             logger.warning("Failed to load tokenizer from checkpoint, falling back to base tokenizer: %s", e)
             spec = self._build_spec(use_agent=False, data_samples=None)
@@ -265,9 +273,13 @@ class ModelLoader:
         use_agent: bool,
         data_samples: Optional[List[Dict[str, Any]]],
     ) -> ModelLoadSpec:
-        teacher_name = self.model_cfg.get("name")
+        teacher_name = self.model_cfg.get("name") or self.model_cfg.get("teacher_name") or self.model_cfg.get("teacher")
         student_name = self.model_cfg.get("student_name", teacher_name)
-        tokenizer_name = self.model_cfg.get("tokenizer_name", teacher_name)
+        tokenizer_name = (
+            self.model_cfg.get("tokenizer_name")
+            or self.model_cfg.get("processor_name")
+            or teacher_name
+        )
         model_type = (self.model_cfg.get("type") or "").lower()
 
         if not teacher_name and use_agent:
@@ -437,7 +449,17 @@ class ModelLoader:
                 logger.warning("Auto model type resolution failed (%s); falling back to sequence classification", exc)
                 resolved_model_type = "sequenceclassification"
 
-        if resolved_model_type in {"causallm", "causal_lm", "causal-lm", "decoder", "gpt", "lm", "language_modeling"}:
+        if resolved_model_type in {"vision", "image", "image_classification", "image-classification", "vit", "deit"}:
+            model_class = AutoModelForImageClassification
+            if "num_labels" in self.model_cfg:
+                model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels"))
+            if "label2id" in self.model_cfg:
+                label_map = self.model_cfg.get("label2id", {})
+                model_kwargs.setdefault("label2id", label_map)
+                model_kwargs.setdefault("id2label", {idx: name for name, idx in label_map.items()})
+        elif resolved_model_type in {"multimodal", "clip"}:
+            model_class = CLIPModel
+        elif resolved_model_type in {"causallm", "causal_lm", "causal-lm", "decoder", "gpt", "lm", "language_modeling"}:
             model_class = AutoModelForCausalLM
         elif resolved_model_type in {"sequenceclassification", "sequence_classification", "classification", "transformer"}:
             model_class = AutoModelForSequenceClassification
@@ -464,13 +486,22 @@ class ModelLoader:
 
         return model_class, model_kwargs
 
-    def _load_tokenizer(self, spec: ModelLoadSpec) -> PreTrainedTokenizerBase:
+    def _load_tokenizer(self, spec: ModelLoadSpec) -> Any:
         tokenizer_kwargs = dict(spec.extra_tokenizer_kwargs)
         tokenizer_kwargs.setdefault("use_fast", True)
         tokenizer_kwargs.setdefault("trust_remote_code", spec.trust_remote_code)
         tokenizer_kwargs.setdefault("local_files_only", spec.local_files_only)
         if spec.hf_token:
             tokenizer_kwargs.setdefault("token", spec.hf_token)
+
+        model_type = spec.model_type.lower()
+        if model_type in {"vision", "image", "image_classification", "image-classification"}:
+            processor_kwargs = dict(tokenizer_kwargs)
+            processor_kwargs.pop("use_fast", None)
+            return AutoImageProcessor.from_pretrained(spec.tokenizer_name, **processor_kwargs)
+
+        if model_type in {"multimodal", "clip", "vlm"}:
+            return AutoProcessor.from_pretrained(spec.tokenizer_name, **tokenizer_kwargs)
 
         tokenizer = AutoTokenizer.from_pretrained(spec.tokenizer_name, **tokenizer_kwargs)
 
@@ -485,6 +516,14 @@ class ModelLoader:
         tokenizer.padding_side = self.model_cfg.get("padding_side", tokenizer.padding_side)
 
         return tokenizer
+
+    def _load_artifact_processor(self, path: str, model_type: str) -> Any:
+        normalized_type = model_type.lower()
+        if normalized_type in {"vision", "image", "image_classification", "image-classification"}:
+            return AutoImageProcessor.from_pretrained(path)
+        if normalized_type in {"multimodal", "clip", "vlm"}:
+            return AutoProcessor.from_pretrained(path)
+        return AutoTokenizer.from_pretrained(path)
 
     def _instantiate_model(
         self,

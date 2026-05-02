@@ -148,6 +148,9 @@ class SingleDistillerPipeline(BasePipeline):
             'targets': batch.get('labels'),
             'input_ids': batch.get('input_ids'),
             'attention_mask': batch.get('attention_mask'),
+            'pixel_values': batch.get('pixel_values'),
+            'image': batch.get('image'),
+            'batch': batch,
             'student_features': outputs.get('student_features', {}),
             'teacher_features': outputs.get('teacher_features', {}),
         }

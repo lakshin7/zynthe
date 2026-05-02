@@ -157,6 +157,7 @@ class DistillerRegistry:
             'feature': FeatureDistiller,
             'similarity': SimilarityTransfer,
             'similarity_transfer': SimilarityTransfer,
+            'multi_stage': MultiStageDistiller,  # Full multi-stage orchestrator
         }
         
         # Add optional distillers

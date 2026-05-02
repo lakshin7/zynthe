@@ -305,3 +305,47 @@ class TestVisionPipelineRouting:
         assert train_loader is sentinel_train
         assert val_loader is sentinel_val
         assert calls["cfg"]["data"]["image_dataset"] == "cifar10"
+
+    def test_single_distiller_pipeline_passes_pixel_values_to_loss(self):
+        from core.distillers.base_distiller import BaseDistiller
+        from core.pipelines.single_distiller_pipeline import SingleDistillerPipeline
+
+        class TinyVisionModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.classifier = nn.Linear(3, 2)
+                self.config = SimpleNamespace(_name_or_path="tiny-vision")
+
+            def forward(self, pixel_values, labels=None):
+                pooled = pixel_values.float().mean(dim=(-1, -2))
+                logits = self.classifier(pooled)
+                return SimpleNamespace(logits=logits, loss=None)
+
+        class PixelAwareDistiller(BaseDistiller):
+            def compute_loss(
+                self,
+                student_outputs,
+                teacher_outputs,
+                pixel_values,
+                targets=None,
+                **kwargs,
+            ):
+                assert pixel_values is not None
+                logits = student_outputs.logits
+                if targets is None:
+                    return logits.sum() * 0.0, {"pixel_batch_size": float(pixel_values.shape[0])}
+                return F.cross_entropy(logits, targets), {"pixel_batch_size": float(pixel_values.shape[0])}
+
+        teacher = TinyVisionModel()
+        student = TinyVisionModel()
+        distiller = PixelAwareDistiller(teacher, student, device=torch.device("cpu"))
+        pipeline = SingleDistillerPipeline(distiller, name="vision_pixel_pipeline")
+        batch = {
+            "pixel_values": torch.randn(2, 3, 4, 4),
+            "labels": torch.tensor([0, 1]),
+        }
+
+        loss, metrics = pipeline(batch)
+
+        assert isinstance(loss, torch.Tensor)
+        assert loss.item() >= 0

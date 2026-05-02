@@ -8,6 +8,7 @@ from evaluation.visualizer import (
     plot_epoch_micro_series,
     plot_evaluation_dashboard,
     plot_distillation_gap,
+    plot_extended_metrics,
 )
 from evaluation.metrics_extended import (
     compute_extended_metrics,
@@ -15,7 +16,7 @@ from evaluation.metrics_extended import (
 )
 from evaluation.evaluation_report import EvaluationReport
 from evaluation.diagnostics import build_eval_diagnostics
-from core.models.model_loader import ModelSaver
+from core.models.model_saver import ModelSaver
 from training.optimizer import OptimizerFactory, GradientManager, AdaptiveOptimizer
 from training.scheduler import SchedulerFactory
 from core.utils.data_validator import DataValidator, OverfitUnderfitDetector
@@ -737,16 +738,13 @@ class Trainer:
             (loss, metrics_dict) tuple
         """
         labels = batch.get('labels', None)
+        pipeline_batch = {key: value for key, value in batch.items() if value is not None}
         
         # Build outputs dict for pipeline
         pipeline_outputs = {
             'teacher_outputs': teacher_outputs,
             'student_outputs': student_outputs,
-            'batch': {
-                'input_ids': batch.get('input_ids'),
-                'attention_mask': batch.get('attention_mask'),
-                'labels': labels,
-            },
+            'batch': pipeline_batch,
         }
         
         # Compute loss through pipeline
@@ -1598,12 +1596,16 @@ class Trainer:
                     LOG.error("See report: " + str(validation_path))
                     LOG.error("="*80)
                     
-                    # Ask user to confirm
-                    user_input = input("\nData validation failed. Continue anyway? (yes/no): ")
-                    if user_input.lower() != 'yes':
+                    fail_policy = str(
+                        self.config.get('train', {}).get('data_validation_fail_policy', 'warn')
+                    ).lower()
+                    if fail_policy == 'abort':
                         raise ValueError("Training aborted due to data validation failure")
-                    else:
-                        LOG.warning("User chose to continue despite validation failure")
+                    LOG.warning(
+                        "Continuing despite data validation failure because "
+                        "train.data_validation_fail_policy=%s",
+                        fail_policy,
+                    )
         
         except Exception as e:
             LOG.warning(f"Data validation check failed: {e}")
@@ -1915,6 +1917,28 @@ class Trainer:
         except Exception as e:
             print(f"[WARNING] Failed to save extended metrics: {e}")
 
+        # Evaluation dashboard is a core run artifact, not only a teacher-comparison artifact.
+        if hasattr(self, 'final_report') and self.final_report:
+            try:
+                report_metadata = dict(getattr(self.final_report, 'metadata', {}) or {})
+                report_metadata.update({
+                    'train_losses': list(self.train_losses),
+                    'val_losses': list(self.val_losses),
+                    'metrics_history': {k: list(v) for k, v in self.metrics_history.items()},
+                    'extended_metrics_history': {
+                        k: list(v) for k, v in self.extended_metrics_history.items()
+                    },
+                })
+                self.final_report.metadata = report_metadata
+
+                dash_path = os.path.join(self.experiment_dir, 'evaluation_dashboard.png')
+                plot_evaluation_dashboard(self.final_report, dash_path)
+
+                extended_plot_path = os.path.join(self.experiment_dir, 'extended_metrics.png')
+                plot_extended_metrics(self.final_report, extended_plot_path)
+            except Exception as e:
+                print(f"[WARNING] Failed to generate evaluation dashboard artifacts: {e}")
+
         # Teacher vs Student comparison plot (if enabled and data exists)
         if self.enable_comparison_plot and self.teacher_epoch_losses and self.train_losses:
             try:
@@ -1930,11 +1954,8 @@ class Trainer:
                     save_path=comparison_path
                 )
                 
-                # New Evaluation Dashboard
+                # Distillation gap is only meaningful when teacher metrics are available.
                 if hasattr(self, 'final_report') and self.final_report:
-                    dash_path = os.path.join(self.experiment_dir, 'evaluation_dashboard.png')
-                    plot_evaluation_dashboard(self.final_report, dash_path)
-                    
                     gap_path = os.path.join(self.experiment_dir, 'distillation_gap.png')
                     plot_distillation_gap(
                         teacher_metrics={k: v[-1] if v else 0.0 for k, v in self.teacher_metrics_history.items()},
@@ -2445,4 +2466,3 @@ class Trainer:
                             self.best_val_loss = float(best_metric)
             except Exception as e:
                 print(f"[WARNING] Failed to restore checkpoint training state: {e}")
-

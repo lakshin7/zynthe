@@ -29,11 +29,41 @@ from app.cli_helpers import (
 
 app = typer.Typer(name="zyn", help="Zynthe / Knowledge-distillation Toolkit CLI")
 
+# Configure base CLI logging: console gets WARNING+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 LOG = logging.getLogger("zyn")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+
+def _setup_experiment_logging(experiment_dir: str):
+    """Route detailed logs to a file in the experiment directory."""
+    log_dir = Path(experiment_dir) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "experiment.log"
+    
+    file_handler = logging.FileHandler(str(log_file))
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    file_handler.setFormatter(formatter)
+    
+    # Enable INFO at root, FileHandler catches INFO+, StreamHandler catches WARNING+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+
+
+def banner_text() -> str:
+    return """
+███████╗██╗   ██╗███╗   ██╗████████╗██╗  ██╗███████╗
+╚══███╔╝╚██╗ ██╔╝████╗  ██║╚══██╔══╝██║  ██║██╔════╝
+  ███╔╝  ╚████╔╝ ██╔██╗ ██║   ██║   ███████║█████╗
+ ███╔╝    ╚██╔╝  ██║╚██╗██║   ██║   ██╔══██║██╔══╝
+███████╗   ██║   ██║ ╚████║   ██║   ██║  ██║███████╗
+╚══════╝   ╚═╝   ╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚══════╝
+ZYNTHE
+""".strip("\n")
+
+
+def _print_banner() -> None:
+    rprint(f"[bold white]{banner_text()}[/bold white]")
 
 @app.command("distill")
 def distill(
@@ -48,10 +78,12 @@ def distill(
     checkpoint_path: Optional[str] = typer.Option(None, help="Optional checkpoint output path"),
 ):
     """Run the distillation pipeline."""
+    _print_banner()
     from app.runtime import RuntimeOptions, UnifiedTrainingRuntime
 
     overrides_dict = parse_overrides(override)
     cfg_manager = ConfigManager(config_path=config, overrides=overrides_dict)
+    _setup_experiment_logging(cfg_manager.experiment_dir)
 
     runtime = UnifiedTrainingRuntime()
     runtime_options = RuntimeOptions(
@@ -105,12 +137,14 @@ def evaluate(
     infer_output: Optional[str] = typer.Option(None, help="Optional JSON output path for inference predictions"),
 ):
     """Run standalone evaluation or inference."""
+    _print_banner()
     from core.inference.predict import StudentInference
     from core.models.model_saver import load_model
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     overrides_dict = parse_overrides(override)
     cfg_manager = ConfigManager(config_path=config, overrides=overrides_dict)
+    _setup_experiment_logging(cfg_manager.experiment_dir)
 
     if load_model_dir:
         student, tokenizer, _ = load_model(
@@ -166,6 +200,29 @@ def evaluate(
     rprint(f"[green]✅ Inference results saved to: {out_path}[/green]")
 
 
+@app.command("diagnose")
+def diagnose(
+    model_path: str = typer.Argument(..., help="Path to the teacher model directory"),
+    val_path: str = typer.Option("data/imdb_val.jsonl", help="Validation dataset path for sanity checks"),
+    max_samples: int = typer.Option(100, help="Max samples to run forward pass on")
+):
+    """Diagnose teacher model issues, outputs, and label alignments."""
+    _print_banner()
+    from app.diagnose import diagnose_model
+    rprint(f"[bold blue]Running Diagnostics on {model_path}...[/bold blue]")
+    diagnose_model(model_path=model_path, val_path=val_path, max_samples=max_samples)
+
+@app.command("test-system")
+def test_system(
+    config: str = typer.Option("configs/test_live_quick.yaml", help="Path to config YAML file for testing")
+):
+    """Run full system pre-flight checks to ensure all modules boot properly."""
+    _print_banner()
+    from app.tester import SystemTester
+    rprint("[bold blue]Running System Diagnostics...[/bold blue]")
+    tester = SystemTester()
+    tester.run_all(config_path=config)
+
 @app.command("export")
 def export(
     model_dir: str = typer.Argument(..., help="Path to the model directory to export"),
@@ -176,7 +233,8 @@ def export(
     output_dir: Optional[str] = typer.Option(None, help="Directory to save the exported model"),
 ):
     """Export a trained model to various deployment formats."""
-    from core.models.model_loader import ModelSaver
+    _print_banner()
+    from core.models.model_saver import ModelSaver
     from core.models.model_saver import load_model
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     
@@ -221,6 +279,7 @@ def compare(
     device: Optional[str] = typer.Option(None, help="Device override: cpu|cuda|mps"),
 ):
     """Compare teacher and student models."""
+    _print_banner()
     import torch
     from data.dataloaders import get_imdb_dataloaders
     from evaluation.model_comparison import ModelComparator
@@ -282,6 +341,7 @@ def info(
     override: List[str] = typer.Option([], help="Config overrides in KEY=VALUE format"),
 ):
     """Print system state, loaded presets, and environment config."""
+    _print_banner()
     overrides_dict = parse_overrides(override)
     cfg_manager = ConfigManager(config_path=config, overrides=overrides_dict)
     
@@ -318,6 +378,7 @@ def smoke(
     hidden_size: int = typer.Option(64, help="Smoke test hidden size"),
 ):
     """Run a tiny CPU-only synthetic training smoke test."""
+    _print_banner()
     import time
     import torch
     import torch.nn as nn
