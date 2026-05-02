@@ -1,41 +1,28 @@
 train:
-  epochs: 3                   # stable baseline for free-tier T4 sessions
-  batch_size: 32              # optimistic T4 baseline
-  lr: 2e-5                   # reduced learning rate for better convergence
-  grad_accum_steps: 1
-  mixed_precision: true        # CUDA AMP for T4
-  early_stop_patience: 2       # stops if val_loss doesn't improve for 2 epochs
-  
-  # Optimizer configuration (NEW - Advanced Optimizer System)
-  optimizer: adamw            # adamw, adam, sgd, lion, adamw_8bit, adam_1bit
-  weight_decay: 0.01          # L2 regularization
-  max_grad_norm: 1.0          # Gradient clipping (prevents explosion)
-  centralize_grads: false     # Gradient centralization (helps distillation stability)
-  dynamic_lr: true            # Enable adaptive LR tuning based on DEI/CAS metrics
-  
-  # Learning rate scheduler (NEW - Advanced Scheduler System)
-  scheduler: cosine           # cosine, linear, step, plateau, onecycle, cyclic, etc.
-  warmup_steps: 20            # Reduced from 50 - more appropriate for 3 epochs (~189 total steps)
-  warmup_type: linear         # linear, cosine, or constant warmup
-  # For step scheduler: step_size: 10, gamma: 0.1
-  # For plateau scheduler: patience: 5, factor: 0.5
-  # Note: With 3 epochs and batch_size 8, total steps ≈ 189
-  #       warmup_steps=20 gives ~10% warmup, leaving 169 steps for cosine annealing
-  
-  # Teacher training options (optional)
-  train_teacher: false         # Set to true to fine-tune teacher before distillation
-  teacher_epochs: 2            # Number of epochs to train teacher
-  teacher_lr: 2e-5             # Learning rate for teacher training
+  epochs: 3
+  batch_size: 16
+  lr: 3e-5
+  grad_accum_steps: 2
+  mixed_precision: true
+  early_stop_patience: 2
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  centralize_grads: false
+  dynamic_lr: true
+  scheduler: cosine
+  warmup_steps: 20
+  warmup_type: linear
+  train_teacher: false
+  teacher_epochs: 2
+  teacher_lr: 2e-5
 
 model:
-  # Teacher model (larger, more capable)
-  name: "bert-base-uncased"                    # Teacher: BERT-base (110M params)
-  # Student model (smaller, faster)
-  student_name: "distilbert-base-uncased"      # Student: DistilBERT (66M params, ~40% smaller)
-  type: "transformer"                          # Both are sequence classification transformers
-  # Tokenizer to use - use DistilBERT's tokenizer for better compatibility
-  tokenizer_name: "distilbert-base-uncased"   # DistilBERT tokenizer (no token_type_ids)
-  max_length: 128                             # Maximum sequence length
+  name: "gpt2"                    # Teacher: GPT-2 (124M params)
+  student_name: "distilgpt2"      # Student: DistilGPT-2 (82M params)
+  type: "transformer"
+  tokenizer_name: "gpt2"
+  max_length: 128
 
 distillation:
   method: "kd_hinton"
@@ -44,46 +31,29 @@ distillation:
   multi_stage: false
 
 data:
-  train_path: "data/sst2_test/train.jsonl"       # SST-2 from HuggingFace
-  val_path: "data/sst2_test/validation.jsonl"    # validation split
-  dataset_id: "glue/sst2"                        # Added for adaptive preprocessing registry
+  train_path: "data/sst2_test/train.jsonl"
+  val_path: "data/sst2_test/validation.jsonl"
+  dataset_id: "glue/sst2"
   label_names:
     - negative
     - positive
 
 preprocessing:
-  text_field: text            # default logical text field name after adapter
-  label_field: label          # logical label field name
-  merge_fields: []            # list of raw fields to concatenate if needed
-  task_prefix: null           # e.g., "classify: " for T5 models
-  lowercase: true             # apply lowercasing (adapter level) FUTURE USE
-  strip: true                 # strip whitespace
-  cache_tokenized: false      # future: enable disk caching of tokenized dataset
+  text_field: text
+  label_field: label
+  merge_fields: []
+  task_prefix: null
+  lowercase: true
+  strip: true
+  cache_tokenized: false
 
 device:
-  prefer_mps: false
+  prefer_mps: true
   prefer_cuda: true
 
 agentic:
   enable_teacher_agent: false
   enable_auto_student: false
 
-auto_student:
-  enable: false
-
 output_root: "experiments"
 seed: 42
-
-quantization:
-  enable: false
-  mode: ptq       # Post-Training Quantization; can switch to QAT later
-
-similarity_transfer: false
-
-explainability:
-  enable_lime: false
-  enable_shap: false
-  num_samples: 4
-  lime_num_features: 8
-  shap_top_k: 10
-  shap_background_size: 8

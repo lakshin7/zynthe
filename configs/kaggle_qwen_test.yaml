@@ -1,0 +1,32 @@
+train:
+  epochs: 3
+  batch_size: 16
+  lr: 2e-5
+  grad_accum_steps: 4
+  mixed_precision: true
+  optimizer: adamw
+  weight_decay: 0.01
+
+model:
+  name: "Qwen/Qwen2.5-0.5B"
+  student_name: "HuggingFaceTB/SmolLM2-135M" 
+  type: "transformer"
+  tokenizer_name: "Qwen/Qwen2.5-0.5B"
+  max_length: 256
+
+distillation:
+  method: "kd_hinton"
+  temperature: 3.0
+  alpha: 0.5
+  multi_stage: false
+
+data:
+  train_path: "data/sst2_test/train.jsonl"
+  val_path: "data/sst2_test/validation.jsonl"
+  dataset_id: "glue/sst2"
+  label_names:
+    - negative
+    - positive
+
+output_root: "experiments"
+seed: 42
