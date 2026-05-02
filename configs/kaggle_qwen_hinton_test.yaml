@@ -28,18 +28,14 @@ model:
     1: positive
 
 distillation:
-  method: "similarity_transfer"
+  method: "kd_hinton"
   multi_stage: false
   config:
-    similarity_transfer:
-      similarity_metric: "cosine"
-      weight: 0.7
-      kd_weight: 0.0
-      progressive: true
-      progressive_epochs: 2
-      auto_layers: "last"
-      auto_layer_count: 2
-      normalize: true
+    kd_hinton:
+      temperature: 4.0
+      alpha: 0.7
+      hint_enabled: false
+      confidence_scaling: true
 
 data:
   train_path: "data/imdb_train.jsonl"
@@ -48,6 +44,15 @@ data:
   label_names:
     - negative
     - positive
+
+preprocessing:
+  text_field: text
+  label_field: label
+  merge_fields: []
+  task_prefix: null
+  lowercase: true
+  strip: true
+  cache_tokenized: false
 
 output_root: "experiments"
 seed: 42

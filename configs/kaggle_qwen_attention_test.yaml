@@ -9,11 +9,11 @@ train:
   max_grad_norm: 1.0
 
 model:
-  name: "unsloth/Qwen2.5-1.5B-Instruct"
-  student_name: "unsloth/Qwen2.5-0.5B-Instruct"
+  name: "unsloth/Qwen2.5-3B-Instruct"
+  student_name: "unsloth/Qwen2.5-1.5B-Instruct"
   type: "sequence_classification"
-  tokenizer_name: "unsloth/Qwen2.5-1.5B-Instruct"
-  max_length: 128
+  tokenizer_name: "unsloth/Qwen2.5-3B-Instruct"
+  max_length: 96
   torch_dtype: "float16"
   quantization:
     type: "bnb-4bit"
@@ -28,18 +28,18 @@ model:
     1: positive
 
 distillation:
-  method: "similarity_transfer"
+  method: "attention_transfer"
   multi_stage: false
   config:
-    similarity_transfer:
-      similarity_metric: "cosine"
-      weight: 0.7
-      kd_weight: 0.0
-      progressive: true
-      progressive_epochs: 2
-      auto_layers: "last"
-      auto_layer_count: 2
-      normalize: true
+    attention_transfer:
+      type: ["self", "relational"]
+      weight: 0.35
+      temperature: 1.2
+      auto_detect_layers: true
+      use_attention_rollout: true
+      use_dual_matching: false
+      use_cross_layer_flow: false
+      normalization: "softmax"
 
 data:
   train_path: "data/imdb_train.jsonl"
@@ -48,6 +48,15 @@ data:
   label_names:
     - negative
     - positive
+
+preprocessing:
+  text_field: text
+  label_field: label
+  merge_fields: []
+  task_prefix: null
+  lowercase: true
+  strip: true
+  cache_tokenized: false
 
 output_root: "experiments"
 seed: 42
