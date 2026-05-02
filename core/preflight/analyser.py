@@ -274,6 +274,16 @@ class PreflightAnalyzer:
         # 2. Data Inspection
         print("📊 Inspecting dataset...")
         data_report = self.data_inspector.validate()
+        
+        # Modality check: Enforce text-only for core stabilization
+        if data_report.get('modality') not in ('text', 'nlp', 'unknown') and data_report.get('status') == 'pass':
+            data_report['status'] = 'fail'
+            data_report['issues'].append({
+                'severity': 'critical',
+                'component': 'data',
+                'message': f"Zynthe currently strictly supports text/nlp modalities. Found: {data_report.get('modality')}"
+            })
+            
         self.results['data'] = data_report
         
         if verbose:

@@ -1143,6 +1143,13 @@ class Trainer:
         return avg_loss
 
     def evaluate(self, dataloader, compute_extended=True) -> EvaluationReport:
+        # Pre-evaluation Modality & Shape validation
+        if len(dataloader) > 0:
+            sample_batch = next(iter(dataloader))
+            # Basic validation to ensure we don't crash deep in forward pass
+            if "input_ids" not in sample_batch:
+                LOG.warning("Evaluation batch missing 'input_ids'. This might crash the forward pass.")
+                
         self.student.eval()
         self.teacher.eval()
         total_loss = 0.0
@@ -1449,11 +1456,15 @@ class Trainer:
                 student_logits_cat = torch.cat(all_student_logits, dim=0)
                 
                 temperature = self.config['distillation'].get('temperature', 2.0)
-                extended_metrics = compute_extended_metrics(
-                    teacher_logits_cat, 
-                    student_logits_cat,
-                    temperature=temperature
-                )
+                try:
+                    extended_metrics = compute_extended_metrics(
+                        teacher_logits_cat, 
+                        student_logits_cat,
+                        temperature=temperature
+                    )
+                except Exception as e:
+                    LOG.warning(f"Extended metrics computation failed: {e}")
+                    extended_metrics = {'dei': 0.0, 'cas': 0.0}
                 
                 # Track extended metrics
                 for key in self.extended_metrics_history.keys():
@@ -1673,6 +1684,14 @@ class Trainer:
                 'runtime': val_report.runtime or {},
                 'calibration': val_report.calibration,
             }
+            
+            # Post-evaluation hooks for pipeline telemetry
+            if hasattr(self, 'pipeline') and hasattr(self.pipeline, 'on_eval_complete'):
+                try:
+                    self.pipeline.on_eval_complete(val_report)
+                except Exception as e:
+                    LOG.warning(f"Pipeline post-evaluate hook failed: {e}")
+                    
             self.final_report = val_report
             if not isinstance(val_metrics, list):
                 val_metrics = []

@@ -207,12 +207,16 @@ class JsonlDataset(Dataset):
             normalized = self.adapter.adapt(base_sample)
         else:
             normalized = {
-                "text": base_sample.get("text", ""),
+                "text": str(base_sample.get("text", "")),
                 "label": _safe_label(base_sample.get("label", 0)),
             }
 
-        if normalized.get("text") is None:
+        # Type guard for tokenizer downstream crashes
+        text_val = normalized.get("text")
+        if text_val is None:
             normalized["text"] = ""
+        elif not isinstance(text_val, str):
+            normalized["text"] = str(text_val)
 
         cache_key: Optional[str] = None
         if not augmented_flag and isinstance(normalized.get("text"), str):
