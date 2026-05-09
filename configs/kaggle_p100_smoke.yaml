@@ -3,7 +3,7 @@
 # Expected: Runs in ~2-3 minutes on P100 (16GB VRAM)
 
 model:
-  name: "gpt2"                        # Teacher: GPT-2 (124M params)
+  name: "gpt2"                        # Teacher: GPT-2 (124M params) This is an example , but if you use them the accracy will be low. iykyk
   student_name: "distilgpt2"          # Student: DistilGPT-2 (82M params)
   type: "transformer"
   tokenizer_name: "gpt2"

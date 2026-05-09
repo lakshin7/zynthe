@@ -4,7 +4,7 @@
 # Expected: ~8-12 minutes
 
 model:
-  name: "bert-base-uncased"              # Teacher: BERT-base (110M params)
+  name: "bert-base-uncased"              # Teacher: BERT-base (110M params) This is an example , but if you use them the accracy will be low. iykyk
   student_name: "distilbert-base-uncased"  # Student: DistilBERT (66M params)
   type: "sequence_classification"
   tokenizer_name: "bert-base-uncased"
