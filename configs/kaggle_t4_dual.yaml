@@ -1,0 +1,83 @@
+# Kaggle T4x2 Full Test Config (Dual GPU)
+# 2x NVIDIA T4: 2×16GB VRAM, Turing arch
+# Tests: BERT → DistilBERT, multi-stage distillation + PTQ + evaluation
+# Expected: ~8-12 minutes
+
+model:
+  name: "bert-base-uncased"              # Teacher: BERT-base (110M params)
+  student_name: "distilbert-base-uncased"  # Student: DistilBERT (66M params)
+  type: "sequence_classification"
+  tokenizer_name: "bert-base-uncased"
+  max_length: 128
+  num_labels: 2
+
+distillation:
+  method: "kd_hinton"
+  multi_stage: true
+  stages:
+    - name: "Stage 1 — Logit Distillation"
+      type: kd_hinton
+      epochs: 2
+      config:
+        temperature: 4.0
+        alpha: 0.7
+
+    - name: "Stage 2 — Feature Alignment"
+      type: feature
+      epochs: 2
+      config:
+        beta: 0.5
+        feature_stages: [1, 2, 3]
+
+    - name: "Stage 3 — Attention Transfer"
+      type: attention
+      epochs: 1
+      config:
+        gamma: 0.3
+
+    - name: "Stage 4 — Similarity Refinement"
+      type: similarity
+      epochs: 1
+      config:
+        lambda_sim: 0.4
+
+data:
+  dataset_id: "glue/sst2"
+  train_path: null
+  val_path: null
+  label_names:
+    - negative
+    - positive
+
+train:
+  epochs: 6                              # Total epochs (overridden per stage)
+  batch_size: 64                         # Higher batch with 2 GPUs
+  lr: 3e-5
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  mixed_precision: true
+  scheduler: cosine
+  warmup_steps: 100
+  early_stop_patience: 3
+  # Multi-GPU settings
+  gradient_accumulation_steps: 2         # Effective batch = 64 * 2 = 128
+
+preprocessing:
+  text_field: sentence
+  label_field: label
+  lowercase: true
+  strip: true
+
+device:
+  prefer_cuda: true
+  prefer_mps: false
+
+quantization:
+  enable: true
+  mode: ptq
+  strategy: dynamic
+  fallback_strategy: float16
+
+output_root: "/kaggle/working/zynthe_t4x2"
+seed: 42

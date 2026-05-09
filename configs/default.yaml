@@ -18,7 +18,7 @@ train:
   teacher_lr: 2e-5
 
 model:
-  name: "gpt2"                    # Teacher: GPT-2 (124M params)
+  name: "gpt2"                    # Teacher: GPT-2 (124M params)     Note: Don't use base models for teacher
   student_name: "distilgpt2"      # Student: DistilGPT-2 (82M params)
   type: "transformer"
   tokenizer_name: "gpt2"
@@ -31,8 +31,8 @@ distillation:
   multi_stage: false
 
 data:
-  train_path: "data/sst2_test/train.jsonl"
-  val_path: "data/sst2_test/validation.jsonl"
+  train_path: null                     # Set path or use dataset_id for HF
+  val_path: null
   dataset_id: "glue/sst2"
   label_names:
     - negative
@@ -51,9 +51,6 @@ device:
   prefer_mps: true
   prefer_cuda: true
 
-agentic:
-  enable_teacher_agent: false
-  enable_auto_student: false
 
 output_root: "experiments"
 seed: 42

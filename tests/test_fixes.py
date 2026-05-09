@@ -1,5 +1,5 @@
 """
-Tests validating the bug-fixes applied to the Zynthe codebase.
+Tests validating the bug-fixes applied to the Zynthé codebase.
 
 Covers:
 1. torch.load weights_only fix (checkpoint round-trip)

@@ -1,0 +1,52 @@
+# Kaggle P100 Smoke Test Config
+# Tests: KD Hinton distillation with GPT-2 → DistilGPT-2
+# Expected: Runs in ~2-3 minutes on P100 (16GB VRAM)
+
+model:
+  name: "gpt2"                        # Teacher: GPT-2 (124M params)
+  student_name: "distilgpt2"          # Student: DistilGPT-2 (82M params)
+  type: "transformer"
+  tokenizer_name: "gpt2"
+  max_length: 128
+
+distillation:
+  method: "kd_hinton"
+  temperature: 4.0
+  alpha: 0.7
+  multi_stage: false
+
+data:
+  dataset_id: "glue/sst2"
+  train_path: null                     # Will use HF dataset loader
+  val_path: null
+  label_names:
+    - negative
+    - positive
+
+train:
+  epochs: 2
+  batch_size: 32                       # P100 handles this easily for GPT-2
+  lr: 5e-5
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  mixed_precision: true                # P100 supports FP16
+  scheduler: cosine
+  warmup_steps: 50
+  early_stop_patience: 3
+
+preprocessing:
+  text_field: sentence
+  label_field: label
+  lowercase: true
+  strip: true
+
+device:
+  prefer_cuda: true
+  prefer_mps: false
+
+quantization:
+  enable: false                        # Set to true to test PTQ after distillation
+
+output_root: "/kaggle/working/zynthe_experiments"
+seed: 42

@@ -66,7 +66,7 @@ def test_model_loader_accepts_teacher_name_alias() -> None:
         device="cpu",
     )
 
-    spec = loader._build_spec(use_agent=False, data_samples=None)
+    spec = loader._build_spec()
 
     assert spec.teacher_name == "teacher-a"
     assert spec.student_name == "student-b"

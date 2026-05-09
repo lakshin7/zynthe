@@ -1,0 +1,74 @@
+# Kaggle P100 — Full Multi-Method Test
+# Tests: All distillation methods with BERT → DistilBERT
+# Expected: Runs in ~8-10 minutes on P100 (16GB VRAM)
+
+model:
+  name: "bert-base-uncased"            # Teacher: BERT-base (110M params)
+  student_name: "distilbert-base-uncased"  # Student: DistilBERT (66M params)
+  type: "sequence_classification"
+  tokenizer_name: "bert-base-uncased"
+  max_length: 128
+  num_labels: 2
+
+distillation:
+  method: "kd_hinton"
+  multi_stage: true
+  stages:
+    - name: "Stage 1 — Logit Distillation"
+      type: kd_hinton
+      epochs: 2
+      config:
+        temperature: 4.0
+        alpha: 0.7
+
+    - name: "Stage 2 — Feature Alignment"
+      type: feature
+      epochs: 2
+      config:
+        beta: 0.5
+        feature_stages: [1, 2, 3]
+
+    - name: "Stage 3 — Attention Transfer"
+      type: attention
+      epochs: 1
+      config:
+        gamma: 0.3
+
+data:
+  dataset_id: "glue/sst2"
+  train_path: null
+  val_path: null
+  label_names:
+    - negative
+    - positive
+
+train:
+  epochs: 5                            # Total epochs (overridden per stage)
+  batch_size: 64                       # P100 handles this for BERT-base
+  lr: 3e-5
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  mixed_precision: true
+  scheduler: cosine
+  warmup_steps: 100
+  early_stop_patience: 3
+
+preprocessing:
+  text_field: sentence
+  label_field: label
+  lowercase: true
+  strip: true
+
+device:
+  prefer_cuda: true
+  prefer_mps: false
+
+quantization:
+  enable: true
+  mode: ptq                            # Post-training quantization after distillation
+  strategy: dynamic                    # Dynamic int8 quantization
+  fallback_strategy: float16
+
+output_root: "/kaggle/working/zynthe_experiments"
+seed: 42

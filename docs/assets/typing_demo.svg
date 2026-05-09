@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 180" width="800" height="180">
+  <defs>
+    <style>
+      .bg { fill: #282C34; rx: 8px; }
+      .text { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 15px; fill: #ABB2BF; font-weight: 500; }
+      .keyword { fill: #C678DD; }
+      .module { fill: #E5C07B; }
+      .class { fill: #E5C07B; }
+      .func { fill: #61AFEF; }
+      .comment { fill: #5C6370; font-style: italic; }
+      .string { fill: #98C379; }
+      
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+      .cursor {
+        animation: blink 1s step-end infinite;
+      }
+    </style>
+  </defs>
+
+  <rect class="bg" width="100%" height="100%" />
+  <circle cx="20" cy="20" r="6" fill="#E06C75" />
+  <circle cx="40" cy="20" r="6" fill="#E5C07B" />
+  <circle cx="60" cy="20" r="6" fill="#98C379" />
+
+  <g transform="translate(20, 60)" class="text" visibility="hidden">
+    <animate attributeName="visibility" values="visible;hidden;hidden" keyTimes="0; 0.2043; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      <text x="0" y="0"><tspan class="keyword">from</tspan> <tspan class="module">zynthe</tspan> <tspan class="keyword">import</tspan> <tspan class="class">DistillationToolkit</tspan>, <tspan class="class">AdapterRegistry</tspan></text>
+      <rect x="0" y="-15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;495.0;495.0" keyTimes="0; 0.0000; 0.0495; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="-12" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;495.0;495.0" keyTimes="0; 0.0000; 0.0495; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.0000; 0.0585; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="30"><tspan class="keyword">from</tspan> <tspan class="module">zynthe.core.quant</tspan> <tspan class="keyword">import</tspan> <tspan class="func">apply_ptq</tspan></text>
+      <rect x="0" y="15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;351.0;351.0" keyTimes="0; 0.0585; 0.0936; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="18" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;351.0;351.0" keyTimes="0; 0.0585; 0.0936; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.0585; 0.1026; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="60"><tspan class="keyword">from</tspan> <tspan class="module">zynthe</tspan> <tspan class="keyword">import</tspan> <tspan class="class">PreflightAnalyzer</tspan>, <tspan class="class">ModelComparator</tspan></text>
+      <rect x="0" y="45" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;477.0;477.0" keyTimes="0; 0.1026; 0.1503; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="48" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;477.0;477.0" keyTimes="0; 0.1026; 0.1503; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.1026; 0.1593; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+  </g>
+  <g transform="translate(20, 60)" class="text" visibility="hidden">
+    <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.2043; 0.3717; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      <text x="0" y="0"><tspan class="comment"># 1. Hardware &amp; Config Preflight</tspan></text>
+      <rect x="0" y="-15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;324.0;324.0" keyTimes="0; 0.2043; 0.2367; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="-12" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;324.0;324.0" keyTimes="0; 0.2043; 0.2367; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.2043; 0.2457; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="30"><tspan>analyzer</tspan> = <tspan class="class">PreflightAnalyzer</tspan>(config)</text>
+      <rect x="0" y="15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;324.0;324.0" keyTimes="0; 0.2457; 0.2781; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="18" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;324.0;324.0" keyTimes="0; 0.2457; 0.2781; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.2457; 0.2871; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="60"><tspan>analyzer</tspan>.<tspan class="func">run_checks</tspan>(device=<tspan class="string">"cuda"</tspan>)</text>
+      <rect x="0" y="45" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;306.0;306.0" keyTimes="0; 0.2871; 0.3177; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="48" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;306.0;306.0" keyTimes="0; 0.2871; 0.3177; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.2871; 0.3267; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+  </g>
+  <g transform="translate(20, 60)" class="text" visibility="hidden">
+    <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.3717; 0.5068; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      <text x="0" y="0"><tspan class="comment"># 2. Modality-Agnostic Model Wrapping</tspan></text>
+      <rect x="0" y="-15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;333.0;333.0" keyTimes="0; 0.3717; 0.4050; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="-12" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;333.0;333.0" keyTimes="0; 0.3717; 0.4050; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.3717; 0.4140; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="30"><tspan>adapter</tspan> = <tspan class="class">AdapterRegistry</tspan>().<tspan class="func">detect</tspan>(teacher)</text>
+      <rect x="0" y="15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;387.0;387.0" keyTimes="0; 0.4140; 0.4527; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="18" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;387.0;387.0" keyTimes="0; 0.4140; 0.4527; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.4140; 0.4617; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+  </g>
+  <g transform="translate(20, 60)" class="text" visibility="hidden">
+    <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.5068; 0.6868; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      <text x="0" y="0"><tspan class="comment"># 3. Multi-Stage Distillation Pipeline</tspan></text>
+      <rect x="0" y="-15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;342.0;342.0" keyTimes="0; 0.5068; 0.5410; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="-12" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;342.0;342.0" keyTimes="0; 0.5068; 0.5410; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.5068; 0.5500; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="30"><tspan>toolkit</tspan> = <tspan class="class">DistillationToolkit</tspan>(teacher, student)</text>
+      <rect x="0" y="15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;423.0;423.0" keyTimes="0; 0.5500; 0.5923; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="18" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;423.0;423.0" keyTimes="0; 0.5500; 0.5923; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.5500; 0.6013; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="60"><tspan>toolkit</tspan>.<tspan class="func">run</tspan>(goal=<tspan class="string">"compression_max"</tspan>)</text>
+      <rect x="0" y="45" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;315.0;315.0" keyTimes="0; 0.6013; 0.6328; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="48" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;315.0;315.0" keyTimes="0; 0.6013; 0.6328; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.6013; 0.6418; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+  </g>
+  <g transform="translate(20, 60)" class="text" visibility="hidden">
+    <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.6868; 0.8677; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      <text x="0" y="0"><tspan class="comment"># 4. Teacher vs Student Comparison</tspan></text>
+      <rect x="0" y="-15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;306.0;306.0" keyTimes="0; 0.6868; 0.7174; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="-12" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;306.0;306.0" keyTimes="0; 0.6868; 0.7174; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.6868; 0.7264; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="30"><tspan>comparator</tspan> = <tspan class="class">ModelComparator</tspan>(teacher, student)</text>
+      <rect x="0" y="15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;414.0;414.0" keyTimes="0; 0.7264; 0.7678; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="18" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;414.0;414.0" keyTimes="0; 0.7264; 0.7678; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.7264; 0.7768; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="60"><tspan>comparator</tspan>.<tspan class="func">evaluate</tspan>(save_dir=<tspan class="string">"./results"</tspan>)</text>
+      <rect x="0" y="45" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;369.0;369.0" keyTimes="0; 0.7768; 0.8137; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="48" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;369.0;369.0" keyTimes="0; 0.7768; 0.8137; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.7768; 0.8227; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+  </g>
+  <g transform="translate(20, 60)" class="text" visibility="hidden">
+    <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.8677; 1.0000; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      <text x="0" y="0"><tspan class="comment"># 5. Post-Training Quantization</tspan></text>
+      <rect x="0" y="-15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;279.0;279.0" keyTimes="0; 0.8677; 0.8956; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="-12" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;279.0;279.0" keyTimes="0; 0.8677; 0.8956; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.8677; 0.9046; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <text x="0" y="30"><tspan>quantized</tspan> = <tspan class="func">apply_ptq</tspan>(student, mode=<tspan class="string">"dynamic"</tspan>)</text>
+      <rect x="0" y="15" width="800" height="30" fill="#282C34">
+        <animate attributeName="x" values="0;0;414.0;414.0" keyTimes="0; 0.9046; 0.9460; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+      <rect class="cursor" x="0" y="18" width="9" height="18" fill="#528BFF" visibility="hidden">
+        <animate attributeName="x" values="0;0;414.0;414.0" keyTimes="0; 0.9046; 0.9460; 1" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+        <animate attributeName="visibility" values="hidden;visible;hidden;hidden" keyTimes="0; 0.9046; 0.9550; 1" calcMode="discrete" begin="0s" dur="44.440000000000005s" repeatCount="indefinite" />
+      </rect>
+  </g>
+
+</svg>
