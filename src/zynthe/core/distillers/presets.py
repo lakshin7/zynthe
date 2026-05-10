@@ -405,6 +405,62 @@ PRESET_LIBRARY: OrderedDictType[str, PresetConfig] = OrderedDict(
                 "max_length": 512,
             },
         },
+        "multimodal": {
+            "description": "Contrastive dual-encoder distillation for CLIP-style vision-language models.",
+            "distillation": {
+                "multi_stage": True,
+                "loss_schedule": {"alpha": 0.7, "beta": 0.6, "gamma": 0.4},
+                "stages": [
+                    {
+                        "name": "Stage 1 - Embedding Alignment",
+                        "type": "feature",
+                        "epochs": 3,
+                        "config": {
+                            "feature_distillation": {
+                                "metrics": ["cosine", "l2"],
+                                "metric_weights": {"cosine": 1.0, "l2": 0.5},
+                                "auto_align": True,
+                                "auto_layers": "last",
+                                "auto_layer_count": 2,
+                                "contrastive_temperature": 0.07,
+                            }
+                        },
+                    },
+                    {
+                        "name": "Stage 2 - Relational Similarity",
+                        "type": "similarity",
+                        "epochs": 3,
+                        "depends_on": [1],
+                        "config": {
+                            "similarity_metric": "cosine",
+                            "weight": 0.6,
+                            "kd_weight": 0.2,
+                            "progressive": True,
+                            "progressive_epochs": 2,
+                            "layers": ["hidden:-1", "hidden:-2"],
+                        },
+                    },
+                    {
+                        "name": "Stage 3 - Attention Alignment",
+                        "type": "attention",
+                        "epochs": 2,
+                        "depends_on": [2],
+                        "config": {
+                            "attention_transfer": {
+                                "type": ["self", "relational"],
+                                "weight": 0.4,
+                                "temperature": 1.2,
+                                "auto_detect_layers": True,
+                                "use_attention_rollout": True,
+                                "use_dual_matching": True,
+                                "entropy_regularizer": 0.02,
+                            }
+                        },
+                    },
+                ],
+            },
+            "training": {"epochs": 8},
+        },
         "compression_max": {
             "description": "Aggressive compression with similarity, attention, and optional QAT.",
             "distillation": {

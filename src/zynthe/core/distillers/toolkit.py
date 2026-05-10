@@ -35,6 +35,10 @@ class DistillationToolkit:
         "baseline": "quick_start",
         "balanced": "balanced",
         "default": "balanced",
+        "text": "balanced",
+        "nlp": "balanced",
+        "code": "balanced",
+        "bert": "balanced",
         "all": "all_distillers_t4",
         "all_distillers": "all_distillers_t4",
         "full": "all_distillers_t4",
@@ -49,6 +53,10 @@ class DistillationToolkit:
         "interpretability": "vision_transformer",
         "compression": "compression_max",
         "aggressive": "compression_max",
+        "multimodal": "multimodal",
+        "clip": "multimodal",
+        "vlm": "multimodal",
+        "vision_language": "multimodal",
     }
 
     def __init__(
@@ -308,4 +316,72 @@ class DistillationToolkit:
         return merged
 
 
-__all__ = ["DistillationToolkit"]
+class Distiller:
+    """Beginner-friendly one-shot wrapper around :class:`DistillationToolkit`.
+
+    This is a simpler interface that mirrors the pattern common in popular
+    ML libraries (scikit-learn, fastai), letting users get started without
+    knowing about presets or plans::
+
+        from zynthe import Distiller
+
+        distiller = Distiller(teacher, student, goal="balanced")
+        distiller.fit(train_loader, val_loader, epochs=3)
+
+    Args:
+        teacher: Pre-trained teacher model.
+        student: Student model to be distilled.
+        goal: High-level training goal. One of 'quick', 'balanced', 'compression',
+            'vision', 'causal_lm', 'multimodal', 'clip'. Defaults to 'balanced'.
+        device: Device string ('cuda', 'cpu', 'mps'). Auto-detected if None.
+    """
+
+    def __init__(self, teacher, student, goal: str = "balanced", device=None):
+        self._toolkit = DistillationToolkit(teacher, student, device=device)
+        self._goal = goal
+
+    def fit(
+        self,
+        train_loader,
+        val_loader=None,
+        *,
+        epochs: int = None,
+        output_dir: str = "./distill_output",
+    ):
+        """Train the student model using knowledge distillation.
+
+        Args:
+            train_loader: PyTorch DataLoader for training data.
+            val_loader: Optional PyTorch DataLoader for validation data.
+            epochs: Override the number of training epochs from the preset.
+            output_dir: Directory to save checkpoints and reports.
+
+        Returns:
+            Training report dict with metrics and best_model_path.
+        """
+        overrides = {}
+        if epochs is not None:
+            overrides["training"] = {"epochs": epochs}
+            overrides["train"] = {"epochs": epochs}
+
+        plan = self._toolkit.build_plan(
+            goal=self._goal,
+            overrides=overrides if overrides else None,
+        )
+        return self._toolkit.run(
+            plan=plan,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            output_dir=output_dir,
+        )
+
+    def evaluate(self, val_loader, **kwargs):
+        """Evaluate the distilled student model."""
+        return self._toolkit.evaluate(val_loader, **kwargs)
+
+    def compare(self, val_loader, **kwargs):
+        """Compare teacher vs student side-by-side."""
+        return self._toolkit.compare(val_loader, **kwargs)
+
+
+__all__ = ["DistillationToolkit", "Distiller"]

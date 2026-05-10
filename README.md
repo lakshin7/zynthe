@@ -81,8 +81,9 @@ Zynthé uses a modular, plugin-based architecture:
 
 ## 📚 Documentation
 
+- [Usage Guide](docs/usage_guide.md) — Full examples for Text, Code, Vision, CLIP, and GPT models.
 - [Quickstart Guide](docs/quickstart.md) — Get up and running in minutes.
-- [API Reference](docs/api_reference.md) — Comprehensive guide to the 44 public API symbols.
+- [API Reference](docs/api_reference.md) — Comprehensive guide to the 44+ public API symbols.
 - [Adapters System](docs/adapters.md) — How to add custom model architectures.
 - [Kaggle Examples](examples/kaggle_t4_test.py) — End-to-end notebooks for T4/P100 environments.
 

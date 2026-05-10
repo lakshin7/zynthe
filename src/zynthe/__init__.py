@@ -43,7 +43,7 @@ __version__ = "0.2.4"
 # ---------------------------------------------------------------------------
 # Primary user-facing API
 # ---------------------------------------------------------------------------
-from zynthe.core.distillers.toolkit import DistillationToolkit
+from zynthe.core.distillers.toolkit import DistillationToolkit, Distiller
 
 # ---------------------------------------------------------------------------
 # Distillation methods
