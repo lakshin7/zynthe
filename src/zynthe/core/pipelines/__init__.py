@@ -28,6 +28,9 @@ Usage:
         .build(teacher, student, device)
 """
 
+from __future__ import annotations
+
+
 from .base_pipeline import BasePipeline, PipelineMetrics
 from .single_distiller_pipeline import SingleDistillerPipeline
 from .pipeline_registry import PipelineRegistry, get_registry

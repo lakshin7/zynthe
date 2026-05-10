@@ -1,5 +1,8 @@
 """Projection head utilities for distillation and representation tasks."""
 
+from __future__ import annotations
+
+
 from typing import Callable, Dict, Optional, Type
 
 import torch

@@ -29,6 +29,9 @@ Reference:
 - Romero et al., "FitNets: Hints for Thin Deep Nets" (2015)
 """
 
+from __future__ import annotations
+
+
 from typing import Dict, List, Optional, Tuple, Any
 import logging
 import torch

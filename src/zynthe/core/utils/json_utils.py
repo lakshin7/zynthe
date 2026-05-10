@@ -2,6 +2,9 @@
 JSON serialization utilities for handling numpy arrays and other non-serializable types.
 """
 
+from __future__ import annotations
+
+
 import numpy as np
 from typing import Any
 

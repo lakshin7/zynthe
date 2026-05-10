@@ -1,3 +1,6 @@
+
+from __future__ import annotations
+
 import copy
 import csv
 from datetime import datetime
@@ -30,6 +33,8 @@ import inspect
 import json
 import time
 import logging
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
 import numpy as np
@@ -77,10 +82,9 @@ class Trainer:
             LOG.warning("   1. Use a task-specific fine-tuned teacher model, OR")
             LOG.warning("   2. Enable teacher training: set train_teacher: true in config")
             LOG.warning("=" * 80)
-            print(f"\n  WARNING: Using base model '{teacher_model_name}' as teacher.")
-            print("   This may result in poor distillation. Consider using a fine-tuned model.")
-            print("   See logs for recommendations.\n")
-        
+            logger.info(f"\n  WARNING: Using base model '{teacher_model_name}' as teacher.")
+            logger.info("   This may result in poor distillation. Consider using a fine-tuned model.")
+            logger.info("   See logs for recommendations.\n")
         # ========== END TEACHER MODEL VALIDATION ==========
         
         # ========== PERFORMANCE OPTIMIZATIONS ==========
@@ -91,13 +95,11 @@ class Trainer:
         scaler_device = 'cuda' if device.type == 'cuda' else 'cpu'
         self.scaler = GradScaler(device=scaler_device, enabled=self.use_amp) if self.use_amp else None
         if self.use_amp:
-            print("[OPTIMIZATION] Mixed Precision Training (AMP) enabled - expect 2-3x speedup")
-        
+            logger.info("[OPTIMIZATION] Mixed Precision Training (AMP) enabled - expect 2-3x speedup")
         # 2. Gradient Accumulation - simulate larger batch sizes
         self.gradient_accumulation_steps = int(train_cfg.get('gradient_accumulation_steps', train_cfg.get('grad_accum_steps', 1)))
         if self.gradient_accumulation_steps > 1:
-            print(f"[OPTIMIZATION] Gradient Accumulation enabled ({self.gradient_accumulation_steps} steps) - effective batch size x{self.gradient_accumulation_steps}")
-        
+            logger.info(f"[OPTIMIZATION] Gradient Accumulation enabled ({self.gradient_accumulation_steps} steps) - effective batch size x{self.gradient_accumulation_steps}")
         # 3. Model Compilation - DISABLED for type safety
         # torch.compile() is powerful but causes type inference issues
         # Users can manually compile models before passing to Trainer if needed
@@ -107,11 +109,10 @@ class Trainer:
         self.websocket_callback = websocket_callback
         self.update_frequency = self.config['train'].get('update_frequency', 10)  # Update every N batches
         if self.websocket_callback:
-            print(f"[OPTIMIZATION] Live metrics streaming enabled (update every {self.update_frequency} batches)")
-        
+            logger.info(f"[OPTIMIZATION] Live metrics streaming enabled (update every {self.update_frequency} batches)")
         # 5. Mac M2 specific optimizations
         if device.type == 'mps':
-            print("[OPTIMIZATION] Mac M2 MPS backend detected - applying optimizations")
+            logger.info("[OPTIMIZATION] Mac M2 MPS backend detected - applying optimizations")
             # Set MPS memory fraction to avoid OOM
             if hasattr(torch.mps, 'set_per_process_memory_fraction'):
                 torch.mps.set_per_process_memory_fraction(0.8)
@@ -158,14 +159,14 @@ class Trainer:
         if pipeline is not None:
             # Pipeline passed directly by caller
             self.pipeline = pipeline
-            print(f"[TRAINER] Using pipeline: {pipeline.name}")
+            logger.info(f"[TRAINER] Using pipeline: {pipeline.name}")
         else:
             distil_cfg = self.config.get('distillation', {}) or {}
             pipeline_cfg = distil_cfg.get('pipeline', {})
             
             if pipeline_cfg and pipeline_cfg.get('type') in ['multi_stage', 'multistage', 'multi']:
                 # Config requests a multi-stage pipeline
-                print("[TRAINER] Building pipeline from configuration...")
+                logger.info("[TRAINER] Building pipeline from configuration...")
                 from zynthe.core.pipelines import PipelineBuilder
                 self.pipeline = PipelineBuilder.from_config(
                     self.config,
@@ -173,7 +174,7 @@ class Trainer:
                     self.student,
                     self.device
                 )
-                print(f"[TRAINER] Pipeline built: {self.pipeline.name}")
+                logger.info(f"[TRAINER] Pipeline built: {self.pipeline.name}")
             else:
                 # Legacy distiller → auto-wrap in SingleDistillerPipeline
                 from zynthe.core.distillers.multi_stage_distiller import DistillerRegistry  # noqa: F811
@@ -229,8 +230,7 @@ class Trainer:
                     distiller,
                     name=f"AutoWrapped_{distiller_class.__name__}",
                 )
-                print(f"[TRAINER] Distiller '{distiller_type}' auto-wrapped in pipeline")
-        
+                logger.info(f"[TRAINER] Distiller '{distiller_type}' auto-wrapped in pipeline")
         # Ensure pipeline is set up
         if not self.pipeline._is_setup:
             self.pipeline.setup()
@@ -385,9 +385,9 @@ class Trainer:
                 self._csv_writer = csv.DictWriter(self._csv_file_handle, fieldnames=self._csv_fieldnames)
                 if init_file:
                     self._csv_writer.writeheader()
-                print(f"[LOG] Detailed batch CSV logging enabled -> {self._csv_path}")
+                logger.info(f"[LOG] Detailed batch CSV logging enabled -> {self._csv_path}")
             except Exception as e:
-                print(f"[WARNING] Failed to initialize CSV logger: {e}")
+                logger.warning(f"[WARNING] Failed to initialize CSV logger: {e}")
                 self.csv_logging = False
 
         # Teacher metrics history for comparison plot later
@@ -429,7 +429,7 @@ class Trainer:
             console_msg += f" ETA={eta_s:.1f}s"
         console_msg += f" {'[TEACHER]' if is_teacher else '[STUDENT]'}"
         if (batch_idx + 1) % self.batch_log_interval == 0 or batch_idx == 0 or (batch_idx + 1) == batches_total:
-            print(console_msg)
+            logger.info(console_msg)
         # CSV row
         if self._csv_writer:
             try:
@@ -685,7 +685,7 @@ class Trainer:
                 if not hasattr(self, '_param_warnings'):
                     self._param_warnings = set()
                 if key not in self._param_warnings:
-                    print(f"[DEBUG] Parameter '{key}' not supported by model, filtering out")
+                    logger.debug(f"[DEBUG] Parameter '{key}' not supported by model, filtering out")
                     self._param_warnings.add(key)
         return filtered_batch
 
@@ -916,12 +916,12 @@ class Trainer:
         
         for batch_idx, batch in enumerate(dataloader):
             if not batch or not isinstance(batch, dict):
-                print(f"[WARNING] Skipping empty or malformed batch at index {batch_idx}")
+                logger.warning(f"[WARNING] Skipping empty or malformed batch at index {batch_idx}")
                 continue
             try:
                 batch = {k: v.to(self.device) for k, v in batch.items() if hasattr(v, 'to')}
             except Exception as e:
-                print(f"[WARNING] Failed to move batch to device at index {batch_idx}: {e}")
+                logger.warning(f"[WARNING] Failed to move batch to device at index {batch_idx}: {e}")
                 continue
             
             # Filter batch for each model's specific requirements
@@ -941,13 +941,13 @@ class Trainer:
                         try:
                             teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                         except Exception as e:
-                            print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
+                            logger.warning(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
                             continue
                 else:
                     try:
                         teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                     except Exception as e:
-                        print(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
+                        logger.warning(f"[WARNING] Teacher forward pass failed at batch {batch_idx}: {e}")
                         continue
             
             if self.use_amp and self.device.type != 'mps':
@@ -955,7 +955,7 @@ class Trainer:
                     try:
                         student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                     except Exception as e:
-                        print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
+                        logger.warning(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
                         continue
                         
                     labels = batch.get('labels', None)
@@ -973,18 +973,18 @@ class Trainer:
                         loss = loss / self.gradient_accumulation_steps
                             
                     except Exception as e:
-                        print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
+                        logger.warning(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
                         fallback_loss = self._compute_supervised_fallback_loss(student_outputs, labels)
                         if fallback_loss is None:
-                            print(f"[WARNING] Skipping batch {batch_idx}: no valid fallback loss")
+                            logger.warning(f"[WARNING] Skipping batch {batch_idx}: no valid fallback loss")
                             continue
                         loss = fallback_loss / self.gradient_accumulation_steps
-                        print(f"[INFO] Using supervised fallback loss at batch {batch_idx}")
+                        logger.info(f"[INFO] Using supervised fallback loss at batch {batch_idx}")
             else:
                 try:
                     student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                 except Exception as e:
-                    print(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
+                    logger.warning(f"[WARNING] Student forward pass failed at batch {batch_idx}: {e}")
                     continue
                     
                 labels = batch.get('labels', None)
@@ -1001,14 +1001,13 @@ class Trainer:
                     # Scale loss for gradient accumulation
                     loss = loss / self.gradient_accumulation_steps
                 except Exception as e:
-                    print(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
+                    logger.warning(f"[WARNING] Loss computation failed at batch {batch_idx}: {e}")
                     fallback_loss = self._compute_supervised_fallback_loss(student_outputs, labels)
                     if fallback_loss is None:
-                        print(f"[WARNING] Skipping batch {batch_idx}: no valid fallback loss")
+                        logger.warning(f"[WARNING] Skipping batch {batch_idx}: no valid fallback loss")
                         continue
                     loss = fallback_loss / self.gradient_accumulation_steps
-                    print(f"[INFO] Using supervised fallback loss at batch {batch_idx}")
-            
+                    logger.info(f"[INFO] Using supervised fallback loss at batch {batch_idx}")
             # ========== GRADIENT ACCUMULATION ==========
             # Accumulate gradients over multiple batches
             if self.use_amp and self.scaler:
@@ -1041,8 +1040,7 @@ class Trainer:
                 if batch_idx % 100 == 0 and grad_norm > 0:
                     grad_stats = GradientManager.get_gradient_stats(self.student)
                     if grad_stats['grad_norm'] > 10.0:  # Warn about potential gradient explosion
-                        print(f"[WARN] Large gradient detected: norm={grad_stats['grad_norm']:.2f}, mean={grad_stats['grad_mean']:.4f}")
-                
+                        logger.warning(f"[WARN] Large gradient detected: norm={grad_stats['grad_norm']:.2f}, mean={grad_stats['grad_mean']:.4f}")
                 # Step optimizer with AMP scaler
                 if self.use_amp and self.scaler:
                     self.scaler.step(self.optimizer)
@@ -1078,8 +1076,7 @@ class Trainer:
                 try:
                     self.websocket_callback(metrics_payload)
                 except Exception as e:
-                    print(f"[WARNING] WebSocket callback failed: {e}")
-            
+                    logger.warning(f"[WARNING] WebSocket callback failed: {e}")
             # ========== BATCH-LEVEL PROGRESS LOGGING ==========
             # Log detailed training progress every 10 batches
             if (batch_idx + 1) % 10 == 0:
@@ -1139,7 +1136,7 @@ class Trainer:
             )
         except Exception as e:
             LOG.warning(f"Failed to plot student micro-series for epoch {len(self.train_losses)}: {e}")
-        print(f"[TRAIN] Epoch training completed. Average Loss: {avg_loss:.4f}")
+        logger.info(f"[TRAIN] Epoch training completed. Average Loss: {avg_loss:.4f}")
         return avg_loss
 
     def evaluate(self, dataloader, compute_extended=True) -> EvaluationReport:
@@ -1189,13 +1186,13 @@ class Trainer:
         with torch.no_grad():
             for batch_idx, batch in enumerate(dataloader):
                 if not batch or not isinstance(batch, dict):
-                    print(f"[WARNING] Skipping empty or malformed batch at index {batch_idx} during evaluation")
+                    logger.warning(f"[WARNING] Skipping empty or malformed batch at index {batch_idx} during evaluation")
                     failed_batches += 1
                     continue
                 try:
                     batch = {k: v.to(self.device) for k, v in batch.items() if hasattr(v, 'to')}
                 except Exception as e:
-                    print(f"[WARNING] Failed to move batch to device at index {batch_idx} during evaluation: {e}")
+                    logger.warning(f"[WARNING] Failed to move batch to device at index {batch_idx} during evaluation: {e}")
                     failed_batches += 1
                     continue
                 
@@ -1209,14 +1206,14 @@ class Trainer:
                 try:
                     teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                 except Exception as e:
-                    print(f"[WARNING] Teacher forward pass failed at batch {batch_idx} during evaluation: {e}")
+                    logger.warning(f"[WARNING] Teacher forward pass failed at batch {batch_idx} during evaluation: {e}")
                     failed_batches += 1
                     continue
                 forward_start = time.perf_counter()
                 try:
                     student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                 except Exception as e:
-                    print(f"[WARNING] Student forward pass failed at batch {batch_idx} during evaluation: {e}")
+                    logger.warning(f"[WARNING] Student forward pass failed at batch {batch_idx} during evaluation: {e}")
                     failed_batches += 1
                     continue
                 batch_latency = (time.perf_counter() - forward_start) * 1000.0
@@ -1238,7 +1235,7 @@ class Trainer:
                     )
                         
                 except Exception as e:
-                    print(f"[WARNING] Loss computation failed at batch {batch_idx} during evaluation: {e}")
+                    logger.warning(f"[WARNING] Loss computation failed at batch {batch_idx} during evaluation: {e}")
                     loss = torch.tensor(0.0, device=self.device)
                     
                 total_loss += loss.item()
@@ -1445,7 +1442,7 @@ class Trainer:
                     pred_probs_np,
                 )
             except Exception as e:
-                print(f"[WARNING] Metric computation failed during evaluation: {e}")
+                logger.warning(f"[WARNING] Metric computation failed during evaluation: {e}")
                 LOG.error(f"Metric computation failed: {e}", exc_info=True)
         
         # Compute extended metrics if enabled
@@ -1474,8 +1471,7 @@ class Trainer:
                 print(f"[EXTENDED] KL: {extended_metrics['kl_divergence']:.4f}, "
                       f"Agreement: {extended_metrics['prediction_agreement']:.2%}")
             except Exception as e:
-                print(f"[WARNING] Extended metrics computation failed: {e}")
-        
+                logger.warning(f"[WARNING] Extended metrics computation failed: {e}")
         if latency_ms:
             lat_arr = np.asarray(latency_ms, dtype=np.float64)
             runtime_snapshot = {
@@ -1500,7 +1496,7 @@ class Trainer:
         if calibration_payload:
             self.eval_calibration_history.append(calibration_payload)
 
-        print(f"[EVAL] Evaluation completed. Average Loss: {avg_loss:.4f}, Metrics: {metrics if metrics else 'N/A'}")
+        logger.info(f"[EVAL] Evaluation completed. Average Loss: {avg_loss:.4f}, Metrics: {metrics if metrics else 'N/A'}")
         if diagnostics.get('warnings'):
             LOG.info(f"Evaluation diagnostics flagged: {diagnostics['warnings']}")
 
@@ -1642,8 +1638,7 @@ class Trainer:
             
             scheduler_factory = SchedulerFactory(self.optimizer, self.config['train'])
             self.scheduler = scheduler_factory.get_scheduler(num_training_steps=total_steps)
-            print(f"[INFO] Scheduler initialized: {type(self.scheduler).__name__}")
-            
+            logger.info(f"[INFO] Scheduler initialized: {type(self.scheduler).__name__}")
             # FIX: Log initial LR to verify scheduler is working
             initial_lr = self.optimizer.param_groups[0]['lr']
             LOG.info(f"  Initial learning rate: {initial_lr:.2e}")
@@ -1657,22 +1652,21 @@ class Trainer:
 
         # Optional: Train teacher first if configured
         if self.should_train_teacher:
-            print("\n" + "=" * 70)
-            print("PHASE 2.5: Fine-tuning Teacher Model")
-            print("=" * 70 + "\n")
-            print(f"[INFO] Training teacher for {self.teacher_epochs} epochs before distillation...")
+            logger.info("\n" + "=" * 70)
+            logger.info("PHASE 2.5: Fine-tuning Teacher Model")
+            logger.info("=" * 70 + "\n")
+            logger.info(f"[INFO] Training teacher for {self.teacher_epochs} epochs before distillation...")
             self._train_teacher(train_loader, val_loader)
-            print("[INFO] Teacher training completed. Starting distillation...\n")
-        
+            logger.info("[INFO] Teacher training completed. Starting distillation...\n")
         metrics_history = []
         epochs = self.config['train']['epochs']
         start_epoch = int(max(0, self.resume_epoch))
         if start_epoch >= epochs:
-            print(f"[INFO] Resume epoch {start_epoch} is >= configured epochs ({epochs}); skipping training loop.")
+            logger.info(f"[INFO] Resume epoch {start_epoch} is >= configured epochs ({epochs}); skipping training loop.")
         else:
-            print(f"[INFO] Training started for {epochs} epochs (starting at epoch {start_epoch + 1}).")
+            logger.info(f"[INFO] Training started for {epochs} epochs (starting at epoch {start_epoch + 1}).")
         for epoch in range(start_epoch, epochs):
-            print(f"[INFO] Starting epoch {epoch+1}/{epochs}")
+            logger.info(f"[INFO] Starting epoch {epoch+1}/{epochs}")
             train_loss = self.train_epoch(train_loader)
             val_report = self.evaluate(val_loader, compute_extended=True)
             val_loss = val_report.loss if val_report.loss is not None else float(val_report.metrics.get('loss', 0.0))
@@ -1706,7 +1700,7 @@ class Trainer:
             if val_details.get('diagnostics'):
                 diag = val_details['diagnostics']
                 if diag.get('warnings'):
-                    print(f"[DIAGNOSTICS] Evaluation warnings: {diag['warnings']}")
+                    logger.info(f"[DIAGNOSTICS] Evaluation warnings: {diag['warnings']}")
             if val_details.get('runtime'):
                 runtime_snapshot = val_details['runtime']
                 if runtime_snapshot:
@@ -1721,8 +1715,7 @@ class Trainer:
                 if cal and isinstance(cal, dict):
                     brier_score = cal.get('brier_score')
                     if brier_score is not None:
-                        print(f"[CALIBRATION] Brier score: {float(brier_score):.4f}")
-
+                        logger.info(f"[CALIBRATION] Brier score: {float(brier_score):.4f}")
             numeric_metrics = {
                 k: float(v)
                 for k, v in (val_details.get('metrics') or {}).items()
@@ -1731,8 +1724,7 @@ class Trainer:
             epoch_record.update(numeric_metrics)
             metrics_history.append(epoch_record)
 
-            print(f"[INFO] Epoch {epoch+1} summary: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, Metrics={val_metrics_dict}")
-
+            logger.info(f"[INFO] Epoch {epoch+1} summary: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, Metrics={val_metrics_dict}")
             # Step scheduler only for epoch-based schedulers (ReduceLROnPlateau)
             if self.scheduler is not None:
                 scheduler_name = type(self.scheduler).__name__
@@ -1745,24 +1737,22 @@ class Trainer:
             if hasattr(self, 'adaptive_opt') and extended:
                 actions = self.adaptive_opt.auto_tune(extended, epoch=epoch+1)
                 if actions:
-                    print(f"[ADAPTIVE] LR tuning actions: {', '.join(actions)}")
-            
+                    logger.info(f"[ADAPTIVE] LR tuning actions: {', '.join(actions)}")
             # Log current learning rate
             current_lr = self.optimizer.param_groups[0]['lr']
-            print(f"[INFO] Current learning rate: {current_lr:.6e}")
-
+            logger.info(f"[INFO] Current learning rate: {current_lr:.6e}")
             early_stop_triggered = False
             # Early stopping
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 self.best_model_state = copy.deepcopy(self.student.state_dict())
                 self.no_improve_epochs = 0
-                print(f"[INFO] Validation loss improved to {val_loss:.4f}. Saving best model state.")
+                logger.info(f"[INFO] Validation loss improved to {val_loss:.4f}. Saving best model state.")
             else:
                 self.no_improve_epochs += 1
-                print(f"[INFO] No improvement in validation loss for {self.no_improve_epochs} epoch(s).")
+                logger.info(f"[INFO] No improvement in validation loss for {self.no_improve_epochs} epoch(s).")
                 if self.no_improve_epochs >= self.early_stop_patience:
-                    print(f"[INFO] Early stopping triggered after {self.no_improve_epochs} epochs without improvement.")
+                    logger.info(f"[INFO] Early stopping triggered after {self.no_improve_epochs} epochs without improvement.")
                     early_stop_triggered = True
 
             guard_triggered = self._maybe_trigger_overfit_guard(epoch + 1, train_loader=train_loader)
@@ -1790,8 +1780,7 @@ class Trainer:
                     best_metric=(val_metrics_dict.get('accuracy') if isinstance(val_metrics_dict, dict) else None),
                     evaluation_report=val_report,
                 )
-                print(f"[INFO] Saved epoch {epoch+1} checkpoint to {ckpt_dir}")
-
+                logger.info(f"[INFO] Saved epoch {epoch+1} checkpoint to {ckpt_dir}")
         # Final summary
         self._summarize_training(metrics_history)
         
@@ -1802,8 +1791,7 @@ class Trainer:
                 self.val_losses,
                 self.metrics_history
             )
-            print(training_health)
-            
+            logger.info(training_health)
             # Save health analysis
             try:
                 health_path = os.path.join(self.experiment_dir, 'training_health.json')
@@ -1851,8 +1839,7 @@ class Trainer:
         # Restore best model and save
         if self.best_model_state:
             self.student.load_state_dict(self.best_model_state)
-            print('[INFO] Restored best model before saving.')
-            
+            logger.info('[INFO] Restored best model before saving.')
             # Save student model
             student_save_dir = os.path.join(self.experiment_dir, 'student_model')
             ModelSaver.save_training_run(
@@ -1863,8 +1850,7 @@ class Trainer:
                 metrics_history=self.metrics_history,
                 evaluation_report=getattr(self, 'final_report', None),
             )
-            print(f'[INFO] Student model and tokenizer saved to {student_save_dir}')
-            
+            logger.info(f'[INFO] Student model and tokenizer saved to {student_save_dir}')
             # Save teacher model for comparison
             teacher_save_dir = os.path.join(self.experiment_dir, 'teacher_model')
             ModelSaver.save_training_run(
@@ -1873,10 +1859,9 @@ class Trainer:
                 teacher_save_dir,
                 config=self.config,
             )
-            print(f'[INFO] Teacher model and tokenizer saved to {teacher_save_dir}')
+            logger.info(f'[INFO] Teacher model and tokenizer saved to {teacher_save_dir}')
         else:
-            print('[WARNING] No best model state found to restore.')
-
+            logger.info('[WARNING] No best model state found to restore.')
         # Plot once at the end safely
         agg_metrics = {k: self.metrics_history[k] for k in self.metrics_history.keys()}
         save_path = os.path.join(self.experiment_dir, 'training_curves.png')
@@ -1891,10 +1876,9 @@ class Trainer:
                 batch_val_losses=self.batch_val_losses,
                 batch_val_running_acc=self.batch_val_running_acc,
             )
-            print(f"[INFO] Training curves saved to {save_path}")
+            logger.info(f"[INFO] Training curves saved to {save_path}")
         except Exception as e:
-            print(f"[WARNING] Failed to plot training curves: {e}")
-
+            logger.warning(f"[WARNING] Failed to plot training curves: {e}")
         # Confusion matrices for teacher and student (if predictions available)
         try:
             # Student confusion matrix
@@ -1903,17 +1887,16 @@ class Trainer:
                 os.makedirs(student_cm_dir, exist_ok=True)
                 student_metrics = compute_all_metrics(self.last_preds, self.last_labels)
                 plot_metrics([student_metrics], student_cm_dir)
-                print(f"[CONFUSION] Student confusion matrix saved to {student_cm_dir}")
+                logger.info(f"[CONFUSION] Student confusion matrix saved to {student_cm_dir}")
             # Teacher confusion matrix
             if getattr(self, 'teacher_last_preds', None) and getattr(self, 'teacher_last_labels', None) and len(self.teacher_last_preds) == len(self.teacher_last_labels):
                 teacher_cm_dir = os.path.join(self.experiment_dir, 'teacher_confusion')
                 os.makedirs(teacher_cm_dir, exist_ok=True)
                 teacher_metrics = compute_all_metrics(self.teacher_last_preds, self.teacher_last_labels)
                 plot_metrics([teacher_metrics], teacher_cm_dir)
-                print(f"[CONFUSION] Teacher confusion matrix saved to {teacher_cm_dir}")
+                logger.info(f"[CONFUSION] Teacher confusion matrix saved to {teacher_cm_dir}")
         except Exception as e:
-            print(f"[WARNING] Failed to generate confusion matrices: {e}")
-
+            logger.warning(f"[WARNING] Failed to generate confusion matrices: {e}")
         if self.last_preds and self.last_labels and len(self.last_preds) == len(self.last_labels):
             try:
                 from zynthe.evaluation.metrics import compute_all_metrics as _cm_all  # type: ignore
@@ -1921,21 +1904,19 @@ class Trainer:
                 final_metrics = _cm_all(self.last_preds, self.last_labels)
                 if isinstance(final_metrics, dict):
                     _plot_metrics([final_metrics], self.experiment_dir)
-                    print(f"[INFO] Final metrics plotted and saved in {self.experiment_dir}")
+                    logger.info(f"[INFO] Final metrics plotted and saved in {self.experiment_dir}")
             except Exception as e:
-                print(f"[WARNING] Failed to plot final metrics: {e}")
+                logger.warning(f"[WARNING] Failed to plot final metrics: {e}")
         else:
-            print("[INFO] Skipping final metrics plotting due to missing or mismatched predictions and labels.")
-        
+            logger.info("[INFO] Skipping final metrics plotting due to missing or mismatched predictions and labels.")
         # Save extended metrics history
         try:
             extended_metrics_path = os.path.join(self.experiment_dir, 'extended_metrics.json')
             with open(extended_metrics_path, 'w') as f:
                 json.dump(self.extended_metrics_history, f, indent=2)
-            print(f"[INFO] Extended metrics saved to {extended_metrics_path}")
+            logger.info(f"[INFO] Extended metrics saved to {extended_metrics_path}")
         except Exception as e:
-            print(f"[WARNING] Failed to save extended metrics: {e}")
-
+            logger.warning(f"[WARNING] Failed to save extended metrics: {e}")
         # Evaluation dashboard is a core run artifact, not only a teacher-comparison artifact.
         if hasattr(self, 'final_report') and self.final_report:
             try:
@@ -1956,8 +1937,7 @@ class Trainer:
                 extended_plot_path = os.path.join(self.experiment_dir, 'extended_metrics.png')
                 plot_extended_metrics(self.final_report, extended_plot_path)
             except Exception as e:
-                print(f"[WARNING] Failed to generate evaluation dashboard artifacts: {e}")
-
+                logger.warning(f"[WARNING] Failed to generate evaluation dashboard artifacts: {e}")
         # Teacher vs Student comparison plot (if enabled and data exists)
         if self.enable_comparison_plot and self.teacher_epoch_losses and self.train_losses:
             try:
@@ -1982,10 +1962,9 @@ class Trainer:
                         save_path=gap_path
                     )
             except Exception as e:
-                print(f"[WARNING] Failed to plot teacher-student comparison: {e}")
-
+                logger.warning(f"[WARNING] Failed to plot teacher-student comparison: {e}")
     def _summarize_training(self, metrics_history):
-        print('\n[SUMMARY] Training Summary:')
+        logger.info('\n[SUMMARY] Training Summary:')
         for record in metrics_history:
             if not isinstance(record, dict):
                 continue
@@ -2060,8 +2039,7 @@ class Trainer:
         self.teacher_last_labels = []
         
         for epoch in range(self.teacher_epochs):
-            print(f"[TEACHER] Epoch {epoch+1}/{self.teacher_epochs}")
-            
+            logger.info(f"[TEACHER] Epoch {epoch+1}/{self.teacher_epochs}")
             # Training
             total_loss = 0.0
             num_batches = 0
@@ -2303,14 +2281,13 @@ class Trainer:
             if avg_val_loss < best_teacher_loss:
                 best_teacher_loss = avg_val_loss
                 best_teacher_state = copy.deepcopy(self.teacher.state_dict())
-                print(f"[TEACHER] Best model updated (val_loss={avg_val_loss:.4f})")
-            
+                logger.info(f"[TEACHER] Best model updated (val_loss={avg_val_loss:.4f})")
             self.teacher.train()
         
         # Restore best teacher
         if best_teacher_state:
             self.teacher.load_state_dict(best_teacher_state)
-            print(f"[TEACHER] Restored best teacher model (val_loss={best_teacher_loss:.4f})")
+            logger.info(f"[TEACHER] Restored best teacher model (val_loss={best_teacher_loss:.4f})")
         # After teacher training, plot aggregate training curves
         try:
             teacher_curve_path = os.path.join(self.experiment_dir, 'teacher_training_curves.png')
@@ -2324,10 +2301,9 @@ class Trainer:
                 batch_val_losses=self.teacher_batch_val_losses,
                 batch_val_running_acc=self.teacher_batch_val_running_acc,
             )
-            print(f"[TEACHER] Training curves saved to {teacher_curve_path}")
+            logger.info(f"[TEACHER] Training curves saved to {teacher_curve_path}")
         except Exception as e:
-            print(f"[WARNING] Failed to plot teacher training curves: {e}")
-
+            logger.warning(f"[WARNING] Failed to plot teacher training curves: {e}")
         # Set teacher back to eval mode for distillation
         self.teacher.eval()
         # Flush CSV
@@ -2362,8 +2338,7 @@ class Trainer:
         should_react = status in ('overfitting', 'mild_overfitting') and confidence >= cfg['confidence_threshold']
 
         if status in ('overfitting', 'mild_overfitting'):
-            print(f"[OVERFIT-GUARD] {status_label} detected at epoch {epoch_idx} (confidence {confidence:.2f}).")
-
+            logger.info(f"[OVERFIT-GUARD] {status_label} detected at epoch {epoch_idx} (confidence {confidence:.2f}).")
         event_record = {
             'epoch': epoch_idx,
             'status': status,
@@ -2387,8 +2362,8 @@ class Trainer:
                     'analysis': analysis,
                     'action': 'mitigation'
                 })
-                print(f"[OVERFIT-MITIGATION] Applied interventions: {', '.join(mitigation_actions)}.")
-                print("[OVERFIT-MITIGATION] Continuing training to measure impact before considering a halt.")
+                logger.info(f"[OVERFIT-MITIGATION] Applied interventions: {', '.join(mitigation_actions)}.")
+                logger.info("[OVERFIT-MITIGATION] Continuing training to measure impact before considering a halt.")
                 return False
 
             self.overfit_guard_state.update({
@@ -2403,9 +2378,9 @@ class Trainer:
             event_record['action'] = 'halt'
             self.overfit_guard_state['events'].append(event_record)
             if cfg['mode'] in ('early_stop', 'stop', 'halt'):
-                print("[OVERFIT-GUARD] Halting student training to prevent further overfitting.")
+                logger.info("[OVERFIT-GUARD] Halting student training to prevent further overfitting.")
                 return True
-            print("[OVERFIT-GUARD] Guard mode set to 'warn'; training will continue.")
+            logger.info("[OVERFIT-GUARD] Guard mode set to 'warn'; training will continue.")
             return False
 
         if status in ('overfitting', 'mild_overfitting'):
@@ -2431,11 +2406,10 @@ class Trainer:
         
         ckpt_path = Path(checkpoint_dir)
         if not ckpt_path.exists():
-            print(f"[WARNING] Checkpoint directory {checkpoint_dir} does not exist. Starting from scratch.")
+            logger.warning(f"[WARNING] Checkpoint directory {checkpoint_dir} does not exist. Starting from scratch.")
             return
             
-        print(f"[INFO] Resuming training from checkpoint: {checkpoint_dir}")
-        
+        logger.info(f"[INFO] Resuming training from checkpoint: {checkpoint_dir}")
         # Load model/tokenizer artifacts if present.
         try:
             model_file = ckpt_path / "pytorch_model.bin"
@@ -2443,13 +2417,12 @@ class Trainer:
                 model_file = ckpt_path / "model.safetensors"
 
             if model_file.exists():
-                print(f"[INFO] Loading model weights from {model_file}")
+                logger.info(f"[INFO] Loading model weights from {model_file}")
                 self.student = self.student.__class__.from_pretrained(str(ckpt_path)).to(self.device)
             else:
-                print(f"[WARNING] No model weights found in {checkpoint_dir}")
+                logger.warning(f"[WARNING] No model weights found in {checkpoint_dir}")
         except Exception as e:
-            print(f"[WARNING] Failed to load model weights from checkpoint: {e}")
-
+            logger.warning(f"[WARNING] Failed to load model weights from checkpoint: {e}")
         # Restore full optimizer/scheduler/scaler state when checkpoint payload exists.
         state_candidates = [
             ckpt_path / "checkpoint.pt",
@@ -2468,13 +2441,13 @@ class Trainer:
                     map_location=str(self.device),
                     strict=False,
                 )
-                print(f"[INFO] Restored optimizer/scheduler state from {state_path}")
+                logger.info(f"[INFO] Restored optimizer/scheduler state from {state_path}")
                 if isinstance(metadata, CheckpointMetadata):
                     self.best_val_loss = float(metadata.best_metric) if metadata.best_metric is not None else self.best_val_loss
                     self.resume_epoch = int(max(0, metadata.epoch))
                     self.resume_global_step = int(max(0, metadata.global_step))
                     if metadata.epoch > 0:
-                        print(f"[INFO] Resumed metadata: epoch={metadata.epoch}, step={metadata.global_step}")
+                        logger.info(f"[INFO] Resumed metadata: epoch={metadata.epoch}, step={metadata.global_step}")
                 else:
                     # Backward compatibility with legacy top-level checkpoint fields.
                     if isinstance(payload, dict):
@@ -2484,4 +2457,4 @@ class Trainer:
                         if isinstance(best_metric, (int, float)):
                             self.best_val_loss = float(best_metric)
             except Exception as e:
-                print(f"[WARNING] Failed to restore checkpoint training state: {e}")
+                logger.warning(f"[WARNING] Failed to restore checkpoint training state: {e}")

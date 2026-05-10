@@ -18,6 +18,9 @@ Supports:
 - Video: TimeSformer, VideoMAE, ViViT
 """
 
+from __future__ import annotations
+
+
 from typing import Dict, List, Optional, Any
 import torch.nn as nn
 from collections import defaultdict

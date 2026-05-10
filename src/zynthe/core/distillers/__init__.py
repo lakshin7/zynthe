@@ -1,5 +1,8 @@
 """Public distillation API surface."""
 
+from __future__ import annotations
+
+
 from .attention_transfer import AttentionTransferDistiller
 from .feature_distiller import FeatureDistiller
 from .kd_hinton import KDHintonDistiller

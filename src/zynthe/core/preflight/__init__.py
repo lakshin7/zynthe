@@ -28,7 +28,7 @@ Quick Start:
         # Start training...
     else:
         # Fix issues
-        print("Blockers:", report['blockers'])
+        logger.info("Blockers:", report['blockers'])
     ```
 
 Advanced Usage:
@@ -56,10 +56,16 @@ Advanced Usage:
     ```
 """
 
+from __future__ import annotations
+
+
 from .model_inspector import ModelInspector
 from .data_inspector import DataInspector
 from .resource_probe import ResourceProbe
 from .analyser import PreflightAnalyzer, run_preflight_check
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'ModelInspector',

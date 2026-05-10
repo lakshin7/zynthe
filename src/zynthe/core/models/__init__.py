@@ -1,5 +1,8 @@
 """Convenience exports for the models toolkit."""
 
+from __future__ import annotations
+
+
 from .model_loader import (
 	ModelBundle,
 	ModelLoader,

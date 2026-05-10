@@ -12,10 +12,15 @@ Load datasets directly from HuggingFace Hub with automatic:
 Author: Zynthé Team
 """
 
+from __future__ import annotations
+
+
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 from datasets import load_dataset, Dataset, DatasetDict
 
 LOG = logging.getLogger(__name__)

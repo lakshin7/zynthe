@@ -17,6 +17,9 @@ Supports:
 - Multimodal: VQA, Image Captioning, Video QA
 """
 
+from __future__ import annotations
+
+
 from typing import Dict, List, Tuple, Optional, Any
 import torch
 from torch.utils.data import Dataset

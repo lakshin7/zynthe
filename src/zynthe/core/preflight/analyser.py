@@ -24,8 +24,11 @@ Usage:
         optimized_config = report['optimized_config']
     else:
         # Fix issues
-        print(report['blockers'])
+        logger.info(report['blockers'])
 """
+
+from __future__ import annotations
+
 
 import math
 from typing import Dict, List, Optional, Any
@@ -46,6 +49,10 @@ try:  # Optional dependency on distiller presets
 except Exception:  # pragma: no cover - presets may be unavailable
     get_preset = None  # type: ignore
     list_presets = None  # type: ignore
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PreflightAnalyzer:
@@ -236,22 +243,22 @@ class PreflightAnalyzer:
         Returns:
             Comprehensive analysis report with go/no-go decision
         """
-        print("=" * 70)
-        print("RUNNING PREFLIGHT ANALYSIS")
-        print("=" * 70)
+        logger.info("=" * 70)
+        logger.info("RUNNING PREFLIGHT ANALYSIS")
+        logger.info("=" * 70)
         print()
         
         # 0. Config Validation (Phase 1.1 - NEW)
-        print("[CHECK] Validating configuration...")
+        logger.info("[CHECK] Validating configuration...")
         config_validation = self.validate_config()
         self.results['config_validation'] = config_validation
         
         if verbose:
-            print(self._format_config_validation(config_validation))
+            logger.info(self._format_config_validation(config_validation))
             print()
         
         if not config_validation['is_valid']:
-            print("[FAIL] Config validation failed. Cannot proceed.")
+            logger.error("[FAIL] Config validation failed. Cannot proceed.")
             return {
                 'timestamp': datetime.now().isoformat(),
                 'can_proceed': False,
@@ -263,16 +270,16 @@ class PreflightAnalyzer:
             }
         
         # 1. Model Inspection
-        print("[LIST] Inspecting models...")
+        logger.info("[LIST] Inspecting models...")
         model_report = self.model_inspector.inspect()
         self.results['model'] = model_report
         
         if verbose:
-            print(self.model_inspector.generate_report())
+            logger.info(self.model_inspector.generate_report())
             print()
         
         # 2. Data Inspection
-        print("[INFO] Inspecting dataset...")
+        logger.info("[INFO] Inspecting dataset...")
         data_report = self.data_inspector.validate()
         
         # Modality check: Enforce text-only for core stabilization
@@ -287,25 +294,25 @@ class PreflightAnalyzer:
         self.results['data'] = data_report
         
         if verbose:
-            print(self.data_inspector.generate_report())
+            logger.info(self.data_inspector.generate_report())
             print()
         
         # 3. Resource Probing
-        print("[CHECK] Probing hardware resources...")
+        logger.info("[CHECK] Probing hardware resources...")
         resource_report = self.resource_probe.probe()
         self.results['resources'] = resource_report
         
         if verbose:
-            print(self.resource_probe.generate_report())
+            logger.info(self.resource_probe.generate_report())
             print()
         
         # 4. Cross-validate and optimize
-        print("  Optimizing configuration...")
+        logger.info("  Optimizing configuration...")
         optimization_report = self._optimize_configuration()
         self.results['optimization'] = optimization_report
         
         # 5. Make go/no-go decision
-        print("[TARGET] Evaluating readiness...")
+        logger.info("[TARGET] Evaluating readiness...")
         decision = self._make_decision()
         self.results['decision'] = decision
 
@@ -319,8 +326,7 @@ class PreflightAnalyzer:
         comprehensive_report = self._generate_comprehensive_report()
         
         if verbose:
-            print(self._format_final_report(comprehensive_report))
-        
+            logger.info(self._format_final_report(comprehensive_report))
         return comprehensive_report
     
     def _optimize_configuration(self) -> Dict[str, Any]:
@@ -1014,7 +1020,7 @@ class PreflightAnalyzer:
         else:
             raise ValueError(f"Unsupported format: {format}")
         
-        print(f"Report saved to: {filepath}")
+        logger.info(f"Report saved to: {filepath}")
         return filepath
     
     def update_config(
@@ -1072,8 +1078,7 @@ class PreflightAnalyzer:
             with open(save_path_obj, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False)
             
-            print(f"Updated config saved to: {save_path_obj}")
-        
+            logger.info(f"Updated config saved to: {save_path_obj}")
         return config
 
 
@@ -1139,12 +1144,11 @@ def validate_config_only(config: Dict[str, Any]) -> Dict[str, Any]:
     analyzer = PreflightAnalyzer(config=config)
     validation = analyzer.validate_config()
     
-    print("=" * 70)
-    print("CONFIG VALIDATION")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("CONFIG VALIDATION")
+    logger.info("=" * 70)
     print()
-    print(analyzer._format_config_validation(validation))
+    logger.info(analyzer._format_config_validation(validation))
     print()
-    print("=" * 70)
-    
+    logger.info("=" * 70)
     return validation

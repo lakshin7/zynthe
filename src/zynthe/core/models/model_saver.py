@@ -1,5 +1,8 @@
 """Enterprise-grade checkpoint and model persistence utilities."""
 
+from __future__ import annotations
+
+
 import json
 import logging
 import os

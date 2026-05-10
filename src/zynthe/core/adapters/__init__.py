@@ -28,6 +28,9 @@ Usage::
     layers = adapter.get_hookable_layers(model)
 """
 
+from __future__ import annotations
+
+
 from .base_adapter import ModelAdapter
 from .text_adapter import TextModelAdapter
 from .code_adapter import CodeModelAdapter

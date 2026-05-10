@@ -1,5 +1,8 @@
 """Causal-LM distillation core (stable trainer, loss, checkpoints, metrics)."""
 
+from __future__ import annotations
+
+
 from .distillation import CausalLMDistillationEngine, DistillationConfig, DistillationLossOutput
 from .checkpoint import CheckpointMeta, CheckpointLoadReport, TrainingState, save_training_checkpoint, smart_load_checkpoint
 from .metrics import DistillationHealthMetrics, MetricStabilityMonitor, TokenMetricsAccumulator, compute_distill_alignment

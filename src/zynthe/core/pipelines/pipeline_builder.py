@@ -12,6 +12,9 @@ Supports:
 - Validation and optimization
 """
 
+from __future__ import annotations
+
+
 from typing import Any, Dict, List, Optional, Union
 import torch
 import torch.nn as nn
@@ -21,6 +24,9 @@ from .base_pipeline import BasePipeline
 from .single_distiller_pipeline import SingleDistillerPipeline
 from .multi_stage_pipeline import MultiStagePipeline, ExecutionMode
 from zynthe.core.distillers.multi_stage_distiller import DistillerRegistry
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineBuilder:

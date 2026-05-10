@@ -15,6 +15,9 @@ Author: Zynthé Team
 License: MIT
 """
 
+from __future__ import annotations
+
+
 import torch
 import torch.optim as optim
 from torch.optim import Optimizer

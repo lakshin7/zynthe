@@ -15,6 +15,9 @@ Key Features:
 All pipeline implementations must extend this class.
 """
 
+from __future__ import annotations
+
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 import torch
@@ -23,6 +26,9 @@ from dataclasses import dataclass, field
 import time
 
 from zynthe.core.utils.device_utils import auto_detect_device as _shared_auto_detect_device
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -122,11 +128,11 @@ class BasePipeline(ABC, nn.Module):
         if device.type == 'cuda':
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
-            print(f"[Pipeline] Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+            logger.info(f"[Pipeline] Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
         elif device.type == 'mps':
-            print("[Pipeline] Using Apple MPS")
+            logger.info("[Pipeline] Using Apple MPS")
         else:
-            print("[Pipeline] Using CPU (WARNING: Training will be slow)")
+            logger.info("[Pipeline] Using CPU (WARNING: Training will be slow)")
         return device
     
     def _enable_memory_optimization(self):
@@ -143,8 +149,7 @@ class BasePipeline(ABC, nn.Module):
             # Helps prevent fragmentation on T4
             torch.cuda.empty_cache()
             
-            print(f"[Pipeline] Memory optimization enabled for {self.device}")
-    
+            logger.info(f"[Pipeline] Memory optimization enabled for {self.device}")
     @abstractmethod
     def setup(self) -> None:
         """

@@ -1,6 +1,12 @@
+
+from __future__ import annotations
+
 import json
 import os
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 def generate_report(summary, plots, config, output_path, fmt="md"):
     """
@@ -92,4 +98,4 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(report_content)
-    print(f"[INFO] Report saved to {output_path}")
+    logger.info(f"[INFO] Report saved to {output_path}")

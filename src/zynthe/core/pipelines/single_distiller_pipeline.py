@@ -8,6 +8,9 @@ pipeline interface for backward compatibility and unified API.
 This allows existing distillers to work seamlessly in the new pipeline system.
 """
 
+from __future__ import annotations
+
+
 from typing import Any, Dict, Optional
 import inspect
 import torch

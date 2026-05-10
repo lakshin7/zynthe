@@ -1,3 +1,6 @@
+
+from __future__ import annotations
+
 from zynthe.evaluation.evaluator import Evaluator
 from zynthe.evaluation.evaluator_extended import CurriculumEvaluator, DualEvaluator
 from zynthe.evaluation.visualizer import (

@@ -22,6 +22,9 @@ FeatureDistiller (extends BaseDistiller)
 Reference: Zynthe Feature Distillation Blueprint
 """
 
+from __future__ import annotations
+
+
 from typing import Dict, List, Optional, Tuple, Any, Union
 import torch
 import torch.nn as nn

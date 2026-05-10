@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 from zynthe.evaluation.evaluation_report import EvaluationReport
+import logging
+
+logger = logging.getLogger(__name__)
 
 def plot_teacher_student_comparison(
     student_train_losses: List[float],
@@ -32,7 +35,7 @@ def plot_teacher_student_comparison(
         save_path: Output file path
     """
     if not (student_train_losses or teacher_train_losses):
-        print("[PLOT] No teacher/student loss data to compare.")
+        logger.info("[PLOT] No teacher/student loss data to compare.")
         return
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -88,9 +91,7 @@ def plot_teacher_student_comparison(
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"[PLOT] Teacher vs Student comparison saved to: {save_path}")
-
-
+    logger.info(f"[PLOT] Teacher vs Student comparison saved to: {save_path}")
 def plot_training_curves(
     train_losses: List[float],
     val_losses: List[float],
@@ -121,7 +122,7 @@ def plot_training_curves(
         annotate: Add text annotations near extrema
     """
     if not train_losses and not val_losses and not metrics:
-        print("No data to plot.")
+        logger.info("No data to plot.")
         return
 
     # Determine number of subplots needed
@@ -413,9 +414,7 @@ def plot_training_curves(
     plt.tight_layout(pad=2.0)  # Add padding between subplots
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"[PLOT] Enhanced training curves saved to: {save_path}")
-
-
+    logger.info(f"[PLOT] Enhanced training curves saved to: {save_path}")
 def plot_epoch_micro_series(
     title_prefix: str,
     epoch_idx: int,
@@ -441,7 +440,7 @@ def plot_epoch_micro_series(
     acc_series = val_running_acc or []
 
     if not train_series and not val_series and not acc_series:
-        print("[PLOT] No micro-series data to plot.")
+        logger.info("[PLOT] No micro-series data to plot.")
         return
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 5))
@@ -495,14 +494,12 @@ def plot_epoch_micro_series(
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"[PLOT] Micro-series saved to: {save_path}")
-
-
+    logger.info(f"[PLOT] Micro-series saved to: {save_path}")
 def plot_metric_grid(metrics: Dict[str, List[float]], save_path: str, columns: int = 2) -> None:
     """Plot each metric on its own axis to highlight subtle differences."""
     metric_series = [(name, values) for name, values in metrics.items() if isinstance(values, (list, tuple)) and values]
     if not metric_series:
-        print("[PLOT] No metric history provided for grid plot.")
+        logger.info("[PLOT] No metric history provided for grid plot.")
         return
 
     rows = math.ceil(len(metric_series) / columns)
@@ -524,18 +521,16 @@ def plot_metric_grid(metrics: Dict[str, List[float]], save_path: str, columns: i
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"[PLOT] Metric grid saved to: {save_path}")
-
-
+    logger.info(f"[PLOT] Metric grid saved to: {save_path}")
 def plot_calibration_curve(calibration: Dict[str, Any], save_path: str) -> None:
     """Render a reliability diagram from calibration statistics."""
     if not calibration:
-        print("[PLOT] Calibration data missing; skipping reliability plot.")
+        logger.info("[PLOT] Calibration data missing; skipping reliability plot.")
         return
     prob_true = calibration.get('prob_true')
     prob_pred = calibration.get('prob_pred')
     if prob_true is None or prob_pred is None:
-        print("[PLOT] Calibration arrays not found; skipping reliability plot.")
+        logger.info("[PLOT] Calibration arrays not found; skipping reliability plot.")
         return
 
     plt.figure(figsize=(6, 5))
@@ -555,18 +550,16 @@ def plot_calibration_curve(calibration: Dict[str, Any], save_path: str) -> None:
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"[PLOT] Calibration curve saved to: {save_path}")
-
-
+    logger.info(f"[PLOT] Calibration curve saved to: {save_path}")
 def plot_runtime_profile(runtime: Dict[str, Any], save_path: str) -> None:
     """Visualize latency distribution and throughput statistics."""
     if not runtime:
-        print("[PLOT] Runtime stats unavailable; skipping profile plot.")
+        logger.info("[PLOT] Runtime stats unavailable; skipping profile plot.")
         return
 
     numeric_items = {k: v for k, v in runtime.items() if isinstance(v, (int, float, np.floating)) and k not in {'batches', 'batches_completed'}}
     if not numeric_items:
-        print("[PLOT] Runtime stats lack numeric values; skipping profile plot.")
+        logger.info("[PLOT] Runtime stats lack numeric values; skipping profile plot.")
         return
 
     metrics_names = list(numeric_items.keys())
@@ -592,9 +585,7 @@ def plot_runtime_profile(runtime: Dict[str, Any], save_path: str) -> None:
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"[PLOT] Runtime profile saved to: {save_path}")
-
-
+    logger.info(f"[PLOT] Runtime profile saved to: {save_path}")
 def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
     """Plot a comprehensive dashboard from an EvaluationReport."""
     metrics = getattr(report, 'metrics', {}) or getattr(report, 'core_metrics', {}) or {}
@@ -718,8 +709,7 @@ def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
         os.makedirs(out_dir, exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"[PLOT] Evaluation dashboard saved to: {save_path}")
-
+    logger.info(f"[PLOT] Evaluation dashboard saved to: {save_path}")
 def plot_distillation_gap(teacher_metrics: Dict, student_metrics: Dict, save_path: str):
     """Plot the gap between teacher and student performance."""
     import matplotlib.pyplot as plt
@@ -760,13 +750,12 @@ def plot_distillation_gap(teacher_metrics: Dict, student_metrics: Dict, save_pat
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"[PLOT] Distillation gap saved to: {save_path}")
-
+    logger.info(f"[PLOT] Distillation gap saved to: {save_path}")
 def plot_extended_metrics(report: "EvaluationReport", save_path: str):
     """Plot extended/custom distillation metrics."""
     metrics = getattr(report, 'distillation_metrics', None)
     if not isinstance(metrics, dict) or not metrics:
-        print("[PLOT] No extended metrics available; skipping extended metrics plot.")
+        logger.info("[PLOT] No extended metrics available; skipping extended metrics plot.")
         return
 
     scalar_metrics = {
@@ -779,7 +768,7 @@ def plot_extended_metrics(report: "EvaluationReport", save_path: str):
     }
 
     if not scalar_metrics and not series_metrics:
-        print("[PLOT] Extended metrics contain no plottable values; skipping.")
+        logger.info("[PLOT] Extended metrics contain no plottable values; skipping.")
         return
 
     fig, axes = plt.subplots(1, 2 if scalar_metrics and series_metrics else 1, figsize=(12, 4.5))
@@ -812,4 +801,4 @@ def plot_extended_metrics(report: "EvaluationReport", save_path: str):
         os.makedirs(out_dir, exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"[PLOT] Extended metrics saved to: {save_path}")
+    logger.info(f"[PLOT] Extended metrics saved to: {save_path}")

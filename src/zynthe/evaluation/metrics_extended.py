@@ -3,11 +3,17 @@ Zynthé EvalX - Extended Metrics Module
 Advanced distillation-specific metrics and KPIs
 """
 
+from __future__ import annotations
+
+
 import torch
 import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Optional, List, Any
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DistillationMetrics:
@@ -445,9 +451,8 @@ def compute_extended_metrics(teacher_logits: torch.Tensor,
 
 if __name__ == "__main__":
     # Example usage
-    print("Zynthé EvalX - Extended Metrics Module")
-    print("="*60)
-    
+    logger.info("Zynthé EvalX - Extended Metrics Module")
+    logger.info("="*60)
     # Simulate teacher and student outputs
     teacher_logits = torch.randn(32, 10)
     student_logits = teacher_logits + torch.randn(32, 10) * 0.1
@@ -455,12 +460,11 @@ if __name__ == "__main__":
     # Compute metrics
     metrics = compute_extended_metrics(teacher_logits, student_logits)
     
-    print("\n[INFO] Distillation Metrics:")
+    logger.info("\n[INFO] Distillation Metrics:")
     for key, value in metrics.items():
-        print(f"  {key}: {value:.4f}")
-    
+        logger.info(f"  {key}: {value:.4f}")
     # Compute CAS
-    print("\n[SCORE] Compression-Aware Score:")
+    logger.info("\n[SCORE] Compression-Aware Score:")
     cas = CompressionAwareScore.compute_cas(
         accuracy=0.945,
         teacher_params=125_000_000,
@@ -469,10 +473,9 @@ if __name__ == "__main__":
         student_latency=28.5
     )
     for key, value in cas.items():
-        print(f"  {key}: {value:.4f}")
-    
+        logger.info(f"  {key}: {value:.4f}")
     # Compute DEI
-    print("\n[TARGET] Distillation Efficacy Index:")
+    logger.info("\n[TARGET] Distillation Efficacy Index:")
     dei = DistillationEfficacyIndex.compute_dei(
         teacher_acc=0.96,
         student_acc=0.945,
@@ -480,4 +483,4 @@ if __name__ == "__main__":
         student_params=82_000_000
     )
     for key, value in dei.items():
-        print(f"  {key}: {value}")
+        logger.info(f"  {key}: {value}")

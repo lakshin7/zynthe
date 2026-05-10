@@ -38,12 +38,20 @@ Preflight analysis::
     from zynthe import PreflightAnalyzer, run_preflight_check
 """
 
+from __future__ import annotations
+
+
 __version__ = "0.2.4"
 
 # ---------------------------------------------------------------------------
 # Primary user-facing API
 # ---------------------------------------------------------------------------
-from zynthe.core.distillers.toolkit import DistillationToolkit, Distiller
+from zynthe.core.distillers.toolkit import (
+    DistillationToolkit,
+    Distiller,
+    Goal,
+    DistillationConfig,
+)
 
 # ---------------------------------------------------------------------------
 # Distillation methods
@@ -180,4 +188,7 @@ __all__ = [
     "UnifiedTrainingRuntime",
     "RuntimeOptions",
     "RuntimeResult",
+    # Config & Enums
+    "Goal",
+    "DistillationConfig",
 ]

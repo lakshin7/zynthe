@@ -3,6 +3,9 @@ Model Validator - Pre-flight model compatibility checker
 Validates models before downloading/loading them
 """
 
+from __future__ import annotations
+
+
 import torch
 from typing import Dict, List, Optional, Any
 from huggingface_hub import HfApi, model_info

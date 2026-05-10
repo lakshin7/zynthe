@@ -20,6 +20,9 @@ this base class and implement their specific loss computation logic.
 Reference: Zynthe Architecture Blueprint v2.0
 """
 
+from __future__ import annotations
+
+
 from typing import Any, Dict, Tuple, List, Optional, Callable, Union
 import torch
 import torch.nn as nn

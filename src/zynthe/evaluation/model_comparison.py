@@ -3,6 +3,9 @@ Model Comparison Module
 Compare Teacher and Student models side-by-side with comprehensive metrics and visualizations.
 """
 
+from __future__ import annotations
+
+
 import torch
 import json
 from pathlib import Path
@@ -21,6 +24,9 @@ from sklearn.metrics import (
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ModelComparator:
@@ -54,8 +60,7 @@ class ModelComparator:
         self.device = device
         self.tokenizer = tokenizer
         
-        print(f"[CHECK] ModelComparator on device: {device}")
-        
+        logger.info(f"[CHECK] ModelComparator on device: {device}")
         self.teacher = teacher.to(device)
         self.teacher.eval()
         
@@ -67,11 +72,10 @@ class ModelComparator:
         self.student_params = sum(p.numel() for p in self.student.parameters())
         self.compression_ratio = self.teacher_params / max(self.student_params, 1)
         
-        print(f"\n[INFO] Model Statistics:")
-        print(f"   Teacher: {self.teacher_params:,} parameters")
-        print(f"   Student: {self.student_params:,} parameters")
-        print(f"   Compression: {self.compression_ratio:.2f}x smaller")
-
+        logger.info(f"\n[INFO] Model Statistics:")
+        logger.info(f"   Teacher: {self.teacher_params:,} parameters")
+        logger.info(f"   Student: {self.student_params:,} parameters")
+        logger.info(f"   Compression: {self.compression_ratio:.2f}x smaller")
     @classmethod
     def from_paths(
         cls,
@@ -128,8 +132,7 @@ class ModelComparator:
         all_logits = []
         total_loss = 0.0
         
-        print(f"\n[TEST] Evaluating {model_name}...")
-        
+        logger.info(f"\n[TEST] Evaluating {model_name}...")
         with torch.no_grad():
             for batch in tqdm(dataloader, desc=f"Evaluating {model_name}"):
                 # Move batch to device
@@ -196,13 +199,12 @@ class ModelComparator:
             'num_parameters': sum(p.numel() for p in model.parameters())
         }
         
-        print(f"\n[OK] {model_name} Results:")
-        print(f"   Accuracy:  {accuracy:.4f}")
-        print(f"   Precision: {precision:.4f}")
-        print(f"   Recall:    {recall:.4f}")
-        print(f"   F1-Score:  {f1:.4f}")
-        print(f"   Avg Loss:  {avg_loss:.4f}")
-        
+        logger.info(f"\n[OK] {model_name} Results:")
+        logger.info(f"   Accuracy:  {accuracy:.4f}")
+        logger.info(f"   Precision: {precision:.4f}")
+        logger.info(f"   Recall:    {recall:.4f}")
+        logger.info(f"   F1-Score:  {f1:.4f}")
+        logger.info(f"   Avg Loss:  {avg_loss:.4f}")
         return results
     
     def compare_models(self, dataloader: DataLoader) -> Tuple[Dict, Dict]:
@@ -215,10 +217,9 @@ class ModelComparator:
         Returns:
             Tuple of (teacher_results, student_results)
         """
-        print("\n" + "="*60)
-        print("[TARGET] TEACHER vs STUDENT COMPARISON")
-        print("="*60)
-        
+        logger.info("\n" + "="*60)
+        logger.info("[TARGET] TEACHER vs STUDENT COMPARISON")
+        logger.info("="*60)
         # Evaluate teacher
         teacher_results = self.evaluate_model(
             self.teacher, 
@@ -258,8 +259,7 @@ class ModelComparator:
         save_dir_path = Path(save_dir)
         save_dir_path.mkdir(parents=True, exist_ok=True)
         
-        print("\n[INFO] Creating comparison visualizations...")
-        
+        logger.info("\n[INFO] Creating comparison visualizations...")
         # 1. Metrics Bar Chart
         self._plot_metrics_comparison(teacher_results, student_results, save_dir_path)
         
@@ -275,8 +275,7 @@ class ModelComparator:
         # 5. Detailed Comparison Table
         self._create_comparison_table(teacher_results, student_results, save_dir_path)
         
-        print(f"[OK] Visualizations saved to: {save_dir_path}")
-        
+        logger.info(f"[OK] Visualizations saved to: {save_dir_path}")
         if not show_plots:
             plt.close('all')
     
@@ -313,8 +312,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'metrics_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print("    Saved: metrics_comparison.png")
-    
+        logger.info("    Saved: metrics_comparison.png")
     def _plot_confusion_matrices(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot confusion matrices side-by-side."""
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -338,8 +336,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'confusion_matrices_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print("    Saved: confusion_matrices_comparison.png")
-    
+        logger.info("    Saved: confusion_matrices_comparison.png")
     def _plot_per_class_metrics(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot per-class performance metrics."""
         num_classes = len(teacher_res['f1_per_class'])
@@ -370,8 +367,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'per_class_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print("    Saved: per_class_comparison.png")
-    
+        logger.info("    Saved: per_class_comparison.png")
     def _plot_efficiency_chart(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot model efficiency (size vs performance)."""
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -410,8 +406,7 @@ class ModelComparator:
         plt.tight_layout()
         plt.savefig(save_dir / 'efficiency_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print("    Saved: efficiency_comparison.png")
-    
+        logger.info("    Saved: efficiency_comparison.png")
     def _create_comparison_table(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Create detailed comparison table as image."""
         fig, ax = plt.subplots(figsize=(12, 8))
@@ -458,8 +453,7 @@ class ModelComparator:
         
         plt.savefig(save_dir / 'comparison_table.png', dpi=300, bbox_inches='tight')
         plt.close()
-        print("    Saved: comparison_table.png")
-    
+        logger.info("    Saved: comparison_table.png")
     def save_results(
         self,
         teacher_results: Dict,
@@ -492,8 +486,7 @@ class ModelComparator:
         with open(save_dir_path / 'comparison_results.json', 'w') as f:
             json.dump(summary, f, indent=2)
         
-        print(f"\n[SAVE] Results saved to: {save_dir_path / 'comparison_results.json'}")
-        
+        logger.info(f"\n[SAVE] Results saved to: {save_dir_path / 'comparison_results.json'}")
     def generate_report(
         self,
         teacher_results: Dict,
@@ -566,4 +559,4 @@ class ModelComparator:
         with open(report_path, 'w') as f:
             f.writelines(report)
         
-        print(f"\n[NOTE] Report generated: {report_path}")
+        logger.info(f"\n[NOTE] Report generated: {report_path}")

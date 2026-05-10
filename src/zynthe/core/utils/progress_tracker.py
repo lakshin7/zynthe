@@ -3,6 +3,9 @@ Progress Tracker for Model Downloads and Training
 Provides real-time progress updates via WebSocket
 """
 
+from __future__ import annotations
+
+
 import time
 from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass, asdict

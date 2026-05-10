@@ -11,6 +11,9 @@ Combines multiple distillers in flexible execution modes:
 Optimized for Google Colab T4 GPU with memory-efficient execution.
 """
 
+from __future__ import annotations
+
+
 from typing import Any, Dict, List, Optional, Union, Callable
 from enum import Enum
 import torch
@@ -21,6 +24,9 @@ from .base_pipeline import BasePipeline, PipelineMetrics
 from .single_distiller_pipeline import SingleDistillerPipeline
 from zynthe.core.distillers.base_distiller import BaseDistiller
 from zynthe.core.utils.device_utils import move_to_device
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionMode(Enum):
@@ -126,8 +132,7 @@ class MultiStagePipeline(BasePipeline):
         # Memory optimization for T4
         self.checkpoint_gradients = (config or {}).get('checkpoint_gradients', False)
         if self.checkpoint_gradients:
-            print("[MultiStagePipeline] Gradient checkpointing enabled (saves memory)")
-    
+            logger.info("[MultiStagePipeline] Gradient checkpointing enabled (saves memory)")
     def add_stage(
         self,
         name: str,
@@ -193,8 +198,7 @@ class MultiStagePipeline(BasePipeline):
         if not self.stages:
             raise ValueError("No stages added to pipeline. Use add_stage() first.")
         
-        print(f"[{self.name}] Setting up {len(self.stages)} stage(s)")
-        
+        logger.info(f"[{self.name}] Setting up {len(self.stages)} stage(s)")
         for stage in self.stages:
             print(f"  - Stage '{stage.name}': {len(stage.pipelines)} pipeline(s), "
                   f"weight={stage.weight:.2f}, mode={stage.mode.value}")
@@ -208,8 +212,7 @@ class MultiStagePipeline(BasePipeline):
         if self.normalize_weights and self._total_weight > 0:
             for stage in self.stages:
                 stage.weight /= self._total_weight
-            print(f"[{self.name}] Normalized stage weights")
-    
+            logger.info(f"[{self.name}] Normalized stage weights")
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute all stages on the batch.

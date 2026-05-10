@@ -1,9 +1,15 @@
+
+from __future__ import annotations
+
 from typing import Optional, Union, Dict, Any, List, Tuple, Callable
 import torch
 import torch.nn.functional as F
 from torch import nn
 from zynthe.core.distillers.base_distiller import BaseDistiller
 import warnings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -1173,8 +1179,7 @@ class AttentionTransferDistiller(BaseDistiller):
         
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            print(f"Attention comparison saved to: {save_path}")
-        
+            logger.info(f"Attention comparison saved to: {save_path}")
         return fig
 
     # ---------------------- Forward Pass ----------------------

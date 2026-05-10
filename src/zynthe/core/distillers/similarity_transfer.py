@@ -28,6 +28,9 @@ Example:
     >>> loss = distiller.compute_loss(inputs, labels)
 """
 
+from __future__ import annotations
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,6 +38,9 @@ from typing import Dict, List, Any, Optional, Tuple
 import warnings
 
 from .base_distiller import BaseDistiller
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SimilarityTransfer(BaseDistiller):
@@ -118,13 +124,12 @@ class SimilarityTransfer(BaseDistiller):
         # Now call super().__init__() which will call _register_hooks()
         super().__init__(teacher, student)
         
-        print("[SIM] Similarity Transfer initialized:")
-        print(f"   Metric: {self.similarity_metric}")
-        print(f"   Layers: {self.layers}")
-        print(f"   Progressive: {self.progressive}")
-        print(f"   Cross-modality: {self.cross_modality}")
-        print(f"   Graph mode: {self.graph_mode}")
-    
+        logger.info("[SIM] Similarity Transfer initialized:")
+        logger.info(f"   Metric: {self.similarity_metric}")
+        logger.info(f"   Layers: {self.layers}")
+        logger.info(f"   Progressive: {self.progressive}")
+        logger.info(f"   Cross-modality: {self.cross_modality}")
+        logger.info(f"   Graph mode: {self.graph_mode}")
     def _register_hooks(self):
         """Register forward hooks to extract intermediate features."""
         
@@ -699,8 +704,7 @@ class SimilarityTransfer(BaseDistiller):
         
         if self.progressive:
             self.current_layers = self.get_progressive_layers(epoch)
-            print(f"  Progressive: Using layers {self.current_layers}")
-    
+            logger.info(f"  Progressive: Using layers {self.current_layers}")
     def get_metrics(self) -> Dict[str, Any]:
         """
         Get similarity transfer metrics.

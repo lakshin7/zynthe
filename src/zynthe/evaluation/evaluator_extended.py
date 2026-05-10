@@ -3,6 +3,9 @@ Zynthé EvalX - Enhanced Evaluator with Dual-Model Comparison
 Supports side-by-side teacher-student evaluation with extended metrics
 """
 
+from __future__ import annotations
+
+
 import torch
 import torch.nn as nn
 from typing import Dict, Optional, Any, Callable
@@ -16,6 +19,9 @@ from zynthe.evaluation.metrics_extended import (
     CompressionAwareScore
 )
 from zynthe.evaluation.evaluation_report import EvaluationReport
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DualEvaluator:
@@ -76,8 +82,7 @@ class DualEvaluator:
         Returns:
             Comprehensive evaluation results
         """
-        print("[DUAL EVAL] Starting side-by-side teacher-student evaluation...")
-        
+        logger.info("[DUAL EVAL] Starting side-by-side teacher-student evaluation...")
         teacher_preds = []
         student_preds = []
         all_labels = []
@@ -184,12 +189,11 @@ class DualEvaluator:
                     try:
                         self.progress_callback(progress_payload)
                     except Exception as e:
-                        print(f"[WARNING] Progress callback failed: {e}")
+                        logger.warning(f"[WARNING] Progress callback failed: {e}")
                 # ================================================
                 
                 if (batch_idx + 1) % 20 == 0:
-                    print(f"[DUAL EVAL] Processed {batch_idx + 1}/{len(self.dataloader)} batches")
-        
+                    logger.info(f"[DUAL EVAL] Processed {batch_idx + 1}/{len(self.dataloader)} batches")
         # Compute standard metrics
         compute_all_metrics(teacher_preds, all_labels)
         student_metrics = compute_all_metrics(student_preds, all_labels)
@@ -317,11 +321,10 @@ class DualEvaluator:
             metadata=metadata,
         )
         
-        print("[DUAL EVAL] Evaluation complete!")
-        print(f"  Teacher Acc: {teacher_acc:.4f} | Student Acc: {student_acc:.4f}")
-        print(f"  Agreement: {prediction_agreement:.4f} | DEI: {dei_result['dei']:.4f}")
-        print(f"  CAS: {cas_result['cas']:.4f} | Speedup: {perf_comparison.get('speedup', 0):.2f}x")
-        
+        logger.info("[DUAL EVAL] Evaluation complete!")
+        logger.info(f"  Teacher Acc: {teacher_acc:.4f} | Student Acc: {student_acc:.4f}")
+        logger.info(f"  Agreement: {prediction_agreement:.4f} | DEI: {dei_result['dei']:.4f}")
+        logger.info(f"  CAS: {cas_result['cas']:.4f} | Speedup: {perf_comparison.get('speedup', 0):.2f}x")
         return report
     
     def quick_eval(self, max_batches: Optional[int] = None) -> EvaluationReport:
@@ -373,8 +376,7 @@ class CurriculumEvaluator:
         results = {}
         
         for difficulty, dataloader in dataloader_dict.items():
-            print(f"[CURRICULUM EVAL] Evaluating on {difficulty} samples...")
-            
+            logger.info(f"[CURRICULUM EVAL] Evaluating on {difficulty} samples...")
             all_preds = []
             all_labels = []
             correct = 0
@@ -407,8 +409,7 @@ class CurriculumEvaluator:
                 'num_samples': total
             }
             
-            print(f"  {difficulty.capitalize()} Accuracy: {accuracy:.4f}")
-        
+            logger.info(f"  {difficulty.capitalize()} Accuracy: {accuracy:.4f}")
         # Compute robustness score (variance across difficulties)
         accuracies = [r['accuracy'] for r in results.values()]
         robustness_score = 1.0 - np.std(accuracies)
@@ -423,12 +424,12 @@ class CurriculumEvaluator:
 
 
 if __name__ == "__main__":
-    print("Zynthé EvalX - Enhanced Evaluator Module")
-    print("="*60)
-    print("Features:")
-    print("   Dual-model evaluation (teacher + student)")
-    print("   Extended distillation metrics")
-    print("   Performance profiling")
-    print("   Compression-Aware Score (CAS)")
-    print("   Distillation Efficacy Index (DEI)")
-    print("   Curriculum-based testing")
+    logger.info("Zynthé EvalX - Enhanced Evaluator Module")
+    logger.info("="*60)
+    logger.info("Features:")
+    logger.info("   Dual-model evaluation (teacher + student)")
+    logger.info("   Extended distillation metrics")
+    logger.info("   Performance profiling")
+    logger.info("   Compression-Aware Score (CAS)")
+    logger.info("   Distillation Efficacy Index (DEI)")
+    logger.info("   Curriculum-based testing")

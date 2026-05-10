@@ -19,6 +19,9 @@ Example:
     Stage 5: QAT Fine-Tuning -> int8
 """
 
+from __future__ import annotations
+
+
 from typing import Dict, List, Any, Optional, Tuple, Mapping
 import torch
 import torch.nn as nn
@@ -56,6 +59,10 @@ except ImportError:
     HAS_QAT = False
     QATDistiller = None  # type: ignore
     warnings.warn("QAT not available. Stage 'qat' will be skipped.")
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class StageController:
@@ -101,7 +108,7 @@ class StageController:
         
         torch.save(checkpoint, checkpoint_path)
         self.checkpoints[stage_idx] = checkpoint_path
-        print(f" Checkpoint saved: {checkpoint_path}")
+        logger.info(f" Checkpoint saved: {checkpoint_path}")
         return checkpoint_path
     
     def load_checkpoint(self, stage_idx: int, model: nn.Module) -> Dict:
@@ -113,7 +120,7 @@ class StageController:
         checkpoint = torch.load(checkpoint_path, weights_only=False)
         
         model.load_state_dict(checkpoint['model_state_dict'])
-        print(f" Loaded checkpoint from stage {stage_idx}")
+        logger.info(f" Loaded checkpoint from stage {stage_idx}")
         return checkpoint
     
     def check_dependencies(self, stage: Dict) -> bool:
@@ -122,7 +129,7 @@ class StageController:
         
         for dep_idx in dependencies:
             if dep_idx not in self.checkpoints:
-                print(f" Dependency not satisfied: stage {dep_idx} not completed")
+                logger.info(f" Dependency not satisfied: stage {dep_idx} not completed")
                 return False
         
         return True
@@ -170,8 +177,7 @@ class DistillerRegistry:
     def register(self, name: str, distiller_cls: type):
         """Register custom distiller."""
         self._registry[name] = distiller_cls
-        print(f" Registered distiller: {name}")
-    
+        logger.info(f" Registered distiller: {name}")
     def get(self, name: str) -> Optional[type]:
         """Get distiller by name."""
         return self._registry.get(name)
@@ -460,8 +466,7 @@ class MultiStageDistiller:
         Returns:
             Generated stage configurations
         """
-        print("[AUTO] Auto-generating stages from preflight analysis...")
-        
+        logger.info("[AUTO] Auto-generating stages from preflight analysis...")
         preflight = config.get('preflight', {})
         compression_ratio = preflight.get('compression_ratio', 2.0)
         model_type = preflight.get('model_type', 'unknown')
@@ -513,10 +518,9 @@ class MultiStageDistiller:
                 }
             })
         
-        print(f"  → Generated {len(stages)} stages")
+        logger.info(f"  → Generated {len(stages)} stages")
         for i, stage in enumerate(stages, 1):
-            print(f"     {i}. {stage['name']} ({stage['type']})")
-        
+            logger.info(f"     {i}. {stage['name']} ({stage['type']})")
         return stages
     
     def run(self) -> Dict[str, Any]:
@@ -526,22 +530,20 @@ class MultiStageDistiller:
         Returns:
             Training report with all stages
         """
-        print("\n" + "=" * 70)
-        print(">>> MULTI-STAGE DISTILLATION")
-        print("=" * 70)
-        print(f"Total Stages: {len(self.stages)}")
-        print(f"Output Dir: {self.output_dir}")
-        print("")
-        
+        logger.info("\n" + "=" * 70)
+        logger.info(">>> MULTI-STAGE DISTILLATION")
+        logger.info("=" * 70)
+        logger.info(f"Total Stages: {len(self.stages)}")
+        logger.info(f"Output Dir: {self.output_dir}")
+        logger.info("")
         # Run each stage
         for stage_idx, stage_cfg in enumerate(self.stages, 1):
-            print(f"\n{'=' * 70}")
-            print(f">>> STAGE {stage_idx}/{len(self.stages)}: {stage_cfg['name']}")
-            print(f"{'=' * 70}")
-            
+            logger.info(f"\n{'=' * 70}")
+            logger.info(f">>> STAGE {stage_idx}/{len(self.stages)}: {stage_cfg['name']}")
+            logger.info(f"{'=' * 70}")
             # Check dependencies
             if not self.controller.check_dependencies(stage_cfg):
-                print("[FAIL] Dependencies not satisfied. Skipping stage.")
+                logger.error("[FAIL] Dependencies not satisfied. Skipping stage.")
                 continue
             
             # Run stage
@@ -587,11 +589,11 @@ class MultiStageDistiller:
             if hasattr(self.loss_scheduler, 'update'):
                 self.loss_scheduler.update(stage_idx, len(self.stages), stage_metrics)
             
-            print(f"\n[OK] Stage {stage_idx} completed!")
+            logger.info(f"\n[OK] Stage {stage_idx} completed!")
             self._print_stage_summary(stage_idx, stage_metrics)
 
             if self.run_state.get('stopped_early'):
-                print("\n Early stop triggered by quality gate.")
+                logger.info("\n Early stop triggered by quality gate.")
                 break
         
         # Generate final report
@@ -600,9 +602,9 @@ class MultiStageDistiller:
         # Save report
         self._save_report(report)
         
-        print("\n" + "=" * 70)
-        print("[DONE] MULTI-STAGE DISTILLATION COMPLETED")
-        print("=" * 70)
+        logger.info("\n" + "=" * 70)
+        logger.info("[DONE] MULTI-STAGE DISTILLATION COMPLETED")
+        logger.info("=" * 70)
         self._print_final_summary(report)
         
         return report
@@ -658,10 +660,11 @@ class MultiStageDistiller:
         if hasattr(self.loss_scheduler, 'update'):
             self.loss_scheduler.update(stage_idx, len(self.stages), {})
         loss_weights = self.loss_scheduler.get_weights()
-        print(
-            f"Loss weights: α={loss_weights.get('alpha', 0):.2f}, "
-            f"β={loss_weights.get('beta', 0):.2f}, "
-            f"γ={loss_weights.get('gamma', 0):.2f}"
+        logger.info(
+            "Loss weights: \u03b1=%.2f, \u03b2=%.2f, \u03b3=%.2f",
+            loss_weights.get('alpha', 0),
+            loss_weights.get('beta', 0),
+            loss_weights.get('gamma', 0),
         )
         
         # Merge stage config with loss weights without mutating presets
@@ -676,7 +679,7 @@ class MultiStageDistiller:
         metadata['stage_index'] = stage_idx
         
         # Initialize distiller
-        print(f"Initializing {stage_cfg['type']} distiller...")
+        logger.info(f"Initializing {stage_cfg['type']} distiller...")
         distiller = self._instantiate_distiller(distiller_cls, distiller_config)
         
         # Initialize optimizer and scheduler
@@ -698,8 +701,7 @@ class MultiStageDistiller:
         
         # Train stage
         epochs = stage_cfg.get('epochs', 3)
-        print(f"Training for {epochs} epochs...")
-        
+        logger.info(f"Training for {epochs} epochs...")
         stage_metrics = {
             'train_loss': 0.0,
             'val_loss': 0.0,
@@ -717,9 +719,11 @@ class MultiStageDistiller:
                     val_metrics = self._evaluate(distiller)
                     stage_metrics.update(val_metrics)
                     
-                    print(f"  Epoch {epoch + 1}/{epochs}: "
-                          f"Loss={epoch_loss:.4f}, "
-                          f"Val Acc={val_metrics.get('val_accuracy', 0):.2f}%")
+                    logger.info(
+                        "  Epoch %d/%d: Loss=%.4f, Val Acc=%.2f%%",
+                        epoch + 1, epochs, epoch_loss,
+                        val_metrics.get('val_accuracy', 0),
+                    )
         else:
             warnings.warn("No train_loader provided, skipping training")
         
@@ -754,9 +758,13 @@ class MultiStageDistiller:
             warnings.warn("train_loader is None, returning 0.0 loss")
             return 0.0
         
-        # Ensure distiller mode is correct (training_step handles model.train())
+        import time
+        
         total_loss = 0.0
         num_batches = 0
+        total_batches = len(self.train_loader)
+        log_interval = max(1, total_batches // 10)  # Log every ~10%
+        epoch_start = time.time()
         
         for batch_idx, batch in enumerate(self.train_loader):
             try:
@@ -779,6 +787,19 @@ class MultiStageDistiller:
                      total_loss += float(loss_dict)  # type: ignore[arg-type]
 
                 num_batches += 1
+                
+                # Progress logging
+                if (batch_idx + 1) % log_interval == 0 or (batch_idx + 1) == total_batches:
+                    elapsed = time.time() - epoch_start
+                    avg_loss = total_loss / max(num_batches, 1)
+                    batches_per_sec = num_batches / max(elapsed, 0.001)
+                    remaining = (total_batches - batch_idx - 1) / max(batches_per_sec, 0.001)
+                    pct = 100 * (batch_idx + 1) / total_batches
+                    logger.info(
+                        "    [%5.1f%%] batch %d/%d | loss: %.4f | %.1f batch/s | ETA: %.0fs",
+                        pct, batch_idx + 1, total_batches,
+                        avg_loss, batches_per_sec, remaining,
+                    )
                 
             except Exception as e:
                 warnings.warn(f"Error in batch {batch_idx}: {e}")
@@ -870,8 +891,7 @@ class MultiStageDistiller:
         Args:
             layer_spec: List of layer indices to freeze
         """
-        print(f"  [LOCK] Freezing layers: {layer_spec}")
-        
+        logger.info(f"  [LOCK] Freezing layers: {layer_spec}")
         # Get all named parameters
         named_params = list(self.student.named_parameters())
         
@@ -896,8 +916,7 @@ class MultiStageDistiller:
             warnings.warn("train_loader is None, skipping knowledge storage")
             return
         
-        print("  [SAVE] Storing knowledge for replay...")
-        
+        logger.info("  [SAVE] Storing knowledge for replay...")
         # Store teacher outputs for a subset of data
         self.teacher.eval()
         knowledge_samples = []
@@ -916,15 +935,13 @@ class MultiStageDistiller:
                 knowledge_samples.append(teacher_out.cpu())
         
         self.knowledge_bank.append(knowledge_samples)
-        print(f"   Stored {len(knowledge_samples)} knowledge samples")
-    
+        logger.info(f"   Stored {len(knowledge_samples)} knowledge samples")
     def _print_stage_summary(self, stage_idx: int, metrics: Dict):
         """Print stage summary."""
-        print("\n[INFO] Stage Summary:")
-        print(f"  Train Loss: {metrics.get('train_loss', 0):.4f}")
-        print(f"  Val Loss: {metrics.get('val_loss', 0):.4f}")
-        print(f"  Val Accuracy: {metrics.get('val_accuracy', 0):.2f}%")
-
+        logger.info("\n[INFO] Stage Summary:")
+        logger.info(f"  Train Loss: {metrics.get('train_loss', 0):.4f}")
+        logger.info(f"  Val Loss: {metrics.get('val_loss', 0):.4f}")
+        logger.info(f"  Val Accuracy: {metrics.get('val_accuracy', 0):.2f}%")
     def _compute_teacher_baseline(self) -> Dict[str, float]:
         """Compute and cache teacher baseline metrics on validation split."""
         if self._teacher_baseline is not None:
@@ -1128,47 +1145,40 @@ class MultiStageDistiller:
     
     def _print_final_summary(self, report: Dict):
         """Print final summary."""
-        print("\n[INFO] FINAL SUMMARY")
-        print("-" * 70)
-        
+        logger.info("\n[INFO] FINAL SUMMARY")
+        logger.info("-" * 70)
         preflight = report['preflight']
-        print(f"Model Type: {preflight['model_type']}")
-        print(f"Compression Ratio: {preflight['compression_ratio']:.1f}x")
-        print(f"Stages Completed: {len(preflight['stages_completed'])}")
-        
-        print("\n[INFO] Stage-wise Progress:")
+        logger.info(f"Model Type: {preflight['model_type']}")
+        logger.info(f"Compression Ratio: {preflight['compression_ratio']:.1f}x")
+        logger.info(f"Stages Completed: {len(preflight['stages_completed'])}")
+        logger.info("\n[INFO] Stage-wise Progress:")
         for stage_info in preflight['stages_completed']:
             gain = stage_info['accuracy_gain']
             sign = '+' if gain >= 0 else ''
-            print(f"  {stage_info['name']}: {sign}{gain:.2f}% accuracy gain")
-        
+            logger.info(f"  {stage_info['name']}: {sign}{gain:.2f}% accuracy gain")
         if report.get('final_metrics'):
             final = report['final_metrics']
-            print("\n\ud83c\udfaf Final Results:")
-            print(f"  Final Accuracy: {final['final_accuracy']:.2f}%")
-            print(f"  Total Gain: {final['total_accuracy_gain']:.2f}%")
-    
+            logger.info("\n\ud83c\udfaf Final Results:")
+            logger.info(f"  Final Accuracy: {final['final_accuracy']:.2f}%")
+            logger.info(f"  Total Gain: {final['total_accuracy_gain']:.2f}%")
     def _save_report(self, report: Dict):
         """Save report to file."""
         # Save JSON
         json_path = self.output_dir / 'multi_stage_report.json'
         with open(json_path, 'w') as f:
             json.dump(report, f, indent=2, default=str)
-        print(f"\n[SAVE] Report saved: {json_path}")
-        
+        logger.info(f"\n[SAVE] Report saved: {json_path}")
         # Save YAML
         yaml_path = self.output_dir / 'multi_stage_report.yaml'
         with open(yaml_path, 'w') as f:
             yaml.dump(report, f, default_flow_style=False)
-        print(f"[SAVE] Report saved: {yaml_path}")
-
+        logger.info(f"[SAVE] Report saved: {yaml_path}")
         comparison_rows = report.get('stage_comparison', [])
         if comparison_rows:
             comparison_json = self.output_dir / 'stage_comparison.json'
             with open(comparison_json, 'w') as f:
                 json.dump(comparison_rows, f, indent=2, default=str)
-            print(f"[SAVE] Stage comparison saved: {comparison_json}")
-
+            logger.info(f"[SAVE] Stage comparison saved: {comparison_json}")
             comparison_csv = self.output_dir / 'stage_comparison.csv'
             fieldnames = [
                 'stage',
@@ -1190,9 +1200,7 @@ class MultiStageDistiller:
                 writer.writeheader()
                 for row in comparison_rows:
                     writer.writerow({key: row.get(key) for key in fieldnames})
-            print(f"[SAVE] Stage comparison saved: {comparison_csv}")
-
-
+            logger.info(f"[SAVE] Stage comparison saved: {comparison_csv}")
 # Convenience function for backward compatibility
 def run_multi_stage_distillation(
     teacher: nn.Module,

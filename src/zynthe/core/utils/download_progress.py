@@ -3,6 +3,9 @@ Download Progress Hook for HuggingFace Models
 Tracks model download progress and reports via ProgressTracker
 """
 
+from __future__ import annotations
+
+
 import os
 from typing import Optional, Any
 from pathlib import Path

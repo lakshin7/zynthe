@@ -3,12 +3,18 @@ Real-time Download Progress Tracker for HuggingFace Models
 Monitors model downloads and emits progress updates
 """
 
+from __future__ import annotations
+
+
 import sys
 from typing import Optional, Callable, Dict, Any
 from pathlib import Path
 import threading
 import time
 from functools import wraps
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadProgressMonitor:
@@ -41,7 +47,7 @@ class DownloadProgressMonitor:
         stage = f"downloading_{self.role}"
         # Clamp progress between 0 and 1
         progress = max(0.0, min(1.0, progress))
-        print(f"[PROGRESS] stage={stage} progress={progress:.3f} message={message}", flush=True)
+        logger.info(f"[PROGRESS] stage={stage} progress={progress:.3f} message={message}", flush=True)
         self.last_log_time = current_time
 
 
@@ -140,8 +146,7 @@ def monitor_cache_directory(model_id: str, role: str, timeout: int = 300):
                         break
                         
         except Exception as e:
-            print(f"[DEBUG] Cache monitoring error: {e}", file=sys.stderr)
-            
+            logger.debug(f"[DEBUG] Cache monitoring error: {e}", file=sys.stderr)
         time.sleep(0.5)
 
 
@@ -235,11 +240,9 @@ def install_progress_hooks():
                 
                 cls.from_pretrained = classmethod(make_wrapper(original_from_pretrained))
         
-        print("[DEBUG] Progress hooks installed successfully", file=sys.stderr)
+        logger.debug("[DEBUG] Progress hooks installed successfully", file=sys.stderr)
     except Exception as e:
-        print(f"[DEBUG] Failed to install progress hooks: {e}", file=sys.stderr)
-
-
+        logger.debug(f"[DEBUG] Failed to install progress hooks: {e}", file=sys.stderr)
 def uninstall_progress_hooks():
     """Restore original from_pretrained methods"""
     try:
@@ -253,7 +256,6 @@ def uninstall_progress_hooks():
                 cls.from_pretrained = _patched_classes[cls_name]
                 del _patched_classes[cls_name]
         
-        print("[DEBUG] Progress hooks uninstalled", file=sys.stderr)
+        logger.debug("[DEBUG] Progress hooks uninstalled", file=sys.stderr)
     except Exception as e:
-        print(f"[DEBUG] Failed to uninstall progress hooks: {e}", file=sys.stderr)
-
+        logger.debug(f"[DEBUG] Failed to uninstall progress hooks: {e}", file=sys.stderr)

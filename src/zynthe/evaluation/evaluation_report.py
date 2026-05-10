@@ -3,6 +3,9 @@ Evaluation Report Module
 Defines the standard EvaluationReport dataclass for modality-agnostic evaluation results.
 """
 
+from __future__ import annotations
+
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path

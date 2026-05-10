@@ -11,6 +11,9 @@ Detects and profiles available hardware resources:
 6. Compute capability assessment
 """
 
+from __future__ import annotations
+
+
 import torch
 import platform
 import psutil
