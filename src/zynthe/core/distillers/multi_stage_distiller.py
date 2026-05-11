@@ -651,6 +651,43 @@ class MultiStageDistiller:
         except TypeError:
             return distiller_cls(self.teacher, self.student, distiller_config)
 
+    def _adaptive_lr(self, stage_idx: int) -> float:
+        """Compute an adaptive learning rate based on model size and stage.
+
+        Base LR is chosen from the student's trainable parameter count
+        using empirically proven scaling (smaller models tolerate higher
+        LR).  Each subsequent stage decays by ``stage_decay`` since later
+        stages fine-tune an already partially-trained student.
+
+        Returns:
+            Computed learning rate (float).
+        """
+        trainable_params = sum(
+            p.numel() for p in self.student.parameters() if p.requires_grad
+        )
+
+        # Base LR from model size (matches DistilBERT/TinyBERT/MiniLM ranges)
+        if trainable_params < 5_000_000:       # < 5M  (tiny)
+            base_lr = 2e-3
+        elif trainable_params < 30_000_000:    # < 30M (small, e.g. DistilBERT)
+            base_lr = 1e-3
+        elif trainable_params < 100_000_000:   # < 100M (medium, e.g. BERT-base)
+            base_lr = 5e-4
+        elif trainable_params < 500_000_000:   # < 500M (large, e.g. BERT-large)
+            base_lr = 2e-4
+        else:                                  # 500M+ (XL / LLM)
+            base_lr = 5e-5
+
+        # Stage decay: later stages refine with smaller steps
+        stage_decay = 0.7
+        lr = base_lr * (stage_decay ** (stage_idx - 1))
+
+        logger.info(
+            "  Adaptive LR: %.1e (base=%.1e, params=%.1fM, stage_decay=%.1f^%d)",
+            lr, base_lr, trainable_params / 1e6, stage_decay, stage_idx - 1,
+        )
+        return lr
+
     def _run_stage(self, stage_idx: int, stage_cfg: Dict) -> Dict[str, float]:
         """
         Run single distillation stage.
@@ -698,7 +735,13 @@ class MultiStageDistiller:
         distiller = self._instantiate_distiller(distiller_cls, distiller_config)
 
         # Initialize optimizer and scheduler
-        learning_rate = distiller_config.get("lr", distiller_config.get("learning_rate", 2e-5))
+        # Adaptive LR: scale based on student size and stage progression.
+        # Users can always override via config "lr" or "learning_rate".
+        config_lr = distiller_config.get("lr", distiller_config.get("learning_rate", None))
+        if config_lr is not None:
+            learning_rate = float(config_lr)
+        else:
+            learning_rate = self._adaptive_lr(stage_idx)
         weight_decay = distiller_config.get("weight_decay", 0.01)
         optimizer_type = distiller_config.get(
             "optimizer_type", distiller_config.get("optimizer", "adamw")
@@ -724,7 +767,7 @@ class MultiStageDistiller:
 
         # Train stage
         epochs = stage_cfg.get("epochs", 3)
-        logger.info(f"Training for {epochs} epochs...")
+        logger.info(f"Training for {epochs} epochs (lr={learning_rate:.1e}, optimizer={optimizer_type})...")
         stage_metrics = {"train_loss": 0.0, "val_loss": 0.0, "val_accuracy": 0.0}
 
         # Training loop
@@ -865,21 +908,14 @@ class MultiStageDistiller:
                 # Forward pass
                 try:
                     t0 = time.perf_counter()
-                    if isinstance(inputs, dict):
-                        student_out = self.student(**inputs)
-                    else:
-                        student_out = self.student(inputs)
+                    # Use _safe_forward to handle dtype mismatches (float16 models)
+                    student_out = distiller._safe_forward(
+                        self.student, inputs, {}
+                    )
                     student_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
                     # Extract logits - handle dict, object with logits attr, or tensor
-                    if isinstance(student_out, dict):
-                        logits = student_out["logits"]
-                    elif hasattr(student_out, "logits"):
-                        logits = student_out.logits
-                    elif isinstance(student_out, tuple):
-                        logits = student_out[0]
-                    else:
-                        logits = student_out
+                    logits = distiller._extract_logits_tensor(student_out)
 
                     # Compute accuracy
                     if labels is not None and hasattr(logits, "dim") and logits.dim() >= 2:
