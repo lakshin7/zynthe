@@ -211,11 +211,15 @@ class MultiStagePipeline(BasePipeline):
                     pipeline.setup()
                     pipeline._is_setup = True
 
-        # Normalize weights if requested
-        if self.normalize_weights and self._total_weight > 0:
-            for stage in self.stages:
-                stage.weight /= self._total_weight
-            logger.info(f"[{self.name}] Normalized stage weights")
+        # Normalize weights if requested.
+        # Use current stage weights (not stale _total_weight) so repeated setup()
+        # calls remain idempotent and do not keep shrinking stage weights.
+        if self.normalize_weights:
+            total_weight = sum(stage.weight for stage in self.stages)
+            if total_weight > 0:
+                for stage in self.stages:
+                    stage.weight /= total_weight
+                logger.info(f"[{self.name}] Normalized stage weights")
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -253,8 +257,10 @@ class MultiStagePipeline(BasePipeline):
 
         for stage in self.stages:
             # Evaluate optional condition
-            if stage.condition is not None and not stage.condition(batch, all_outputs):
-                continue
+            if stage.condition is not None:
+                decision = bool(stage.condition(batch, all_outputs))
+                if not decision:
+                    continue
 
             stage_outputs: Dict[str, Any] = {}
             for i, pipeline in enumerate(stage.pipelines):

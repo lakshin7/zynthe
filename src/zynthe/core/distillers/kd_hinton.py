@@ -757,7 +757,7 @@ class KDHintonDistiller(BaseDistiller):
                             hint_s, size=hint_t.shape[2:], mode=mode, align_corners=align_corners
                         )
 
-                    hint_key = f"hint_{i}_{s_layer}"
+                    hint_key = f"hint_{i}_{s_layer}".replace(".", "_")
                     regressor = self._ensure_regressor(hint_key, hint_cfg, hint_s, hint_t)
                     hint_s = regressor(hint_s)
 
@@ -843,7 +843,7 @@ class KDHintonDistiller(BaseDistiller):
                 hint_s = student_features[s_layer]
 
                 # Apply regressor if available
-                hint_key = f"hint_{i}_{s_layer}"
+                hint_key = f"hint_{i}_{s_layer}".replace(".", "_")
                 if hint_key in self.hint_regressors:
                     hint_s = self.hint_regressors[hint_key](hint_s)
 

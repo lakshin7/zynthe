@@ -213,7 +213,7 @@ class VLMModelAdapter(ModelAdapter):
         out_dim: int,
         device: torch.device,
     ) -> nn.Linear:
-        proj_key = f"proj_{key}_{in_dim}_{out_dim}"
+        proj_key = f"proj_{key}_{in_dim}_{out_dim}".replace(".", "_")
         if proj_key not in self._projections:
             proj = nn.Linear(in_dim, out_dim, bias=False).to(device)
             nn.init.kaiming_uniform_(proj.weight)

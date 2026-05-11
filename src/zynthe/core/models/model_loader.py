@@ -210,9 +210,12 @@ class ModelLoader:
             model_class = AutoModel
 
         resolved_location = map_location or str(self.device)
-        model = model_class.from_pretrained(
-            str(checkpoint_path), torch_dtype=self.model_cfg.get("torch_dtype")
-        )
+        resume_dtype = _to_torch_dtype(self.model_cfg.get("torch_dtype"))
+        resume_kwargs: Dict[str, Any] = {}
+        if resume_dtype is not None:
+            resume_kwargs["torch_dtype"] = resume_dtype
+
+        model = model_class.from_pretrained(str(checkpoint_path), **resume_kwargs)
 
         try:
             tokenizer = self._load_artifact_processor(str(checkpoint_path), model_type)

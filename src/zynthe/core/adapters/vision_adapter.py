@@ -190,7 +190,7 @@ class VisionModelAdapter(ModelAdapter):
         device: torch.device,
     ) -> nn.Linear:
         """Lazily create a linear projection for dimension alignment."""
-        proj_key = f"proj_{key}_{in_dim}_{out_dim}"
+        proj_key = f"proj_{key}_{in_dim}_{out_dim}".replace(".", "_")
         if proj_key not in self._projections:
             proj = nn.Linear(in_dim, out_dim, bias=False).to(device)
             nn.init.kaiming_uniform_(proj.weight)
@@ -205,7 +205,7 @@ class VisionModelAdapter(ModelAdapter):
         device: torch.device,
     ) -> nn.Conv2d:
         """Lazily create a 1x1 conv projection for channel alignment."""
-        proj_key = f"conv_{key}_{in_channels}_{out_channels}"
+        proj_key = f"conv_{key}_{in_channels}_{out_channels}".replace(".", "_")
         if proj_key not in self._projections:
             proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False).to(device)
             nn.init.kaiming_uniform_(proj.weight)

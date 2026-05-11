@@ -639,7 +639,7 @@ class FeatureDistiller(BaseDistiller):
                         )
                         fsp_loss_total = fsp_loss_total + fsp_loss
 
-            if fsp_loss_total > 0:
+            if fsp_loss_total.item() > 0:
                 total_loss = total_loss + fsp_loss_total
                 loss_dict["fsp_loss"] = fsp_loss_total.item()
 
