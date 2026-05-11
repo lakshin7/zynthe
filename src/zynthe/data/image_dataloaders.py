@@ -93,7 +93,8 @@ class _VisionDatasetWrapper(Dataset):
 def _require_torchvision() -> Any:
     if tv_datasets is None:
         raise RuntimeError(
-            "torchvision is required for image dataloaders. Install torchvision to use vision datasets."
+            "torchvision is required for image dataloaders. "
+            "Install torchvision to use vision datasets."
         )
     return tv_datasets
 

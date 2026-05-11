@@ -201,7 +201,8 @@ def compute_precision_recall_curve_data(pred_probs, labels):
     preds_np = _to_numpy(pred_probs)
     labels_np = _to_numpy(labels)
     if preds_np.ndim == 2 and preds_np.shape[1] > 1:
-        # Assume positive class is 1 (binary); for multiclass fallback to macro average by selecting predicted class
+        # Assume positive class is 1 (binary); for multiclass fallback to macro
+        # average by selecting predicted class
         if preds_np.shape[1] == 2:
             scores = preds_np[:, 1]
         else:

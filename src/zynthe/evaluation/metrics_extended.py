@@ -243,7 +243,8 @@ class DistillationEfficacyIndex:
         """
         Compute Distillation Efficacy Index.
 
-        DEI = (Acc_student / Acc_teacher) × (Params_teacher / Params_student) × (1 + retention_bonus)
+        DEI = (Acc_student / Acc_teacher) ×
+        (Params_teacher / Params_student) × (1 + retention_bonus)
 
         Higher DEI = better distillation (maintained accuracy with compression)
 

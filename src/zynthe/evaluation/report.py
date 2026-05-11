@@ -76,7 +76,9 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
         for plot in plots:
             fname = os.path.basename(plot)
             html_lines.append(
-                f'<div style="margin-bottom:1em;"><img src="{fname}" alt="{fname}" style="max-width:600px;"><br><small>{fname}</small></div>'
+                '<div style="margin-bottom:1em;">'
+                f'<img src="{fname}" alt="{fname}" style="max-width:600px;">'
+                f'<br><small>{fname}</small></div>'
             )
         html_lines.append("</body>")
         html_lines.append("</html>")
@@ -95,7 +97,8 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
         for epoch, stats in summary.items():
             lines.append(
                 f"| {epoch} | {stats['train_loss']:.4f} | {stats['val_loss']:.4f} | "
-                f"{stats['accuracy']:.4f} | {stats['f1']:.4f} | {stats['precision']:.4f} | {stats['recall']:.4f} |"
+                f"{stats['accuracy']:.4f} | {stats['f1']:.4f} | "
+                f"{stats['precision']:.4f} | {stats['recall']:.4f} |"
             )
         lines.append("\n## Plots\n")
         for plot in plots:

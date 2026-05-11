@@ -473,7 +473,8 @@ def plot_epoch_micro_series(
     save_path: str,
 ):
     """
-    Plot micro-series for a single epoch: per-batch train/val losses and running validation accuracy.
+    Plot micro-series for a single epoch: per-batch train/val losses and
+    running validation accuracy.
 
     Args:
         title_prefix: Label prefix like "Student" or "Teacher"
@@ -693,8 +694,10 @@ def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
     rows = max(1, math.ceil(len(panel_specs) / cols))
     fig, axes = plt.subplots(rows, cols, figsize=(7.5 * cols, 4.5 * rows))
     axes = np.atleast_1d(axes).flatten()
+    model_name = getattr(report, "model_name", "model")
+    modality = getattr(report, "modality", "text").capitalize()
     fig.suptitle(
-        f"Evaluation Dashboard: {getattr(report, 'model_name', 'model')} ({getattr(report, 'modality', 'text').capitalize()})",
+        f"Evaluation Dashboard: {model_name} ({modality})",
         fontsize=16,
         fontweight="bold",
     )

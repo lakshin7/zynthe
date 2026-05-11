@@ -183,7 +183,8 @@ class JsonlDataset(Dataset):
             return processed
 
         LOG.warning(
-            "Advanced preprocessing removed all samples for %s; reverting to basic-preprocessed data",
+            "Advanced preprocessing removed all samples for %s; reverting to "
+            "basic-preprocessed data",
             self.file_path,
         )
         # Re-read raw file and re-apply basic preprocessing as a fallback.

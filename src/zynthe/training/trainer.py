@@ -116,7 +116,10 @@ class Trainer:
         )
         if self.gradient_accumulation_steps > 1:
             logger.info(
-                f"[OPTIMIZATION] Gradient Accumulation enabled ({self.gradient_accumulation_steps} steps) - effective batch size x{self.gradient_accumulation_steps}"
+                "[OPTIMIZATION] Gradient Accumulation enabled (%s steps) - "
+                "effective batch size x%s",
+                self.gradient_accumulation_steps,
+                self.gradient_accumulation_steps,
             )
         # 3. Model Compilation - DISABLED for type safety
         # torch.compile() is powerful but causes type inference issues
@@ -130,7 +133,8 @@ class Trainer:
         )  # Update every N batches
         if self.websocket_callback:
             logger.info(
-                f"[OPTIMIZATION] Live metrics streaming enabled (update every {self.update_frequency} batches)"
+                "[OPTIMIZATION] Live metrics streaming enabled (update every %s batches)",
+                self.update_frequency,
             )
         # 5. Mac M2 specific optimizations
         if device.type == "mps":
@@ -469,8 +473,9 @@ class Trainer:
         acc_str = f"{running_acc*100:.2f}%" if running_acc is not None else "N/A"
         console_msg = (
             f"[{phase.upper():7}] Ep {epoch} Batch {batch_idx+1:04d}/{batches_total} "
-            f"Loss={loss:.4f} (scaled={scaled_loss:.4f}) LR={lr:.2e} Grad={grad_norm_str} Acc={acc_str} "
-            f"Throughput={throughput:.1f} samp/s Elapsed={elapsed:.1f}s"
+            f"Loss={loss:.4f} (scaled={scaled_loss:.4f}) LR={lr:.2e} "
+            f"Grad={grad_norm_str} Acc={acc_str} Throughput={throughput:.1f} samp/s "
+            f"Elapsed={elapsed:.1f}s"
         )
         if self.show_eta:
             console_msg += f" ETA={eta_s:.1f}s"
@@ -1138,7 +1143,9 @@ class Trainer:
                     grad_stats = GradientManager.get_gradient_stats(self.student)
                     if grad_stats["grad_norm"] > 10.0:  # Warn about potential gradient explosion
                         logger.warning(
-                            f"[WARN] Large gradient detected: norm={grad_stats['grad_norm']:.2f}, mean={grad_stats['grad_mean']:.4f}"
+                            "[WARN] Large gradient detected: norm=%.2f, mean=%.4f",
+                            grad_stats["grad_norm"],
+                            grad_stats["grad_mean"],
                         )
                 # Step optimizer with AMP scaler
                 if self.use_amp and self.scaler:
@@ -1296,7 +1303,8 @@ class Trainer:
             for batch_idx, batch in enumerate(dataloader):
                 if not batch or not isinstance(batch, dict):
                     logger.warning(
-                        f"[WARNING] Skipping empty or malformed batch at index {batch_idx} during evaluation"
+                        "[WARNING] Skipping empty or malformed batch at index %s during evaluation",
+                        batch_idx,
                     )
                     failed_batches += 1
                     continue
@@ -1304,7 +1312,10 @@ class Trainer:
                     batch = {k: v.to(self.device) for k, v in batch.items() if hasattr(v, "to")}
                 except Exception as e:
                     logger.warning(
-                        f"[WARNING] Failed to move batch to device at index {batch_idx} during evaluation: {e}"
+                        "[WARNING] Failed to move batch to device at index %s "
+                        "during evaluation: %s",
+                        batch_idx,
+                        e,
                     )
                     failed_batches += 1
                     continue
@@ -1324,7 +1335,9 @@ class Trainer:
                     teacher_outputs = self.teacher(**teacher_batch, **teacher_runtime_kwargs)
                 except Exception as e:
                     logger.warning(
-                        f"[WARNING] Teacher forward pass failed at batch {batch_idx} during evaluation: {e}"
+                        "[WARNING] Teacher forward pass failed at batch %s during evaluation: %s",
+                        batch_idx,
+                        e,
                     )
                     failed_batches += 1
                     continue
@@ -1333,7 +1346,9 @@ class Trainer:
                     student_outputs = self.student(**student_batch, **student_runtime_kwargs)
                 except Exception as e:
                     logger.warning(
-                        f"[WARNING] Student forward pass failed at batch {batch_idx} during evaluation: {e}"
+                        "[WARNING] Student forward pass failed at batch %s during evaluation: %s",
+                        batch_idx,
+                        e,
                     )
                     failed_batches += 1
                     continue
@@ -1359,7 +1374,9 @@ class Trainer:
 
                 except Exception as e:
                     logger.warning(
-                        f"[WARNING] Loss computation failed at batch {batch_idx} during evaluation: {e}"
+                        "[WARNING] Loss computation failed at batch %s during evaluation: %s",
+                        batch_idx,
+                        e,
                     )
                     loss = torch.tensor(0.0, device=self.device)
 
@@ -1500,7 +1517,12 @@ class Trainer:
                 # Log progress every 10 batches
                 if (batch_idx + 1) % 10 == 0:
                     LOG.info(
-                        f"  Eval Batch {batch_idx + 1}/{len(dataloader)}: Loss={loss.item():.4f}, Preds={len(all_preds)}, Labels={len(all_labels)}"
+                        "  Eval Batch %s/%s: Loss=%.4f, Preds=%s, Labels=%s",
+                        batch_idx + 1,
+                        len(dataloader),
+                        loss.item(),
+                        len(all_preds),
+                        len(all_labels),
                     )
 
         # Validate evaluation results
@@ -1514,8 +1536,12 @@ class Trainer:
         max_allowed_failures = max(1, int(0.1 * len(dataloader)))  # Allow up to 10% failures
         if failed_batches > max_allowed_failures:
             LOG.warning(
-                f"High failure rate during evaluation: {failed_batches}/{len(dataloader)} batches failed "
-                f"({100 * failed_batches / len(dataloader):.1f}%). Max allowed: {max_allowed_failures}"
+                "High failure rate during evaluation: %s/%s batches failed (%.1f%%). "
+                "Max allowed: %s",
+                failed_batches,
+                len(dataloader),
+                100 * failed_batches / len(dataloader),
+                max_allowed_failures,
             )
 
         avg_loss = total_loss / num_batches  # Safe now since num_batches > 0
@@ -1544,7 +1570,10 @@ class Trainer:
         self.last_labels = all_labels
 
         LOG.info(
-            f"Evaluation complete: {num_batches} batches, {len(all_preds)} predictions, {len(all_labels)} labels"
+            "Evaluation complete: %s batches, %s predictions, %s labels",
+            num_batches,
+            len(all_preds),
+            len(all_labels),
         )
 
         metrics = []
@@ -1554,7 +1583,8 @@ class Trainer:
                 pred_probs_np = np.concatenate(all_probabilities, axis=0)
             except ValueError:
                 LOG.warning(
-                    "Failed to concatenate prediction probabilities; skipping probability-based metrics"
+                    "Failed to concatenate prediction probabilities; "
+                    "skipping probability-based metrics"
                 )
                 pred_probs_np = None
 
@@ -1666,7 +1696,9 @@ class Trainer:
             self.eval_calibration_history.append(calibration_payload)
 
         logger.info(
-            f"[EVAL] Evaluation completed. Average Loss: {avg_loss:.4f}, Metrics: {metrics if metrics else 'N/A'}"
+            "[EVAL] Evaluation completed. Average Loss: %.4f, Metrics: %s",
+            avg_loss,
+            metrics if metrics else "N/A",
         )
         if diagnostics.get("warnings"):
             LOG.info(f"Evaluation diagnostics flagged: {diagnostics['warnings']}")
@@ -1833,11 +1865,15 @@ class Trainer:
         start_epoch = int(max(0, self.resume_epoch))
         if start_epoch >= epochs:
             logger.info(
-                f"[INFO] Resume epoch {start_epoch} is >= configured epochs ({epochs}); skipping training loop."
+                "[INFO] Resume epoch %s is >= configured epochs (%s); skipping training loop.",
+                start_epoch,
+                epochs,
             )
         else:
             logger.info(
-                f"[INFO] Training started for {epochs} epochs (starting at epoch {start_epoch + 1})."
+                "[INFO] Training started for %s epochs (starting at epoch %s).",
+                epochs,
+                start_epoch + 1,
             )
         for epoch in range(start_epoch, epochs):
             logger.info(f"[INFO] Starting epoch {epoch+1}/{epochs}")
@@ -1909,7 +1945,11 @@ class Trainer:
             metrics_history.append(epoch_record)
 
             logger.info(
-                f"[INFO] Epoch {epoch+1} summary: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, Metrics={val_metrics_dict}"
+                "[INFO] Epoch %s summary: Train Loss=%.4f, Val Loss=%.4f, Metrics=%s",
+                epoch + 1,
+                train_loss,
+                val_loss,
+                val_metrics_dict,
             )
             # Step scheduler only for epoch-based schedulers (ReduceLROnPlateau)
             if self.scheduler is not None:
@@ -1939,11 +1979,13 @@ class Trainer:
             else:
                 self.no_improve_epochs += 1
                 logger.info(
-                    f"[INFO] No improvement in validation loss for {self.no_improve_epochs} epoch(s)."
+                    "[INFO] No improvement in validation loss for %s epoch(s).",
+                    self.no_improve_epochs,
                 )
                 if self.no_improve_epochs >= self.early_stop_patience:
                     logger.info(
-                        f"[INFO] Early stopping triggered after {self.no_improve_epochs} epochs without improvement."
+                        "[INFO] Early stopping triggered after %s epochs without improvement.",
+                        self.no_improve_epochs,
                     )
                     early_stop_triggered = True
 
@@ -2118,7 +2160,8 @@ class Trainer:
                 logger.warning(f"[WARNING] Failed to plot final metrics: {e}")
         else:
             logger.info(
-                "[INFO] Skipping final metrics plotting due to missing or mismatched predictions and labels."
+                "[INFO] Skipping final metrics plotting due to missing or "
+                "mismatched predictions and labels."
             )
         # Save extended metrics history
         try:
@@ -2197,7 +2240,8 @@ class Trainer:
             recall = record.get("recall", 0)
             print(
                 f"[SUMMARY] Epoch {epoch}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, "
-                f"Accuracy={accuracy:.4f}, F1={f1:.4f}, Precision={precision:.4f}, Recall={recall:.4f}"
+                f"Accuracy={accuracy:.4f}, F1={f1:.4f}, "
+                f"Precision={precision:.4f}, Recall={recall:.4f}"
             )
         # No plotting here to avoid repeated visualizations
 
@@ -2286,7 +2330,8 @@ class Trainer:
                 # Ensure loss requires grad
                 if not loss.requires_grad:
                     LOG.warning(
-                        f"Teacher loss at batch {batch_idx} does not require grad, skipping backward"
+                        "Teacher loss at batch %s does not require grad, skipping backward",
+                        batch_idx,
                     )
                     continue
 
@@ -2682,7 +2727,10 @@ class Trainer:
 
         if status in ("overfitting", "mild_overfitting"):
             logger.info(
-                f"[OVERFIT-GUARD] {status_label} detected at epoch {epoch_idx} (confidence {confidence:.2f})."
+                "[OVERFIT-GUARD] %s detected at epoch %s (confidence %.2f).",
+                status_label,
+                epoch_idx,
+                confidence,
             )
         event_record = {
             "epoch": epoch_idx,
@@ -2710,10 +2758,12 @@ class Trainer:
                     }
                 )
                 logger.info(
-                    f"[OVERFIT-MITIGATION] Applied interventions: {', '.join(mitigation_actions)}."
+                    "[OVERFIT-MITIGATION] Applied interventions: %s.",
+                    ", ".join(mitigation_actions),
                 )
                 logger.info(
-                    "[OVERFIT-MITIGATION] Continuing training to measure impact before considering a halt."
+                    "[OVERFIT-MITIGATION] Continuing training to measure impact "
+                    "before considering a halt."
                 )
                 return False
 
@@ -2764,7 +2814,8 @@ class Trainer:
         ckpt_path = Path(checkpoint_dir)
         if not ckpt_path.exists():
             logger.warning(
-                f"[WARNING] Checkpoint directory {checkpoint_dir} does not exist. Starting from scratch."
+                "[WARNING] Checkpoint directory %s does not exist. Starting from scratch.",
+                checkpoint_dir,
             )
             return
 
@@ -2813,7 +2864,9 @@ class Trainer:
                     self.resume_global_step = int(max(0, metadata.global_step))
                     if metadata.epoch > 0:
                         logger.info(
-                            f"[INFO] Resumed metadata: epoch={metadata.epoch}, step={metadata.global_step}"
+                            "[INFO] Resumed metadata: epoch=%s, step=%s",
+                            metadata.epoch,
+                            metadata.global_step,
                         )
                 else:
                     # Backward compatibility with legacy top-level checkpoint fields.

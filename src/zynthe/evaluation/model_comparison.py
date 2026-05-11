@@ -560,26 +560,34 @@ class ModelComparator:
         report.append("## [ARCH] Model Statistics\n\n")
         report.append("| Metric | Teacher | Student |\n")
         report.append("|--------|---------|----------|\n")
-        report.append(
-            f"| Parameters | {teacher_results['num_parameters']:,} | {student_results['num_parameters']:,} |\n"
-        )
+        t_params = teacher_results["num_parameters"]
+        s_params = student_results["num_parameters"]
+        report.append(f"| Parameters | {t_params:,} | {s_params:,} |\n")
         report.append(f"| Size Ratio | 1.0x | {1/compression:.3f}x |\n\n")
 
         # Performance Metrics
         report.append("## [INFO] Performance Metrics\n\n")
         report.append("| Metric | Teacher | Student | Difference |\n")
         report.append("|--------|---------|---------|------------|\n")
+        t_acc = teacher_results["accuracy"]
+        s_acc = student_results["accuracy"]
         report.append(
-            f"| Accuracy | {teacher_results['accuracy']:.4f} | {student_results['accuracy']:.4f} | {teacher_results['accuracy'] - student_results['accuracy']:.4f} |\n"
+            f"| Accuracy | {t_acc:.4f} | {s_acc:.4f} | {t_acc - s_acc:.4f} |\n"
         )
+        t_pre = teacher_results["precision"]
+        s_pre = student_results["precision"]
         report.append(
-            f"| Precision | {teacher_results['precision']:.4f} | {student_results['precision']:.4f} | {teacher_results['precision'] - student_results['precision']:.4f} |\n"
+            f"| Precision | {t_pre:.4f} | {s_pre:.4f} | {t_pre - s_pre:.4f} |\n"
         )
+        t_rec = teacher_results["recall"]
+        s_rec = student_results["recall"]
         report.append(
-            f"| Recall | {teacher_results['recall']:.4f} | {student_results['recall']:.4f} | {teacher_results['recall'] - student_results['recall']:.4f} |\n"
+            f"| Recall | {t_rec:.4f} | {s_rec:.4f} | {t_rec - s_rec:.4f} |\n"
         )
+        t_f1 = teacher_results["f1"]
+        s_f1 = student_results["f1"]
         report.append(
-            f"| F1-Score | {teacher_results['f1']:.4f} | {student_results['f1']:.4f} | {teacher_results['f1'] - student_results['f1']:.4f} |\n\n"
+            f"| F1-Score | {t_f1:.4f} | {s_f1:.4f} | {t_f1 - s_f1:.4f} |\n\n"
         )
 
         # Visualizations
@@ -596,13 +604,19 @@ class ModelComparator:
         # Conclusion
         report.append("## [TARGET] Conclusion\n\n")
         if abs(acc_diff) < 2.0:
-            verdict = "[OK] **Excellent**: Student model maintains near-identical performance with significant size reduction."
+            verdict = (
+                "[OK] **Excellent**: Student model maintains near-identical "
+                "performance with significant size reduction."
+            )
         elif abs(acc_diff) < 5.0:
             verdict = (
                 " **Good**: Student model shows acceptable performance with good compression ratio."
             )
         else:
-            verdict = " **Fair**: Student model shows noticeable performance drop. Consider retraining with adjusted hyperparameters."
+            verdict = (
+                " **Fair**: Student model shows noticeable performance drop. "
+                "Consider retraining with adjusted hyperparameters."
+            )
 
         report.append(f"{verdict}\n\n")
         report.append(f"The student model achieves **{compression:.2f}x compression** ")

@@ -112,11 +112,13 @@ class Evaluator:
         def _batch_size(model_inputs: Mapping[str, Any]) -> int:
             for key in ("input_ids", "pixel_values"):
                 value = model_inputs.get(key)
-                if getattr(value, "shape", None) is not None and len(value.shape) > 0:  # type: ignore[union-attr]
-                    return int(value.shape[0])  # type: ignore[union-attr]
+                shape = getattr(value, "shape", None)  # type: ignore[union-attr]
+                if shape is not None and len(shape) > 0:  # type: ignore[union-attr]
+                    return int(shape[0])  # type: ignore[union-attr]
             for value in model_inputs.values():
-                if getattr(value, "shape", None) is not None and len(value.shape) > 0:  # type: ignore[union-attr]
-                    return int(value.shape[0])  # type: ignore[union-attr]
+                shape = getattr(value, "shape", None)  # type: ignore[union-attr]
+                if shape is not None and len(shape) > 0:  # type: ignore[union-attr]
+                    return int(shape[0])  # type: ignore[union-attr]
             return 0
 
         with torch.no_grad():
