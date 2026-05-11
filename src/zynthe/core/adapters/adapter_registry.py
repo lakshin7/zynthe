@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from typing import Dict, Type
 
-import torch.nn as nn
-
 from .base_adapter import ModelAdapter
 from .text_adapter import TextModelAdapter
 from .code_adapter import CodeModelAdapter

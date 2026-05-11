@@ -257,6 +257,27 @@ class BasePipeline(ABC, nn.Module):
         
         # Update tracking
         self._total_batches_processed += 1
+        self._cumulative_metrics.total_loss += metrics.total_loss
+        self._cumulative_metrics.execution_time_ms += metrics.execution_time_ms
+        self._cumulative_metrics.memory_allocated_mb = max(
+            self._cumulative_metrics.memory_allocated_mb,
+            metrics.memory_allocated_mb,
+        )
+        self._cumulative_metrics.memory_reserved_mb = max(
+            self._cumulative_metrics.memory_reserved_mb,
+            metrics.memory_reserved_mb,
+        )
+        for key, value in metrics.component_losses.items():
+            self._cumulative_metrics.component_losses[key] = (
+                self._cumulative_metrics.component_losses.get(key, 0.0) + float(value)
+            )
+        for key, value in metrics.custom_metrics.items():
+            if isinstance(value, (int, float)):
+                self._cumulative_metrics.custom_metrics[key] = (
+                    float(self._cumulative_metrics.custom_metrics.get(key, 0.0)) + float(value)
+                )
+            else:
+                self._cumulative_metrics.custom_metrics[key] = value
         
         return loss, metrics
     
@@ -270,10 +291,22 @@ class BasePipeline(ABC, nn.Module):
         if self._total_batches_processed == 0:
             return {}
         
+        component_losses = {
+            key: value / self._total_batches_processed
+            for key, value in self._cumulative_metrics.component_losses.items()
+        }
+        custom_metrics = {
+            key: (value / self._total_batches_processed if isinstance(value, (int, float)) else value)
+            for key, value in self._cumulative_metrics.custom_metrics.items()
+        }
         return {
             'batches_processed': self._total_batches_processed,
             'avg_loss': self._cumulative_metrics.total_loss / self._total_batches_processed,
             'total_execution_time_ms': self._cumulative_metrics.execution_time_ms,
+            'peak_memory_allocated_mb': self._cumulative_metrics.memory_allocated_mb,
+            'peak_memory_reserved_mb': self._cumulative_metrics.memory_reserved_mb,
+            'component_losses': component_losses,
+            'custom_metrics': custom_metrics,
         }
     
     def __repr__(self) -> str:

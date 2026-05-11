@@ -13,6 +13,14 @@ from typing import Any, Dict, List, Optional
 from .manifest import ArtifactRecord, Manifest, MANIFEST_FILENAME
 
 
+def _safe_destination(base_dir: Path, member_name: str) -> Path:
+	base_resolved = base_dir.resolve()
+	target = (base_dir / member_name).resolve()
+	if target != base_resolved and base_resolved not in target.parents:
+		raise ValueError(f"Unsafe archive member path: {member_name}")
+	return target
+
+
 @dataclass
 class RegisteredArtifact:
 	source_path: Path
@@ -195,25 +203,53 @@ class PackageVerifier:
 		if self.package_path.suffix == ".zip":
 			with zipfile.ZipFile(self.package_path, "r") as archive:
 				for name in archive.namelist():
-					if name.endswith(MANIFEST_FILENAME):
-						archive.extract(name, destination)
+					if name == MANIFEST_FILENAME:
+						target = _safe_destination(destination, name)
+						target.parent.mkdir(parents=True, exist_ok=True)
+						with archive.open(name) as src, target.open("wb") as dst:
+							shutil.copyfileobj(src, dst)
 						return
 		else:
 			mode = "r:gz" if self.package_path.suffix in {".gz", ".tgz"} else "r"
 			with tarfile.open(str(self.package_path), mode) as archive:  # type: ignore[call-overload]
 				try:
-					archive.extract(MANIFEST_FILENAME, destination)
+					member = archive.getmember(MANIFEST_FILENAME)
 				except KeyError:
-					pass
+					return
+				if member.isfile():
+					target = _safe_destination(destination, member.name)
+					target.parent.mkdir(parents=True, exist_ok=True)
+					source = archive.extractfile(member)
+					if source is not None:
+						with source, target.open("wb") as dst:
+							shutil.copyfileobj(source, dst)
 
 	def _extract_all(self, destination: Path) -> None:
 		if self.package_path.suffix == ".zip":
 			with zipfile.ZipFile(self.package_path, "r") as archive:
-				archive.extractall(destination)
+				for info in archive.infolist():
+					target = _safe_destination(destination, info.filename)
+					if info.is_dir():
+						target.mkdir(parents=True, exist_ok=True)
+						continue
+					target.parent.mkdir(parents=True, exist_ok=True)
+					with archive.open(info) as src, target.open("wb") as dst:
+						shutil.copyfileobj(src, dst)
 		else:
 			mode = "r:gz" if self.package_path.suffix in {".gz", ".tgz"} else "r"
 			with tarfile.open(str(self.package_path), mode) as archive:  # type: ignore[call-overload]
-				archive.extractall(destination)
+				for member in archive.getmembers():
+					target = _safe_destination(destination, member.name)
+					if member.isdir():
+						target.mkdir(parents=True, exist_ok=True)
+						continue
+					if not member.isfile():
+						continue
+					target.parent.mkdir(parents=True, exist_ok=True)
+					source = archive.extractfile(member)
+					if source is not None:
+						with source, target.open("wb") as dst:
+							shutil.copyfileobj(source, dst)
 
 
 __all__ = [

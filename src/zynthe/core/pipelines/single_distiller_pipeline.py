@@ -48,23 +48,30 @@ class SingleDistillerPipeline(BasePipeline):
         Initialize single distiller pipeline.
         
         Args:
-            distiller: An instance of BaseDistiller or any subclass
+            distiller: BaseDistiller or a compatible object with teacher, student, and compute_loss
             config: Optional configuration (merged with distiller config)
             name: Pipeline name (defaults to distiller class name)
         """
-        # Validate distiller
-        if not isinstance(distiller, BaseDistiller):
+        # Accept BaseDistiller subclasses and lightweight duck-typed distillers
+        # used by library consumers/tests.
+        if not all(hasattr(distiller, attr) for attr in ("teacher", "student", "compute_loss")):
             raise TypeError(
-                f"Expected BaseDistiller instance, got {type(distiller).__name__}"
+                "Expected a distiller with teacher, student, and compute_loss attributes, "
+                f"got {type(distiller).__name__}"
             )
         
         # Extract teacher, student, device from distiller
         teacher = distiller.teacher
         student = distiller.student
-        device = distiller.device
+        device = getattr(distiller, "device", None)
+        if device is None:
+            try:
+                device = next(student.parameters()).device
+            except StopIteration:
+                device = torch.device("cpu")
         
         # Merge configs
-        merged_config = {**(distiller.config or {}), **(config or {})}
+        merged_config = {**(getattr(distiller, "config", {}) or {}), **(config or {})}
         
         # Initialize base pipeline
         super().__init__(
@@ -180,9 +187,10 @@ class SingleDistillerPipeline(BasePipeline):
             if name in available:
                 call_kwargs[name] = available[name]
             elif param.default is inspect.Parameter.empty:
-                # Required param not in our pool — pass None and let
-                # the distiller raise a clear error if it matters.
-                call_kwargs[name] = None
+                raise TypeError(
+                    f"{self.distiller.__class__.__name__}.compute_loss requires "
+                    f"unsupported parameter {name!r}"
+                )
         
         result = self.distiller.compute_loss(**call_kwargs)
         

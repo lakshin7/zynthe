@@ -42,6 +42,7 @@ dependencies = [
     "rich>=13.5.2",
     "transformers>=4.34.0",
     "accelerate>=0.23.0",
+    "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]
@@ -83,3 +84,25 @@ packages = ["src/zynthe"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "configs/" = "zynthe/configs/"
+"src/zynthe/py.typed" = "zynthe/py.typed"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["zynthe"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true

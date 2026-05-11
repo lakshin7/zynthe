@@ -1135,7 +1135,7 @@ def validate_config_only(config: Dict[str, Any]) -> Dict[str, Any]:
         Validation report with errors and warnings
         
     Example:
-        >>> from core.preflight.analyser import validate_config_only
+        >>> from zynthe.core.preflight.analyser import validate_config_only
         >>> validation = validate_config_only(cfg_manager.resolved_config)
         >>> if not validation['is_valid']:
         >>>     print("Config errors:", validation['errors'])

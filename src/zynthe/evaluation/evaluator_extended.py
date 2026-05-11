@@ -195,7 +195,7 @@ class DualEvaluator:
                 if (batch_idx + 1) % 20 == 0:
                     logger.info(f"[DUAL EVAL] Processed {batch_idx + 1}/{len(self.dataloader)} batches")
         # Compute standard metrics
-        compute_all_metrics(teacher_preds, all_labels)
+        teacher_metrics = compute_all_metrics(teacher_preds, all_labels)
         student_metrics = compute_all_metrics(student_preds, all_labels)
         
         # Aggregate extended metrics
@@ -207,7 +207,7 @@ class DualEvaluator:
         teacher_logits_cat = torch.cat(teacher_logits_all, dim=0)
         student_logits_cat = torch.cat(student_logits_all, dim=0)
         
-        compute_extended_metrics(
+        extended_metrics = compute_extended_metrics(
             teacher_logits_cat, student_logits_cat,
             temperature=self.temperature
         )
@@ -286,9 +286,10 @@ class DualEvaluator:
             per_class_metrics['f1'] = student_metrics['f1_per_class']
             
         dist_metrics = {
-            'kl_divergence': float(np.mean(kl_divs)),
-            'js_divergence': float(np.mean(js_divs)),
-            'confidence_correlation': float(np.mean(confidence_corrs)),
+            **extended_metrics,
+            'batch_kl_divergence': float(np.mean(kl_divs)) if kl_divs else 0.0,
+            'batch_js_divergence': float(np.mean(js_divs)) if js_divs else 0.0,
+            'batch_confidence_correlation': float(np.mean(confidence_corrs)) if confidence_corrs else 0.0,
             'dei': dei_result['dei'],
             'cas': cas_result['cas']
         }
@@ -300,6 +301,7 @@ class DualEvaluator:
             'speedup': perf_comparison.get('speedup', 0),
             'teacher_latency_ms': perf_comparison.get('teacher_latency_ms', 0),
             'student_latency_ms': perf_comparison.get('student_latency_ms', 0),
+            'teacher_metrics': teacher_metrics,
         }
         
         report = EvaluationReport(

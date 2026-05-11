@@ -12,7 +12,6 @@ from __future__ import annotations
 
 
 from typing import Any, Dict, Type, Optional, Callable
-import torch
 import torch.nn as nn
 
 from .base_pipeline import BasePipeline

@@ -42,6 +42,8 @@ class StudentInference:
         results: List[Dict[str, Any]] = []
         if not texts:
             return results
+        if any(not isinstance(text, str) for text in texts):
+            raise TypeError("StudentInference.predict expects a list of strings")
 
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i : i + batch_size]
@@ -54,7 +56,14 @@ class StudentInference:
             )
             enc = {k: v.to(self.device) for k, v in enc.items()}
             outputs = self.model(**enc)
-            logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
+            if hasattr(outputs, 'logits'):
+                logits = outputs.logits
+            elif isinstance(outputs, (tuple, list)) and outputs:
+                logits = outputs[0]
+            else:
+                raise RuntimeError("Model output does not contain logits")
+            if not torch.is_tensor(logits):
+                raise RuntimeError("Model logits must be a torch.Tensor")
             probs = F.softmax(logits, dim=-1)
             top_prob, top_idx = probs.max(dim=-1)
 

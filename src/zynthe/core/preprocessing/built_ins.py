@@ -102,12 +102,36 @@ class AGNewsAdapter(SampleAdapter):
         }
 
 
-class CIFAR10Adapter(SampleAdapter):
+class VisionClassificationAdapter(SampleAdapter):
+    """Normalize common image-classification samples into image/label fields."""
+
+    IMAGE_KEYS = ("image", "img", "pixel_values")
+    LABEL_KEYS = ("label", "labels", "target", "class", "category")
+
     def adapt(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        image = None
+        for key in self.IMAGE_KEYS:
+            if key in raw:
+                image = raw[key]
+                break
+
+        label = 0
+        for key in self.LABEL_KEYS:
+            if key in raw and raw[key] is not None:
+                label = raw[key]
+                break
+
+        if hasattr(label, "item"):
+            label = label.item()
+
         return {
-            "image": raw.get("image"),
-            "label": int(raw.get("label", 0)),
+            "image": image,
+            "label": int(label),
         }
+
+
+class CIFAR10Adapter(VisionClassificationAdapter):
+    """Backward-compatible name for the generic vision classification adapter."""
 
 
 class GenericTextAdapter(SampleAdapter):
@@ -314,22 +338,22 @@ def register_defaults() -> None:
     )
     PreprocessRegistry.register_dataset(
         "cifar100",
-        CIFAR10Adapter(),
+        VisionClassificationAdapter(),
         {"task": "vision-classification", "modality": "vision", "num_labels": 100},
     )
     PreprocessRegistry.register_dataset(
         "stl10",
-        CIFAR10Adapter(),
+        VisionClassificationAdapter(),
         {"task": "vision-classification", "modality": "vision", "num_labels": 10},
     )
     PreprocessRegistry.register_dataset(
         "imagenet",
-        CIFAR10Adapter(),
+        VisionClassificationAdapter(),
         {"task": "vision-classification", "modality": "vision"},
     )
     PreprocessRegistry.register_dataset(
         "image_folder",
-        CIFAR10Adapter(),
+        VisionClassificationAdapter(),
         {"task": "vision-classification", "modality": "vision"},
     )
     PreprocessRegistry.register_dataset(

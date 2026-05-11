@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .base_adapter import ModelAdapter
 from zynthe.core.utils.device_utils import normalize_model_output
@@ -119,7 +120,22 @@ class VisionModelAdapter(ModelAdapter):
             s_feat = student_features[key]
             aligned_teacher[key] = t_feat
 
-            if t_feat.shape[-1] != s_feat.shape[-1]:
+            if t_feat.ndim == 4 and s_feat.ndim == 4:
+                aligned = s_feat
+                if aligned.shape[-2:] != t_feat.shape[-2:]:
+                    aligned = F.interpolate(
+                        aligned,
+                        size=t_feat.shape[-2:],
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                if aligned.shape[1] != t_feat.shape[1]:
+                    proj = self._get_or_create_channel_projection(
+                        key, aligned.shape[1], t_feat.shape[1], aligned.device,
+                    )
+                    aligned = proj(aligned)
+                aligned_student[key] = aligned
+            elif t_feat.shape[-1] != s_feat.shape[-1]:
                 proj = self._get_or_create_projection(
                     key, s_feat.shape[-1], t_feat.shape[-1], s_feat.device,
                 )
@@ -166,6 +182,17 @@ class VisionModelAdapter(ModelAdapter):
         proj_key = f"proj_{key}_{in_dim}_{out_dim}"
         if proj_key not in self._projections:
             proj = nn.Linear(in_dim, out_dim, bias=False).to(device)
+            nn.init.kaiming_uniform_(proj.weight)
+            self._projections[proj_key] = proj
+        return self._projections[proj_key]
+
+    def _get_or_create_channel_projection(
+        self, key: str, in_channels: int, out_channels: int, device: torch.device,
+    ) -> nn.Conv2d:
+        """Lazily create a 1x1 conv projection for channel alignment."""
+        proj_key = f"conv_{key}_{in_channels}_{out_channels}"
+        if proj_key not in self._projections:
+            proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False).to(device)
             nn.init.kaiming_uniform_(proj.weight)
             self._projections[proj_key] = proj
         return self._projections[proj_key]

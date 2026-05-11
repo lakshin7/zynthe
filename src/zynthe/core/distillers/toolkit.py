@@ -13,12 +13,11 @@ surface to a single ``fit()`` call.
 from __future__ import annotations
 
 import enum
-import json
 import logging
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 import torch
 import torch.nn as nn

@@ -20,7 +20,9 @@ import uuid
 import shutil
 import logging
 import subprocess
-from datetime import datetime
+from copy import deepcopy
+from datetime import datetime, timezone
+from importlib import resources
 from typing import Any, Dict, Optional
 import random
 import numpy as np
@@ -55,10 +57,35 @@ def _deep_update(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, An
     """Recursively update base with override (mutates base)."""
     for k, v in override.items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
-            base[k] = _deep_update(base.get(k, {}), v)
+            base[k] = _deep_update(base[k], v)
         else:
             base[k] = v
     return base
+
+
+def _default_config_path() -> str:
+    """Resolve packaged defaults with a source-tree fallback for editable installs."""
+
+    candidates = []
+    try:
+        candidates.append(resources.files("zynthe").joinpath("configs", _DEFAULTS_FILENAME))
+    except Exception:
+        pass
+
+    here = os.path.abspath(os.path.dirname(__file__))
+    candidates.extend(
+        [
+            os.path.join(here, "..", "..", "configs", _DEFAULTS_FILENAME),
+            os.path.join(here, "..", "..", "..", "..", "configs", _DEFAULTS_FILENAME),
+        ]
+    )
+
+    for candidate in candidates:
+        candidate_path = os.fspath(candidate)
+        if os.path.exists(candidate_path):
+            return candidate_path
+
+    return os.fspath(candidates[0]) if candidates else _DEFAULTS_FILENAME
 
 def _get_env_info() -> Dict[str, Any]:
     info = {
@@ -149,10 +176,9 @@ class ConfigManager:
         env_root = os.environ.get("ZYNTHÉ_EXPERIMENTS_ROOT")
         if env_root:
             experiments_root = env_root
-        # Look for default.yaml in configs/ directory (2 levels up from core/config/)
+        # Prefer packaged defaults; fall back to the repository config in editable installs.
         if defaults_path is None:
-            config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "configs"))
-            defaults_path = os.path.join(config_dir, _DEFAULTS_FILENAME)
+            defaults_path = _default_config_path()
         self.defaults_path = defaults_path
         self.overrides = overrides.copy() if overrides else {}
         self.experiments_root = os.path.abspath(os.path.expanduser(experiments_root))
@@ -252,7 +278,7 @@ class ConfigManager:
             except Exception as e:
                 raise ConfigError(f"Failed to load user config from {self.config_path}: {e}")
 
-        merged = _deep_update(defaults.copy(), user_cfg)
+        merged = _deep_update(deepcopy(defaults), user_cfg)
         merged = _deep_update(merged, self.overrides or {})
         self.raw_config = self._normalize_legacy_aliases(merged)
 
@@ -372,7 +398,7 @@ class ConfigManager:
         _ensure_dir(base)
 
         # experiment id uses timestamp + short uuid
-        ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         short = uuid.uuid4().hex[:8]
         self.experiment_id = f"{ts}_{short}"
         exp_dir = os.path.join(base, self.experiment_id)
@@ -403,7 +429,7 @@ class ConfigManager:
         payload = dict(self.resolved_config)
         meta: Dict[str, Any] = {
             "experiment_id": self.experiment_id,
-            "created_at_utc": datetime.utcnow().isoformat() + "Z",
+            "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "config_version": "v1.0"
         }
         meta["git"] = self.git_info

@@ -20,10 +20,26 @@ from pathlib import Path
 import json
 import logging
 
-logger = logging.getLogger(__name__)
-from datasets import load_dataset, Dataset, DatasetDict
+try:
+    from datasets import load_dataset, Dataset, DatasetDict
+except Exception:  # pragma: no cover - optional dependency
+    load_dataset = None  # type: ignore[assignment]
+
+    class Dataset:  # type: ignore[no-redef]
+        pass
+
+    class DatasetDict:  # type: ignore[no-redef]
+        pass
 
 LOG = logging.getLogger(__name__)
+
+
+def _require_datasets() -> None:
+    if load_dataset is None:
+        raise ImportError(
+            "HuggingFace dataset loading requires the optional eval dependencies. "
+            "Install with `pip install zynthe[eval]`."
+        )
 
 
 class HuggingFaceDatasetLoader:
@@ -130,6 +146,7 @@ class HuggingFaceDatasetLoader:
             >>> dataset = loader.load_from_hub('imdb', split='train')
         """
         LOG.info(f"Loading dataset from HuggingFace Hub: {dataset_path}")
+        _require_datasets()
         if dataset_name:
             LOG.info(f"  Config: {dataset_name}")
         if split:
@@ -255,6 +272,7 @@ class HuggingFaceDatasetLoader:
         LOG.info("="*80)
         LOG.info(f"PREPARING HUGGINGFACE DATASET: {dataset_id}")
         LOG.info("="*80)
+        _require_datasets()
         
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

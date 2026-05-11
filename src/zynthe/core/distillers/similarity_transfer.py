@@ -56,7 +56,8 @@ class SimilarityTransfer(BaseDistiller):
         self,
         teacher: nn.Module,
         student: nn.Module,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        device: Optional[torch.device] = None,
     ):
         """
         Initialize Similarity Transfer distiller.
@@ -122,7 +123,7 @@ class SimilarityTransfer(BaseDistiller):
             self.current_layers = [self.layers[0]] if self.progressive and self.layers else self.layers
 
         # Now call super().__init__() which will call _register_hooks()
-        super().__init__(teacher, student)
+        super().__init__(teacher, student, config=config, device=device)
         
         logger.info("[SIM] Similarity Transfer initialized:")
         logger.info(f"   Metric: {self.similarity_metric}")

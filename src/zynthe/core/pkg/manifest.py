@@ -26,11 +26,6 @@ def _default_environment() -> Dict[str, Any]:
 	}
 
 
-def _read_bytes(path: Path) -> bytes:
-	with path.open("rb") as handle:
-		return handle.read()
-
-
 def compute_sha256(path: Path) -> str:
 	import hashlib
 

@@ -114,6 +114,10 @@ class MultimodalModelAdapter(ModelAdapter):
             if val is not None:
                 result[attr] = val
 
+        if result.get("logits") is None:
+            logits = result.get("logits_per_image")
+            result["logits"] = logits if logits is not None else result.get("itm_score")
+
         return result
 
     def get_hookable_layers(self, model: nn.Module) -> List[str]:

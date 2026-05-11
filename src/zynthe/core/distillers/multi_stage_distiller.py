@@ -50,15 +50,12 @@ try:
 except ImportError:
     HAS_ATTENTION = False
     AttentionTransferDistiller = None  # type: ignore
-    warnings.warn("AttentionTransfer not available")
 
-try:
-    from ..quant.qat import QATDistiller  # type: ignore[import, attr-defined]
-    HAS_QAT = True
-except ImportError:
-    HAS_QAT = False
-    QATDistiller = None  # type: ignore
-    warnings.warn("QAT not available. Stage 'qat' will be skipped.")
+# There is no distiller-shaped QAT class in core.quant. QATRunner is an
+# orchestration runner, not a BaseDistiller implementation, so it should not be
+# registered here until a real QAT distiller exists.
+HAS_QAT = False
+QATDistiller = None  # type: ignore
 
 import logging
 
@@ -1237,4 +1234,3 @@ def run_multi_stage_distillation(
     )
     
     return distiller.run()
-

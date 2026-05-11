@@ -11,17 +11,6 @@ import zynthe.evaluation.metrics
 from zynthe.evaluation.diagnostics import build_eval_diagnostics
 from zynthe.evaluation.evaluation_report import EvaluationReport
 
-try:  # Optional explainability dependencies
-    from zynthe.core.explainability.lime_explainer import LimeTextExplainerWrapper
-except Exception:  # pragma: no cover - optional dependency may be missing
-    LimeTextExplainerWrapper = None  # type: ignore
-
-try:
-    from zynthe.core.explainability.shap_explainer import SHAPExplainer
-except Exception:  # pragma: no cover - optional dependency may be missing
-    SHAPExplainer = None  # type: ignore
-
-
 LOG = logging.getLogger(__name__)
 
 class Evaluator:
@@ -61,9 +50,6 @@ class Evaluator:
         self.explainability_config = dict(explainability_config or {})
         self.enable_runtime_profiling = enable_runtime_profiling
         self.store_batch_text = store_batch_text
-
-        self._lime_explainer: Optional[Any] = None
-        self._shap_explainer: Optional[Any] = None
 
     @staticmethod
     def _normalise_text(sample: Any) -> Optional[str]:
@@ -433,166 +419,9 @@ class Evaluator:
         labels: Sequence[Any],
         probabilities: Optional[np.ndarray],
     ) -> Dict[str, Any]:
-        if not self.explainability_config:
-            return {}
-        if self.task_type != 'classification':
-            return {}
-        if not texts:
-            return {}
-
-        methods_cfg = self.explainability_config.get('methods', ['lime', 'shap'])
-        if isinstance(methods_cfg, str):
-            methods = [methods_cfg.lower()]
-        else:
-            methods = [str(method).lower() for method in methods_cfg]
-        max_samples = int(self.explainability_config.get('num_samples', 4))
-        if max_samples <= 0:
-            return {}
-
-        num_items = min(len(texts), len(preds), len(labels))
-        if num_items == 0:
-            return {}
-
-        confidence_scores: Optional[np.ndarray] = None
-        if probabilities is not None:
-            try:
-                if probabilities.ndim == 2 and probabilities.shape[0] >= num_items:
-                    confidence_scores = probabilities[:num_items].max(axis=1)
-                elif probabilities.ndim == 1 and probabilities.shape[0] >= num_items:
-                    confidence_scores = probabilities[:num_items]
-            except Exception:
-                LOG.debug("Failed to compute confidence scores for explainability", exc_info=True)
-
-        sample_indices = self._select_explainability_indices(preds, labels, num_items, confidence_scores, max_samples)
-        if not sample_indices:
-            return {}
-
-        class_names = self.explainability_config.get('class_names') or self.explainability_config.get('label_names')
-        if isinstance(class_names, Mapping):
-            class_names = list(class_names.values())
-        elif isinstance(class_names, (list, tuple)):
-            class_names = list(class_names)
-        elif class_names is not None:
-            class_names = [str(class_names)]
-        if class_names is None and probabilities is not None and probabilities.ndim == 2:
-            class_names = [f'class_{i}' for i in range(probabilities.shape[1])]
-
-        samples_payload: List[Dict[str, Any]] = []
-        for idx in sample_indices:
-            if idx >= len(texts):
-                continue
-            sample_confidence = None
-            if confidence_scores is not None and idx < confidence_scores.shape[0]:
-                sample_confidence = float(confidence_scores[idx])
-            prediction = preds[idx]
-            try:
-                prediction_int = int(prediction)
-            except Exception:
-                prediction_int = None
-            text_value = self._normalise_text(texts[idx])
-            if not text_value:
-                LOG.debug("Skipping explainability sample %s due to missing text", idx)
-                continue
-            samples_payload.append(
-                {
-                    'index': idx,
-                    'text': text_value,
-                    'label': labels[idx] if idx < len(labels) else None,
-                    'prediction': prediction,
-                    'prediction_index': prediction_int,
-                    'confidence': sample_confidence,
-                }
-            )
-
-        explainability: Dict[str, Any] = {'samples': samples_payload}
-
-        if 'lime' in methods and LimeTextExplainerWrapper is not None:
-            lime_results: List[Dict[str, Any]] = []
-            if self._lime_explainer is None and class_names is not None:
-                try:
-                    self._lime_explainer = LimeTextExplainerWrapper(self.model, self.tokenizer, list(class_names))
-                except Exception as exc:
-                    LOG.warning("Failed to initialise LIME explainer: %s", exc)
-            if self._lime_explainer is not None:
-                num_features = int(self.explainability_config.get('lime_num_features', 8))
-                for sample in samples_payload:
-                    label_index = sample.get('prediction_index')
-                    try:
-                        explanation = self._lime_explainer.explain(sample['text'], num_features=num_features)
-                        top_features = self._lime_explainer.visualize(explanation, num_features=num_features, label=label_index)
-                        lime_results.append(
-                            {
-                                'index': sample['index'],
-                                'prediction': sample['prediction'],
-                                'top_features': top_features,
-                            }
-                        )
-                    except Exception:
-                        LOG.debug("LIME explanation failed for index %s", sample['index'], exc_info=True)
-            if lime_results:
-                explainability['lime'] = lime_results
-
-        if 'shap' in methods and SHAPExplainer is not None:
-            shap_results: List[Dict[str, Any]] = []
-            if self._shap_explainer is None:
-                try:
-                    self._shap_explainer = SHAPExplainer(self.model, self.tokenizer, device=str(self.device))
-                except Exception as exc:
-                    LOG.warning("Failed to initialise SHAP explainer: %s", exc)
-            if self._shap_explainer is not None:
-                sample_texts = [sample['text'] for sample in samples_payload]
-                if sample_texts:
-                    try:
-                        shap_values = self._shap_explainer.explain(sample_texts)
-                        shap_summary = self._shap_explainer.summarize(
-                            shap_values,
-                            top_k=int(self.explainability_config.get('shap_top_k', 10)),
-                        )
-                        for sample, contribs in zip(samples_payload, shap_summary):
-                            shap_results.append(
-                                {
-                                    'index': sample['index'],
-                                    'prediction': sample['prediction'],
-                                    'top_features': contribs,
-                                }
-                            )
-                    except Exception:
-                        LOG.debug("SHAP explanation failed", exc_info=True)
-            if shap_results:
-                explainability['shap'] = shap_results
-
-        if len(explainability) == 1 and not explainability.get('samples'):
-            return {}
-        return explainability
-
-    def _select_explainability_indices(
-        self,
-        preds: Sequence[Any],
-        labels: Sequence[Any],
-        num_items: int,
-        confidence_scores: Optional[np.ndarray],
-        max_samples: int,
-    ) -> List[int]:
-        indices: List[int] = []
-        misclassified = [idx for idx in range(num_items) if preds[idx] != labels[idx]]
-        indices.extend(misclassified[:max_samples])
-
-        if confidence_scores is not None and len(indices) < max_samples:
-            uncertain_sorted = list(np.argsort(confidence_scores))
-            for idx in uncertain_sorted:
-                if idx not in indices:
-                    indices.append(int(idx))
-                if len(indices) >= max_samples:
-                    break
-
-        if len(indices) < max_samples:
-            for idx in range(num_items):
-                if idx not in indices:
-                    indices.append(idx)
-                if len(indices) >= max_samples:
-                    break
-
-        return indices[:max_samples]
+        # LIME/SHAP explainability was intentionally removed from the library
+        # surface. Keep the report field stable by returning no payload.
+        return {}
 
     def run_all(self):
         """

@@ -8,8 +8,7 @@ Smart optimizer system with:
 - Gradient management (clipping, centralization, noise injection)
 - Adaptive LR tuning based on distillation metrics (DEI, CAS)
 - Parameter grouping (encoder vs classifier, layer-wise)
-- 1-bit optimizer support (future-ready)
-- Checkpoint compatibility
+    - Checkpoint compatibility
 
 Author: Zynthé Team
 License: MIT
@@ -36,7 +35,7 @@ LOG = logging.getLogger(__name__)
 class OptimizerFactory:
     """
     Factory for creating optimizers with phase-aware configurations.
-    Supports: AdamW, Lion, SGD, Adam, AdamW8bit, 1-bit Adam (future)
+    Supports: AdamW, Lion, SGD, Adam, AdamW8bit
     """
     
     SUPPORTED_OPTIMIZERS = {
@@ -45,7 +44,6 @@ class OptimizerFactory:
         'sgd': 'SGD with momentum and Nesterov',
         'lion': 'Lion optimizer (memory efficient)',
         'adamw8bit': '8-bit AdamW for large models',
-        '1bit_adam': '1-bit Adam for distributed training (future)',
     }
     
     @staticmethod
@@ -156,11 +154,6 @@ class OptimizerFactory:
                 LOG.warning("8-bit AdamW not available, falling back to standard AdamW")
                 optimizer = optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
                 
-        elif optimizer_name == '1bit_adam':
-            # Placeholder for Microsoft's 1-bit Adam
-            LOG.warning("1-bit Adam not yet implemented, using AdamW")
-            optimizer = optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
-            
         else:
             LOG.warning(f"Unknown optimizer '{optimizer_name}', using AdamW")
             optimizer = optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
