@@ -160,6 +160,42 @@ class BaseDistiller(nn.Module):
         """Auto-detect the best available device."""
         return _shared_auto_detect_device()
 
+    @staticmethod
+    def _get_model_dtype(model: nn.Module) -> torch.dtype:
+        """Detect the parameter dtype of a model (float16, bfloat16, float32, etc.)."""
+        try:
+            return next(model.parameters()).dtype
+        except StopIteration:
+            return torch.float32
+
+    def _cast_inputs_to_model_dtype(self, data: Any, model: nn.Module) -> Any:
+        """Cast floating-point tensors in *data* to match *model*'s parameter dtype.
+
+        Integer tensors (e.g. ``input_ids``, ``attention_mask``, ``labels``)
+        are left unchanged. This prevents the ``mat1 and mat2 must have the
+        same dtype`` crash when a model is loaded in float16/bfloat16 but
+        receives float32 inputs.
+        """
+        target_dtype = self._get_model_dtype(model)
+        if target_dtype == torch.float32:
+            return data  # No casting needed, everything defaults to float32
+        return self._recursive_cast(data, target_dtype)
+
+    @staticmethod
+    def _recursive_cast(data: Any, dtype: torch.dtype) -> Any:
+        """Recursively cast floating-point tensors to *dtype*."""
+        if isinstance(data, torch.Tensor):
+            if data.is_floating_point():
+                return data.to(dtype)
+            return data  # Keep integer tensors (input_ids, labels, etc.) as-is
+        if isinstance(data, dict):
+            return {k: BaseDistiller._recursive_cast(v, dtype) for k, v in data.items()}
+        if isinstance(data, list):
+            return [BaseDistiller._recursive_cast(v, dtype) for v in data]
+        if isinstance(data, tuple):
+            return tuple(BaseDistiller._recursive_cast(v, dtype) for v in data)
+        return data
+
     def _register_hooks(self) -> None:
         """
         Register forward hooks to capture intermediate features.
@@ -278,14 +314,25 @@ class BaseDistiller(nn.Module):
 
     @staticmethod
     def _extract_logits_tensor(outputs: Any) -> torch.Tensor:
-        """Extract logits tensor from common output formats."""
+        """Extract logits tensor from common output formats.
+
+        Always returns float32 logits for numerically stable loss
+        computation (softmax, KL-div, cross-entropy).  Models loaded in
+        float16/bfloat16 produce half-precision logits that can overflow
+        or underflow during softmax.
+        """
         if isinstance(outputs, dict):
-            return outputs["logits"]
-        if hasattr(outputs, "logits"):
-            return outputs.logits
-        if isinstance(outputs, tuple):
-            return outputs[0]
-        return outputs
+            logits = outputs["logits"]
+        elif hasattr(outputs, "logits"):
+            logits = outputs.logits
+        elif isinstance(outputs, tuple):
+            logits = outputs[0]
+        else:
+            logits = outputs
+        # Upcast to float32 for stable loss computation
+        if isinstance(logits, torch.Tensor) and logits.dtype != torch.float32:
+            logits = logits.float()
+        return logits
 
     @staticmethod
     def _flatten_lm_logits_and_targets(
@@ -403,18 +450,26 @@ class BaseDistiller(nn.Module):
         inputs = self._move_to_device(inputs)
         kwargs = {k: self._move_to_device(v) for k, v in kwargs.items()}
 
+        # Cast floating-point inputs to match each model's parameter dtype.
+        # This prevents "mat1 and mat2 must have the same dtype" errors
+        # when models are loaded in float16/bfloat16.
+        teacher_inputs = self._cast_inputs_to_model_dtype(inputs, self.teacher)
+        teacher_kwargs = self._cast_inputs_to_model_dtype(kwargs, self.teacher)
+        student_inputs = self._cast_inputs_to_model_dtype(inputs, self.student)
+        student_kwargs = self._cast_inputs_to_model_dtype(kwargs, self.student)
+
         # Teacher forward (no gradients)
         with torch.no_grad():
-            if isinstance(inputs, dict):
-                teacher_outputs = self.teacher(**inputs, **kwargs)
+            if isinstance(teacher_inputs, dict):
+                teacher_outputs = self.teacher(**teacher_inputs, **teacher_kwargs)
             else:
-                teacher_outputs = self.teacher(inputs, **kwargs)
+                teacher_outputs = self.teacher(teacher_inputs, **teacher_kwargs)
 
         # Student forward (with gradients)
-        if isinstance(inputs, dict):
-            student_outputs = self.student(**inputs, **kwargs)
+        if isinstance(student_inputs, dict):
+            student_outputs = self.student(**student_inputs, **student_kwargs)
         else:
-            student_outputs = self.student(inputs, **kwargs)
+            student_outputs = self.student(student_inputs, **student_kwargs)
 
         if return_features:
             teacher_features = self._collect_features(self.teacher_hooks)

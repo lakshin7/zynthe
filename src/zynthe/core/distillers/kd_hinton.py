@@ -596,7 +596,10 @@ class KDHintonDistiller(BaseDistiller):
                 activation=activation,
             )
 
-        self.hint_regressors[hint_key] = reg.to(self.device)
+        # Match both device and dtype of the student model to prevent
+        # "mat1 and mat2 must have the same dtype" errors with float16 models.
+        student_dtype = self._get_model_dtype(self.student)
+        self.hint_regressors[hint_key] = reg.to(device=self.device, dtype=student_dtype)
         return self.hint_regressors[hint_key]
 
     def _register_hooks(self):
@@ -779,7 +782,10 @@ class KDHintonDistiller(BaseDistiller):
                             ).squeeze(1)
 
                     if loss_type in self.hint_loss_fns:
-                        hint_loss = self.hint_loss_fns[loss_type](hint_t, hint_s)
+                        # Upcast to float32 for numerically stable loss computation
+                        hint_loss = self.hint_loss_fns[loss_type](
+                            hint_t.float(), hint_s.float()
+                        )
                         weighted_hint_loss = hint_weight * current_hint_weight * hint_loss
                         hint_loss_total += weighted_hint_loss
                         loss_dict[f"hint_{i}_{loss_type}"] = hint_loss.item()

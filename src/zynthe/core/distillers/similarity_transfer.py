@@ -199,13 +199,17 @@ class SimilarityTransfer(BaseDistiller):
     @staticmethod
     def _extract_logits(output: Any) -> Any:
         if isinstance(output, dict) and "logits" in output:
-            return output["logits"]
-        logits_attr = getattr(output, "logits", None)
-        if logits_attr is not None:
-            return logits_attr
-        if isinstance(output, tuple) and len(output) > 0:
-            return output[0]
-        return output
+            logits = output["logits"]
+        elif getattr(output, "logits", None) is not None:
+            logits = output.logits
+        elif isinstance(output, tuple) and len(output) > 0:
+            logits = output[0]
+        else:
+            logits = output
+        # Upcast to float32 for stable loss computation
+        if isinstance(logits, torch.Tensor) and logits.is_floating_point() and logits.dtype != torch.float32:
+            logits = logits.float()
+        return logits
 
     def _get_feature(
         self,
