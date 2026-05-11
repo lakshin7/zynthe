@@ -7,18 +7,26 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Tuple, Union, cast
 
 import torch
-from transformers import (
-    AutoConfig,
-    AutoImageProcessor,
-    AutoModel,
-    AutoModelForImageClassification,
-    AutoModelForCausalLM,
-    AutoModelForSequenceClassification,
-    AutoProcessor,
-    CLIPModel,
-    AutoTokenizer,
-    PreTrainedModel,
-)
+
+# Lazy transformers imports — avoids crashing on environments with
+# torch/transformers version mismatches (e.g. Kaggle kernels) when the
+# user only needs the distillation API, not the model loader.
+import importlib as _importlib
+
+def _lazy_transformers_import(name: str):
+    """Import a symbol from transformers on first use."""
+    _mod = _importlib.import_module("transformers")
+    return getattr(_mod, name)
+
+class _LazyTransformers:
+    """Proxy that defers transformers imports until attribute access."""
+    _cache: dict = {}
+    def __getattr__(self, name: str):
+        if name not in self._cache:
+            self._cache[name] = _lazy_transformers_import(name)
+        return self._cache[name]
+
+_tf = _LazyTransformers()
 
 if TYPE_CHECKING:
     from zynthe.core.config.config_manager import ConfigManager
@@ -199,15 +207,15 @@ class ModelLoader:
         # Determine model class based on config
         model_type = (self.model_cfg.get("type") or "").lower()
         if model_type in {"causal_lm", "causallm", "causal-lm", "lm"}:
-            model_class = AutoModelForCausalLM
+            model_class = _tf.AutoModelForCausalLM
         elif model_type in {"vision", "image", "image_classification", "image-classification"}:
-            model_class = AutoModelForImageClassification
+            model_class = _tf.AutoModelForImageClassification
         elif model_type in {"multimodal", "clip"}:
-            model_class = CLIPModel
+            model_class = _tf.CLIPModel
         elif model_type in {"sequence_classification", "sequenceclassification", "classification"}:
-            model_class = AutoModelForSequenceClassification
+            model_class = _tf.AutoModelForSequenceClassification
         else:
-            model_class = AutoModel
+            model_class = _tf.AutoModel
 
         resolved_location = map_location or str(self.device)
         resume_dtype = _to_torch_dtype(self.model_cfg.get("torch_dtype"))
@@ -446,7 +454,7 @@ class ModelLoader:
         resolved_model_type = spec.model_type
         if resolved_model_type in {"", "auto", "transformer"}:
             try:
-                cfg = AutoConfig.from_pretrained(
+                cfg = _tf.AutoConfig.from_pretrained(
                     spec.teacher_name,
                     trust_remote_code=spec.trust_remote_code,
                     local_files_only=spec.local_files_only,
@@ -476,7 +484,7 @@ class ModelLoader:
             "vit",
             "deit",
         }:
-            model_class = AutoModelForImageClassification
+            model_class = _tf.AutoModelForImageClassification
             if "num_labels" in self.model_cfg:
                 model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels"))
             if "label2id" in self.model_cfg:
@@ -484,7 +492,7 @@ class ModelLoader:
                 model_kwargs.setdefault("label2id", label_map)
                 model_kwargs.setdefault("id2label", {idx: name for name, idx in label_map.items()})
         elif resolved_model_type in {"multimodal", "clip"}:
-            model_class = CLIPModel
+            model_class = _tf.CLIPModel
         elif resolved_model_type in {
             "causallm",
             "causal_lm",
@@ -494,14 +502,14 @@ class ModelLoader:
             "lm",
             "language_modeling",
         }:
-            model_class = AutoModelForCausalLM
+            model_class = _tf.AutoModelForCausalLM
         elif resolved_model_type in {
             "sequenceclassification",
             "sequence_classification",
             "classification",
             "transformer",
         }:
-            model_class = AutoModelForSequenceClassification
+            model_class = _tf.AutoModelForSequenceClassification
             if "num_labels" in self.model_cfg:
                 model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels", 2))
             if "label2id" in self.model_cfg:
@@ -512,7 +520,7 @@ class ModelLoader:
                     {idx: name for name, idx in label_map.items()},
                 )
         else:
-            model_class = AutoModel
+            model_class = _tf.AutoModel
 
         # Attach revision/local flags
         if spec.revision:
@@ -537,12 +545,12 @@ class ModelLoader:
         if model_type in {"vision", "image", "image_classification", "image-classification"}:
             processor_kwargs = dict(tokenizer_kwargs)
             processor_kwargs.pop("use_fast", None)
-            return AutoImageProcessor.from_pretrained(spec.tokenizer_name, **processor_kwargs)
+            return _tf.AutoImageProcessor.from_pretrained(spec.tokenizer_name, **processor_kwargs)
 
         if model_type in {"multimodal", "clip", "vlm"}:
-            return AutoProcessor.from_pretrained(spec.tokenizer_name, **tokenizer_kwargs)
+            return _tf.AutoProcessor.from_pretrained(spec.tokenizer_name, **tokenizer_kwargs)
 
-        tokenizer = AutoTokenizer.from_pretrained(spec.tokenizer_name, **tokenizer_kwargs)
+        tokenizer = _tf.AutoTokenizer.from_pretrained(spec.tokenizer_name, **tokenizer_kwargs)
 
         # Ensure padding token for decoder-only models
         if tokenizer.pad_token is None:
@@ -559,10 +567,10 @@ class ModelLoader:
     def _load_artifact_processor(self, path: str, model_type: str) -> Any:
         normalized_type = model_type.lower()
         if normalized_type in {"vision", "image", "image_classification", "image-classification"}:
-            return AutoImageProcessor.from_pretrained(path)
+            return _tf.AutoImageProcessor.from_pretrained(path)
         if normalized_type in {"multimodal", "clip", "vlm"}:
-            return AutoProcessor.from_pretrained(path)
-        return AutoTokenizer.from_pretrained(path)
+            return _tf.AutoProcessor.from_pretrained(path)
+        return _tf.AutoTokenizer.from_pretrained(path)
 
     def _instantiate_model(
         self,
