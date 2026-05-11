@@ -12,6 +12,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
+logger = logging.getLogger(__name__)
+
 from zynthe.core.preprocessing.advanced import run_advanced_pipeline
 from zynthe.core.preprocessing.built_ins import register_defaults
 from zynthe.core.preprocessing.registry import PreprocessRegistry, ensure_registered
@@ -78,9 +80,9 @@ class JsonlDataset(Dataset):
         file_path: str,
         tokenizer,
         *,
-    max_length: int = 128,
-    model_name: Optional[str] = None,
-    config: Optional[Mapping[str, Any]] = None,
+        max_length: int = 128,
+        model_name: Optional[str] = None,
+        config: Optional[Mapping[str, Any]] = None,
         dataset_id: Optional[str] = None,
         split: str = "train",
         augmenter: Optional[TextAugmenter] = None,
@@ -89,7 +91,9 @@ class JsonlDataset(Dataset):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.model_name = model_name or "generic"
-        self.config: Dict[str, Any] = dict(config) if config else {"model": {"max_length": max_length}}
+        self.config: Dict[str, Any] = (
+            dict(config) if config else {"model": {"max_length": max_length}}
+        )
         self.dataset_id = dataset_id or "unknown"
         self.split = split
         self.augmenter = augmenter if split == "train" else None
@@ -101,7 +105,9 @@ class JsonlDataset(Dataset):
         if self._advanced_enabled:
             # Advanced pipeline will apply token-level truncation.
             self.preprocess_config.max_characters = None
-        self.samples, self.preprocess_stats = apply_preprocess_pipeline(self.samples, self.preprocess_config)
+        self.samples, self.preprocess_stats = apply_preprocess_pipeline(
+            self.samples, self.preprocess_config
+        )
         LOG.debug(
             "[%s] basic preprocessing summary: %s",
             split,
@@ -116,7 +122,9 @@ class JsonlDataset(Dataset):
             self.adapter = PreprocessRegistry.get_dataset_adapter(self.dataset_id)
         except Exception:
             self.adapter = None
-        self.preprocessor = PreprocessRegistry.get_model_preprocessor(self.model_name, self.tokenizer, self.config)
+        self.preprocessor = PreprocessRegistry.get_model_preprocessor(
+            self.model_name, self.tokenizer, self.config
+        )
 
         cache_cfg = self._resolve_cache_config()
         self._cache_size = cache_cfg
@@ -186,7 +194,9 @@ class JsonlDataset(Dataset):
 
     @staticmethod
     def _clone_item(item: Dict[str, Any]) -> Dict[str, Any]:
-        return {key: value.clone() if torch.is_tensor(value) else value for key, value in item.items()}
+        return {
+            key: value.clone() if torch.is_tensor(value) else value for key, value in item.items()
+        }
 
     # ------------------------------------------------------------------
     # Dataset protocol
@@ -263,7 +273,7 @@ def _default_collate(batch: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                 output[key] = torch.stack(values)
                 continue
             except Exception:
-                pass
+                logger.debug("Failed to stack tensors for key %s, keeping as list", key)
         output[key] = values
     return output
 

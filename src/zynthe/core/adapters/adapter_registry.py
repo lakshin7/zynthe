@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Dict, Type
 
+import torch.nn as nn
+
 from .base_adapter import ModelAdapter
 from .text_adapter import TextModelAdapter
 from .code_adapter import CodeModelAdapter
@@ -108,10 +110,7 @@ class AdapterRegistry:
         modality = modality.lower().strip()
         if modality not in self._by_name:
             available = sorted(self._by_name.keys())
-            raise KeyError(
-                f"Unknown modality '{modality}'. "
-                f"Available: {available}"
-            )
+            raise KeyError(f"Unknown modality '{modality}'. " f"Available: {available}")
         return self._by_name[modality]
 
     def register(
@@ -130,9 +129,7 @@ class AdapterRegistry:
                 (lowest priority).  ``0`` = front (highest priority).
         """
         if not issubclass(adapter_cls, ModelAdapter):
-            raise TypeError(
-                f"{adapter_cls.__name__} must extend ModelAdapter"
-            )
+            raise TypeError(f"{adapter_cls.__name__} must extend ModelAdapter")
 
         adapter = adapter_cls()
         adapter.modality = modality

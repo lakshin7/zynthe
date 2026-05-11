@@ -74,8 +74,12 @@ def _trace_from_legacy_trainer(
         batch = {k: v.to(trainer.device) for k, v in batch.items() if hasattr(v, "to")}
         teacher_batch = trainer._filter_batch_for_model(batch, trainer._teacher_forward_params)
         student_batch = trainer._filter_batch_for_model(batch, trainer._student_forward_params)
-        teacher_runtime_kwargs = trainer._build_forward_runtime_kwargs(trainer._teacher_forward_params)
-        student_runtime_kwargs = trainer._build_forward_runtime_kwargs(trainer._student_forward_params)
+        teacher_runtime_kwargs = trainer._build_forward_runtime_kwargs(
+            trainer._teacher_forward_params
+        )
+        student_runtime_kwargs = trainer._build_forward_runtime_kwargs(
+            trainer._student_forward_params
+        )
         trainer._prepare_distiller_batch()
 
         with torch.no_grad():
@@ -104,7 +108,9 @@ def _trace_from_legacy_trainer(
             trainer.student.parameters(),
             float(trainer.config.get("train", {}).get("max_grad_norm", 1.0)),
         )
-        grad_norm_val = float(grad_norm.item()) if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+        grad_norm_val = (
+            float(grad_norm.item()) if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+        )
         grad_norms.append(grad_norm_val)
 
         if not np.isfinite(grad_norm_val):
@@ -161,7 +167,11 @@ class RegressionGate:
 
         cfg_core = copy.deepcopy(dict(config))
         cfg_legacy = copy.deepcopy(dict(config))
-        seed = int(cfg_core.get("train", {}).get("seed", cfg_core.get("seed", cfg_core.get("runtime", {}).get("seed", 42))))
+        seed = int(
+            cfg_core.get("train", {}).get(
+                "seed", cfg_core.get("seed", cfg_core.get("runtime", {}).get("seed", 42))
+            )
+        )
 
         try:
             from zynthe.training.trainer import Trainer as LegacyTrainer
@@ -202,9 +212,13 @@ class RegressionGate:
         )
 
         _set_seed(seed)
-        core_trace = trace_from_trainer(core_trainer, train_loader, max_steps=self.config.compare_steps)
+        core_trace = trace_from_trainer(
+            core_trainer, train_loader, max_steps=self.config.compare_steps
+        )
         _set_seed(seed)
-        legacy_trace = _trace_from_legacy_trainer(legacy_trainer, train_loader, max_steps=self.config.compare_steps)
+        legacy_trace = _trace_from_legacy_trainer(
+            legacy_trainer, train_loader, max_steps=self.config.compare_steps
+        )
 
         steps = min(
             self.config.compare_steps,
@@ -230,8 +244,13 @@ class RegressionGate:
                 causal_trace={"losses": core_trace.losses, "grad_norms": core_trace.grad_norms},
             )
 
-        loss_diffs = [abs(float(core_trace.losses[i]) - float(legacy_trace.losses[i])) for i in range(steps)]
-        grad_diffs = [abs(float(core_trace.grad_norms[i]) - float(legacy_trace.grad_norms[i])) for i in range(steps)]
+        loss_diffs = [
+            abs(float(core_trace.losses[i]) - float(legacy_trace.losses[i])) for i in range(steps)
+        ]
+        grad_diffs = [
+            abs(float(core_trace.grad_norms[i]) - float(legacy_trace.grad_norms[i]))
+            for i in range(steps)
+        ]
 
         max_loss_diff = max(loss_diffs) if loss_diffs else 0.0
         max_grad_diff = max(grad_diffs) if grad_diffs else 0.0
@@ -255,8 +274,14 @@ class RegressionGate:
             max_grad_norm_diff=float(max_grad_diff),
             has_nan_or_inf=has_nan_or_inf,
             reasons=reasons,
-            legacy_trace={"losses": legacy_trace.losses[:steps], "grad_norms": legacy_trace.grad_norms[:steps]},
-            causal_trace={"losses": core_trace.losses[:steps], "grad_norms": core_trace.grad_norms[:steps]},
+            legacy_trace={
+                "losses": legacy_trace.losses[:steps],
+                "grad_norms": legacy_trace.grad_norms[:steps],
+            },
+            causal_trace={
+                "losses": core_trace.losses[:steps],
+                "grad_norms": core_trace.grad_norms[:steps],
+            },
         )
 
         try:

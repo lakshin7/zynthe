@@ -14,7 +14,6 @@ from typing import Any, Dict, Optional, Tuple, cast
 
 import torch
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -338,14 +337,22 @@ class ModelSaver:
 
         if fmt == "onnx":
             try:
-                from optimum.onnxruntime import ORTModelForCausalLM, ORTModelForSequenceClassification
+                from optimum.onnxruntime import (
+                    ORTModelForCausalLM,
+                    ORTModelForSequenceClassification,
+                )
 
                 temp_dir = save_path / "temp_hf"
                 _save_pretrained_compat(model, temp_dir)
                 _save_pretrained_compat(tokenizer, temp_dir)
 
-                if hasattr(model, "classifier") or "SequenceClassification" in model.__class__.__name__:
-                    ort_model = ORTModelForSequenceClassification.from_pretrained(str(temp_dir), export=True)
+                if (
+                    hasattr(model, "classifier")
+                    or "SequenceClassification" in model.__class__.__name__
+                ):
+                    ort_model = ORTModelForSequenceClassification.from_pretrained(
+                        str(temp_dir), export=True
+                    )
                 else:
                     ort_model = ORTModelForCausalLM.from_pretrained(str(temp_dir), export=True)
 
@@ -376,10 +383,14 @@ class ModelSaver:
                         return outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
                 wrapper = _TorchscriptWrapper(model.eval())
-                example_inputs = (input_ids, attention_mask) if attention_mask is not None else (input_ids,)
+                example_inputs = (
+                    (input_ids, attention_mask) if attention_mask is not None else (input_ids,)
+                )
                 export_torchscript(wrapper, str(save_path / "model.torchscript.pt"), example_inputs)
             else:
-                export_torchscript(model.eval(), str(save_path / "model.torchscript.pt"), example_inputs)
+                export_torchscript(
+                    model.eval(), str(save_path / "model.torchscript.pt"), example_inputs
+                )
             _save_pretrained_compat(tokenizer, save_path)
 
         elif fmt == "safetensors":

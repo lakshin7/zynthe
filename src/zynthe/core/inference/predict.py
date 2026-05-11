@@ -3,6 +3,7 @@
 Provides a simple, transparent wrapper that mirrors training-time tokenizer
 settings (max_length, padding/truncation) and returns probabilities and labels.
 """
+
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
 import torch
@@ -10,7 +11,13 @@ import torch.nn.functional as F
 
 
 class StudentInference:
-    def __init__(self, model, tokenizer, config: Optional[Dict[str, Any]] = None, device: Optional[torch.device] = None):
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        config: Optional[Dict[str, Any]] = None,
+        device: Optional[torch.device] = None,
+    ):
         self.model = model.eval()
         self.tokenizer = tokenizer
         self.config = config or {}
@@ -18,13 +25,11 @@ class StudentInference:
         self.model.to(self.device)
 
         # Inference parameters
-        self.max_length = (
-            self.config.get('model', {}).get('max_length', 128)
-        )
+        self.max_length = self.config.get("model", {}).get("max_length", 128)
 
         # Label mapping if available
-        cfg = getattr(self.model, 'config', None)
-        self.id2label = getattr(cfg, 'id2label', None) if cfg is not None else None
+        cfg = getattr(self.model, "config", None)
+        self.id2label = getattr(cfg, "id2label", None) if cfg is not None else None
 
     @torch.no_grad()
     def predict(self, texts: List[str], batch_size: int = 8) -> List[Dict[str, Any]]:
@@ -52,11 +57,11 @@ class StudentInference:
                 padding=True,
                 truncation=True,
                 max_length=self.max_length,
-                return_tensors='pt'
+                return_tensors="pt",
             )
             enc = {k: v.to(self.device) for k, v in enc.items()}
             outputs = self.model(**enc)
-            if hasattr(outputs, 'logits'):
+            if hasattr(outputs, "logits"):
                 logits = outputs.logits
             elif isinstance(outputs, (tuple, list)) and outputs:
                 logits = outputs[0]
@@ -69,16 +74,20 @@ class StudentInference:
 
             for j, text in enumerate(batch_texts):
                 label_id = int(top_idx[j].item())
-                label_name = self.id2label.get(label_id) if isinstance(self.id2label, dict) else None
-                results.append({
-                    'text': text,
-                    'label_id': label_id,
-                    'label': label_name,
-                    'prob': float(top_prob[j].item()),
-                    'probs': probs[j].detach().cpu().tolist(),
-                })
+                label_name = (
+                    self.id2label.get(label_id) if isinstance(self.id2label, dict) else None
+                )
+                results.append(
+                    {
+                        "text": text,
+                        "label_id": label_id,
+                        "label": label_name,
+                        "prob": float(top_prob[j].item()),
+                        "probs": probs[j].detach().cpu().tolist(),
+                    }
+                )
 
         return results
 
 
-__all__ = ['StudentInference']
+__all__ = ["StudentInference"]

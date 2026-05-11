@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -85,12 +84,12 @@ def compute_classwise_metrics(preds, labels):
     recall = recall_score(labels_np, preds_np, average=None, zero_division=0)
     f1 = f1_score(labels_np, preds_np, average=None)
     classes = np.unique(np.concatenate((labels_np, preds_np)))
-    
+
     # Handle scalar results (single class case)
     precision = np.atleast_1d(precision)
     recall = np.atleast_1d(recall)
     f1 = np.atleast_1d(f1)
-    
+
     precision_dict = {int(cls): float(p) for cls, p in zip(classes, precision)}
     recall_dict = {int(cls): float(r) for cls, r in zip(classes, recall)}
     f1_dict = {int(cls): float(f) for cls, f in zip(classes, f1)}
@@ -141,7 +140,9 @@ def compute_average_precision(pred_probs, labels):
     labels_np = _to_numpy(labels)
     try:
         if preds_np.ndim == 1 or preds_np.shape[1] == 1:
-            return average_precision_score(labels_np, preds_np if preds_np.ndim == 1 else preds_np[:, 0])
+            return average_precision_score(
+                labels_np, preds_np if preds_np.ndim == 1 else preds_np[:, 0]
+            )
         return average_precision_score(labels_np, preds_np, average="macro")
     except ValueError:
         return None
@@ -179,7 +180,9 @@ def compute_calibration(pred_probs, labels, n_bins: int = 10) -> Optional[Calibr
     if probs.size == 0 or labels_np.size == 0:
         return None
     try:
-        prob_true, prob_pred = calibration_curve(labels_np, probs, n_bins=n_bins, strategy="uniform")
+        prob_true, prob_pred = calibration_curve(
+            labels_np, probs, n_bins=n_bins, strategy="uniform"
+        )
     except ValueError:
         return None
     brier = compute_brier(probs, labels_np)
@@ -239,7 +242,9 @@ def compute_all_metrics(preds, labels, pred_probs=None):
                 metrics["y_score"] = _to_numpy(pred_probs)
             else:
                 metrics["y_score"] = pred_probs[:, 1]
-        top3 = compute_top_k_accuracy(pred_probs, labels, k=min(3, pred_probs.shape[1] if pred_probs.ndim == 2 else 1))
+        top3 = compute_top_k_accuracy(
+            pred_probs, labels, k=min(3, pred_probs.shape[1] if pred_probs.ndim == 2 else 1)
+        )
         if top3 is not None:
             metrics["top3_accuracy"] = top3
         avg_precision = compute_average_precision(pred_probs, labels)
@@ -295,31 +300,45 @@ def plot_metrics(metrics, save_dir, labels=None):
     cm = metrics.get("confusion_matrix")
     if cm is not None:
         plt.figure(figsize=(8, 6))
-        
+
         # Add class labels if not provided
         if labels is None:
             num_classes = cm.shape[0]
             labels = [f"Class {i}" for i in range(num_classes)]
-        
+
         # Create heatmap with better formatting
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=True,
-                    xticklabels=labels,
-                    yticklabels=labels,
-                    square=True)
-        
-        plt.xlabel("Predicted Label", fontsize=12, fontweight='bold')
-        plt.ylabel("True Label", fontsize=12, fontweight='bold')
-        plt.title("Confusion Matrix\n(Rows=Actual, Columns=Predicted)", fontsize=14, fontweight='bold')
-        
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt="d",
+            cmap="Blues",
+            cbar=True,
+            xticklabels=labels,
+            yticklabels=labels,
+            square=True,
+        )
+
+        plt.xlabel("Predicted Label", fontsize=12, fontweight="bold")
+        plt.ylabel("True Label", fontsize=12, fontweight="bold")
+        plt.title(
+            "Confusion Matrix\n(Rows=Actual, Columns=Predicted)", fontsize=14, fontweight="bold"
+        )
+
         # Add accuracy text
-        accuracy = metrics.get('accuracy', 0)
+        accuracy = metrics.get("accuracy", 0)
         if accuracy > 0:
-            plt.text(0.5, -0.15, f'Overall Accuracy: {accuracy:.2%}', 
-                    transform=plt.gca().transAxes,
-                    ha='center', fontsize=11, style='italic')
-        
+            plt.text(
+                0.5,
+                -0.15,
+                f"Overall Accuracy: {accuracy:.2%}",
+                transform=plt.gca().transAxes,
+                ha="center",
+                fontsize=11,
+                style="italic",
+            )
+
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, "confusion_matrix.png"), dpi=150, bbox_inches='tight')
+        plt.savefig(os.path.join(save_dir, "confusion_matrix.png"), dpi=150, bbox_inches="tight")
         plt.close()
 
     roc_auc = metrics.get("roc_auc")
@@ -329,8 +348,8 @@ def plot_metrics(metrics, save_dir, labels=None):
         if len(y_true) > 0 and len(y_score) > 0:
             fpr, tpr, _ = roc_curve(y_true, y_score)
             plt.figure(figsize=(6, 5))
-            plt.plot(fpr, tpr, label=f'ROC curve (area = {roc_auc:.2f})')
-            plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+            plt.plot(fpr, tpr, label=f"ROC curve (area = {roc_auc:.2f})")
+            plt.plot([0, 1], [0, 1], linestyle="--", color="gray")
             plt.xlabel("False Positive Rate")
             plt.ylabel("True Positive Rate")
             plt.title("ROC Curve")

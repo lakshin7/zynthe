@@ -31,33 +31,35 @@ class TextModelAdapter(ModelAdapter):
     modality = "text"
 
     # Typical forward-signature keys for text models.
-    _COMMON_KEYS = frozenset({
-        "input_ids",
-        "attention_mask",
-        "labels",
-        "token_type_ids",
-        "position_ids",
-        "head_mask",
-        "decoder_input_ids",
-        "decoder_attention_mask",
-        "past_key_values",
-        "use_cache",
-        "output_attentions",
-        "output_hidden_states",
-        "return_dict",
-    })
+    _COMMON_KEYS = frozenset(
+        {
+            "input_ids",
+            "attention_mask",
+            "labels",
+            "token_type_ids",
+            "position_ids",
+            "head_mask",
+            "decoder_input_ids",
+            "decoder_attention_mask",
+            "past_key_values",
+            "use_cache",
+            "output_attentions",
+            "output_hidden_states",
+            "return_dict",
+        }
+    )
 
     # Module name patterns for hookable transformer layers.
     _LAYER_PATTERNS = [
-        re.compile(r"^(encoder\.layer\.\d+)$"),               # BERT-like
-        re.compile(r"^(transformer\.h\.\d+)$"),                # GPT-2
-        re.compile(r"^(model\.layers\.\d+)$"),                 # LLaMA / Mistral
-        re.compile(r"^(roberta\.encoder\.layer\.\d+)$"),       # RoBERTa
-        re.compile(r"^(bert\.encoder\.layer\.\d+)$"),          # BERT
-        re.compile(r"^(distilbert\.transformer\.layer\.\d+)$"),# DistilBERT
-        re.compile(r"^(deberta\.encoder\.layer\.\d+)$"),       # DeBERTa
-        re.compile(r"^(decoder\.layers\.\d+)$"),               # T5 / BART decoder
-        re.compile(r"^(encoder\.layers\.\d+)$"),               # T5 / BART encoder
+        re.compile(r"^(encoder\.layer\.\d+)$"),  # BERT-like
+        re.compile(r"^(transformer\.h\.\d+)$"),  # GPT-2
+        re.compile(r"^(model\.layers\.\d+)$"),  # LLaMA / Mistral
+        re.compile(r"^(roberta\.encoder\.layer\.\d+)$"),  # RoBERTa
+        re.compile(r"^(bert\.encoder\.layer\.\d+)$"),  # BERT
+        re.compile(r"^(distilbert\.transformer\.layer\.\d+)$"),  # DistilBERT
+        re.compile(r"^(deberta\.encoder\.layer\.\d+)$"),  # DeBERTa
+        re.compile(r"^(decoder\.layers\.\d+)$"),  # T5 / BART decoder
+        re.compile(r"^(encoder\.layers\.\d+)$"),  # T5 / BART encoder
     ]
 
     def __init__(self) -> None:
@@ -116,7 +118,10 @@ class TextModelAdapter(ModelAdapter):
 
             if t_feat.shape[-1] != s_feat.shape[-1]:
                 proj = self._get_or_create_projection(
-                    key, s_feat.shape[-1], t_feat.shape[-1], s_feat.device,
+                    key,
+                    s_feat.shape[-1],
+                    t_feat.shape[-1],
+                    s_feat.device,
                 )
                 aligned_student[key] = proj(s_feat)
             else:
@@ -144,16 +149,18 @@ class TextModelAdapter(ModelAdapter):
         if model_id not in self._forward_params_cache:
             try:
                 sig = inspect.signature(model.forward)
-                self._forward_params_cache[model_id] = frozenset(
-                    sig.parameters.keys()
-                )
+                self._forward_params_cache[model_id] = frozenset(sig.parameters.keys())
             except (ValueError, TypeError):
                 # Fallback to common text keys
                 self._forward_params_cache[model_id] = self._COMMON_KEYS
         return self._forward_params_cache[model_id]
 
     def _get_or_create_projection(
-        self, key: str, in_dim: int, out_dim: int, device: torch.device,
+        self,
+        key: str,
+        in_dim: int,
+        out_dim: int,
+        device: torch.device,
     ) -> nn.Linear:
         """Lazily create a linear projection for dimension alignment."""
         proj_key = f"proj_{key}_{in_dim}_{out_dim}"

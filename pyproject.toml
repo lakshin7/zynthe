@@ -45,6 +45,9 @@ dependencies = [
     "psutil>=5.9.0",
 ]
 
+[project.scripts]
+zynthe = "zynthe.cli:main"
+
 [project.optional-dependencies]
 vision = [
     "torchvision>=0.16.0",

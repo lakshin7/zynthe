@@ -92,10 +92,18 @@ class VLMModelAdapter(ModelAdapter):
 
         # Generous fallback for VLMs
         allowed |= {
-            "pixel_values", "input_ids", "attention_mask", "labels",
-            "images", "image_sizes", "image_token_index",
-            "return_dict", "output_attentions", "output_hidden_states",
-            "past_key_values", "use_cache",
+            "pixel_values",
+            "input_ids",
+            "attention_mask",
+            "labels",
+            "images",
+            "image_sizes",
+            "image_token_index",
+            "return_dict",
+            "output_attentions",
+            "output_hidden_states",
+            "past_key_values",
+            "use_cache",
         }
 
         return {k: v for k, v in batch.items() if k in allowed}
@@ -116,7 +124,8 @@ class VLMModelAdapter(ModelAdapter):
             "language_model_outputs",
         ):
             val = (
-                raw_output.get(attr) if isinstance(raw_output, dict)
+                raw_output.get(attr)
+                if isinstance(raw_output, dict)
                 else getattr(raw_output, attr, None)
             )
             if val is not None:
@@ -132,11 +141,7 @@ class VLMModelAdapter(ModelAdapter):
             and language model.
         """
         layers: List[str] = []
-        all_patterns = (
-            self._VISION_PATTERNS
-            + self._PROJECTION_PATTERNS
-            + self._LM_PATTERNS
-        )
+        all_patterns = self._VISION_PATTERNS + self._PROJECTION_PATTERNS + self._LM_PATTERNS
         for name, _ in model.named_modules():
             for pattern in all_patterns:
                 if pattern.match(name):
@@ -169,7 +174,10 @@ class VLMModelAdapter(ModelAdapter):
 
             if t_feat.shape[-1] != s_feat.shape[-1]:
                 proj = self._get_or_create_projection(
-                    key, s_feat.shape[-1], t_feat.shape[-1], s_feat.device,
+                    key,
+                    s_feat.shape[-1],
+                    t_feat.shape[-1],
+                    s_feat.device,
                 )
                 aligned_student[key] = proj(s_feat)
             else:
@@ -186,17 +194,10 @@ class VLMModelAdapter(ModelAdapter):
         module_names = {n for n, _ in model.named_modules()}
 
         has_vision_tower = any(
-            "vision_tower" in n or "vision_model" in n or "visual" in n
-            for n in module_names
+            "vision_tower" in n or "vision_model" in n or "visual" in n for n in module_names
         )
-        has_lm = any(
-            "language_model" in n or "lm_head" in n
-            for n in module_names
-        )
-        has_projector = any(
-            "projector" in n or "vision_proj" in n
-            for n in module_names
-        )
+        has_lm = any("language_model" in n or "lm_head" in n for n in module_names)
+        has_projector = any("projector" in n or "vision_proj" in n for n in module_names)
 
         # VLM = vision encoder + LM (projector is common but not required)
         return has_vision_tower and (has_lm or has_projector)
@@ -206,7 +207,11 @@ class VLMModelAdapter(ModelAdapter):
     # ------------------------------------------------------------------
 
     def _get_or_create_projection(
-        self, key: str, in_dim: int, out_dim: int, device: torch.device,
+        self,
+        key: str,
+        in_dim: int,
+        out_dim: int,
+        device: torch.device,
     ) -> nn.Linear:
         proj_key = f"proj_{key}_{in_dim}_{out_dim}"
         if proj_key not in self._projections:

@@ -36,7 +36,9 @@ class RuntimeOptions:
     checkpoint_path: Optional[str] = None
 
     @classmethod
-    def from_namespace(cls, args: Any, overrides: Optional[Dict[str, Any]] = None) -> "RuntimeOptions":
+    def from_namespace(
+        cls, args: Any, overrides: Optional[Dict[str, Any]] = None
+    ) -> "RuntimeOptions":
         return cls(
             config_path=getattr(args, "config", None),
             overrides=overrides or {},
@@ -74,7 +76,9 @@ class UnifiedTrainingRuntime:
         quantization_summary_path: Optional[Path] = None
 
         cfg_manager = ConfigManager(config_path=options.config_path, overrides=options.overrides)
-        normalized, norm_warnings = self._normalize_config(copy.deepcopy(cfg_manager.resolved_config))
+        normalized, norm_warnings = self._normalize_config(
+            copy.deepcopy(cfg_manager.resolved_config)
+        )
         warnings.extend(norm_warnings)
 
         config_hash = self._compute_config_hash(normalized)
@@ -121,7 +125,9 @@ class UnifiedTrainingRuntime:
         train_loader, val_loader = create_dataloaders(normalized, tokenizer)
 
         # Phase 3: preflight gate
-        preflight_dir = Path(cfg_manager.paths.get("logs", cfg_manager.experiment_dir)) / "preflight"
+        preflight_dir = (
+            Path(cfg_manager.paths.get("logs", cfg_manager.experiment_dir)) / "preflight"
+        )
         preflight_dir.mkdir(parents=True, exist_ok=True)
         preflight_report = run_preflight_check(
             teacher_model=teacher,
@@ -257,20 +263,33 @@ class UnifiedTrainingRuntime:
 
         engine = str(train.get("engine", "legacy")).lower()
         if engine not in _ALLOWED_ENGINES:
-            raise ValueError(f"Unsupported train.engine='{engine}'. Allowed={sorted(_ALLOWED_ENGINES)}")
+            raise ValueError(
+                f"Unsupported train.engine='{engine}'. Allowed={sorted(_ALLOWED_ENGINES)}"
+            )
 
         task_type = str(distill.get("task_type", "")).lower()
-        if engine in {"causal_lm_core", "causal_lm_core_stable"} and task_type not in {"", "causal_lm", "gpt", "language_modeling"}:
-            warnings.append("Engine is causal_lm_core* but distillation.task_type is non-LM; runtime will proceed with caution.")
+        if engine in {"causal_lm_core", "causal_lm_core_stable"} and task_type not in {
+            "",
+            "causal_lm",
+            "gpt",
+            "language_modeling",
+        }:
+            warnings.append(
+                "Engine is causal_lm_core* but distillation.task_type is non-LM; runtime will proceed with caution."
+            )
 
         if engine == "legacy" and task_type in {"causal_lm", "gpt", "language_modeling"}:
-            warnings.append("Legacy engine selected with LM task_type; consider train.engine=causal_lm_core.")
+            warnings.append(
+                "Legacy engine selected with LM task_type; consider train.engine=causal_lm_core."
+            )
 
         return cfg, warnings
 
     @staticmethod
     def _compute_config_hash(cfg: Mapping[str, Any]) -> str:
-        payload = json.dumps(cfg, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+        payload = json.dumps(cfg, sort_keys=True, default=str, separators=(",", ":")).encode(
+            "utf-8"
+        )
         return hashlib.sha256(payload).hexdigest()
 
     def _deep_freeze(self, obj: Any) -> Any:
@@ -353,13 +372,17 @@ class UnifiedTrainingRuntime:
         device: torch.device,
     ) -> Dict[str, Any]:
         if explicit_checkpoint:
-            return self._resume_from_path(trainer, engine, explicit_checkpoint, strict=strict, device=device)
+            return self._resume_from_path(
+                trainer, engine, explicit_checkpoint, strict=strict, device=device
+            )
 
         latest = self._find_latest_valid_checkpoint(experiment_dir)
         if latest is None:
             return {"decision": "fresh_start", "reason": "no_valid_checkpoint_found"}
 
-        resume_report = self._resume_from_path(trainer, engine, str(latest), strict=strict, device=device)
+        resume_report = self._resume_from_path(
+            trainer, engine, str(latest), strict=strict, device=device
+        )
         resume_report.setdefault("decision", "auto_resume")
         return resume_report
 
@@ -489,7 +512,9 @@ class UnifiedTrainingRuntime:
         if options.save_model:
             from zynthe.core.models.model_saver import save_model
 
-            out_dir = options.save_model_dir or str(Path(cfg_manager.experiment_dir) / "student_model")
+            out_dir = options.save_model_dir or str(
+                Path(cfg_manager.experiment_dir) / "student_model"
+            )
             save_model(
                 model=trainer.student,
                 path=out_dir,
@@ -503,7 +528,9 @@ class UnifiedTrainingRuntime:
             )
 
         if options.save_checkpoint:
-            out_ckpt = options.checkpoint_path or str(Path(cfg_manager.experiment_dir) / "checkpoints" / "latest.pt")
+            out_ckpt = options.checkpoint_path or str(
+                Path(cfg_manager.experiment_dir) / "checkpoints" / "latest.pt"
+            )
             if hasattr(trainer, "save_explicit_checkpoint"):
                 trainer.save_explicit_checkpoint(out_ckpt)
             else:
@@ -544,7 +571,9 @@ class UnifiedTrainingRuntime:
             exp_dir = Path(cfg_manager.experiment_dir)
             artifacts: List[ArtifactRecord] = []
 
-            resolved_cfg_path = Path(cfg_manager.paths.get("resolved_config", exp_dir / "resolved_config.yaml"))
+            resolved_cfg_path = Path(
+                cfg_manager.paths.get("resolved_config", exp_dir / "resolved_config.yaml")
+            )
             if resolved_cfg_path.exists():
                 artifacts.append(
                     ArtifactRecord.from_file(
@@ -554,7 +583,7 @@ class UnifiedTrainingRuntime:
                     )
                 )
 
-            for logical_name, path in (artifacts_extra or []):
+            for logical_name, path in artifacts_extra or []:
                 if path.exists() and path.is_file():
                     artifacts.append(
                         ArtifactRecord.from_file(
@@ -606,9 +635,13 @@ class UnifiedTrainingRuntime:
     def _model_sizes(teacher: Any, student: Any) -> Dict[str, int]:
         return {
             "teacher_total": int(sum(p.numel() for p in teacher.parameters())),
-            "teacher_trainable": int(sum(p.numel() for p in teacher.parameters() if p.requires_grad)),
+            "teacher_trainable": int(
+                sum(p.numel() for p in teacher.parameters() if p.requires_grad)
+            ),
             "student_total": int(sum(p.numel() for p in student.parameters())),
-            "student_trainable": int(sum(p.numel() for p in student.parameters() if p.requires_grad)),
+            "student_trainable": int(
+                sum(p.numel() for p in student.parameters() if p.requires_grad)
+            ),
         }
 
     @staticmethod
@@ -620,9 +653,17 @@ class UnifiedTrainingRuntime:
         fallback_tokenizer: Any,
     ) -> Tuple[Any, Any]:
         from zynthe.core.models.model_saver import load_model
-        from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
+        from transformers import (
+            AutoModelForCausalLM,
+            AutoModelForSequenceClassification,
+            AutoTokenizer,
+        )
 
-        model_class = AutoModelForCausalLM if engine in {"causal_lm_core", "causal_lm_core_stable"} else AutoModelForSequenceClassification
+        model_class = (
+            AutoModelForCausalLM
+            if engine in {"causal_lm_core", "causal_lm_core_stable"}
+            else AutoModelForSequenceClassification
+        )
         student, tokenizer, _ = load_model(
             model_class,
             model_dir,

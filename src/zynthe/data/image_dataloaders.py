@@ -31,7 +31,6 @@ except Exception:  # pragma: no cover - optional dependency
 from zynthe.core.preprocessing.built_ins import register_defaults
 from zynthe.core.preprocessing.registry import PreprocessRegistry, ensure_registered
 
-
 LOG = logging.getLogger(__name__)
 
 
@@ -46,10 +45,14 @@ class _VisionDatasetWrapper(Dataset):
         ensure_registered(register_defaults)
         resolved = PreprocessRegistry.resolve_dataset_adapter(dataset_id)
         metadata = resolved.get("metadata", {}) if resolved else {}
-        self.adapter = resolved.get("adapter") if resolved and metadata.get("modality") == "vision" else None
+        self.adapter = (
+            resolved.get("adapter") if resolved and metadata.get("modality") == "vision" else None
+        )
 
         model_name = self.config.get("model", {}).get("name", "vit")
-        self.preprocessor = PreprocessRegistry.get_model_preprocessor(model_name, tokenizer=None, config=self.config)
+        self.preprocessor = PreprocessRegistry.get_model_preprocessor(
+            model_name, tokenizer=None, config=self.config
+        )
 
     def __len__(self) -> int:
         return len(self.base_dataset)
@@ -78,7 +81,11 @@ class _VisionDatasetWrapper(Dataset):
             try:
                 normalized = self.adapter.adapt(normalized)
             except Exception:
-                LOG.debug("Vision adapter failed for dataset=%s; using default normalization", self.dataset_id, exc_info=True)
+                LOG.debug(
+                    "Vision adapter failed for dataset=%s; using default normalization",
+                    self.dataset_id,
+                    exc_info=True,
+                )
 
         return self.preprocessor.prepare(normalized)
 
@@ -186,7 +193,9 @@ def _build_hf_datasets(dataset_id: str, seed: int, val_ratio: float) -> Tuple[Da
     return train_ds, val_ds
 
 
-def create_image_dataloaders(cfg: Mapping[str, Any], tokenizer: Optional[Any] = None) -> Tuple[DataLoader, DataLoader]:
+def create_image_dataloaders(
+    cfg: Mapping[str, Any], tokenizer: Optional[Any] = None
+) -> Tuple[DataLoader, DataLoader]:
     """Create train/val dataloaders for image-centric datasets."""
     del tokenizer  # Kept for API compatibility with text dataloader signatures.
 
@@ -211,7 +220,9 @@ def create_image_dataloaders(cfg: Mapping[str, Any], tokenizer: Optional[Any] = 
         val_base = _build_torchvision_dataset(image_dataset, root=root, split="val")
         dataset_hint = image_dataset
     elif image_dataset in {"imagenet", "image_folder"}:
-        train_base, val_base = _build_image_folder_datasets(root=root, seed=seed, val_ratio=val_ratio)
+        train_base, val_base = _build_image_folder_datasets(
+            root=root, seed=seed, val_ratio=val_ratio
+        )
         dataset_hint = "imagenet" if image_dataset == "imagenet" else "image_folder"
     else:
         raise ValueError(

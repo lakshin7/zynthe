@@ -238,8 +238,12 @@ class ViTPreprocessor(ModelPreprocessor):
     def __init__(self, tokenizer, config: Dict[str, Any]):  # tokenizer may be None for vision
         super().__init__(tokenizer, config)
         self.image_size = self.config.get("model", {}).get("image_size", 224)
-        self.normalize_mean = self.config.get("preprocessing", {}).get("image_mean", [0.485, 0.456, 0.406])
-        self.normalize_std = self.config.get("preprocessing", {}).get("image_std", [0.229, 0.224, 0.225])
+        self.normalize_mean = self.config.get("preprocessing", {}).get(
+            "image_mean", [0.485, 0.456, 0.406]
+        )
+        self.normalize_std = self.config.get("preprocessing", {}).get(
+            "image_std", [0.229, 0.224, 0.225]
+        )
         aug_cfg = self.config.get("preprocessing", {}).get("augment", {})
 
         if transforms:

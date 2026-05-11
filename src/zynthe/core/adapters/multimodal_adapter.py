@@ -35,16 +35,16 @@ class MultimodalModelAdapter(ModelAdapter):
 
     # Module name patterns for text encoder layers.
     _TEXT_PATTERNS = [
-        re.compile(r"^text_model\.encoder\.layers\.(\d+)$"),       # CLIP
-        re.compile(r"^text_encoder\.encoder\.layer\.(\d+)$"),      # BLIP
-        re.compile(r"^text_model\.transformer\.resblocks\.(\d+)$"),# OpenCLIP
+        re.compile(r"^text_model\.encoder\.layers\.(\d+)$"),  # CLIP
+        re.compile(r"^text_encoder\.encoder\.layer\.(\d+)$"),  # BLIP
+        re.compile(r"^text_model\.transformer\.resblocks\.(\d+)$"),  # OpenCLIP
     ]
 
     # Module name patterns for vision encoder layers.
     _VISION_PATTERNS = [
-        re.compile(r"^vision_model\.encoder\.layers\.(\d+)$"),     # CLIP / SigLIP
-        re.compile(r"^visual_encoder\.blocks\.(\d+)$"),            # BLIP
-        re.compile(r"^vision_model\.transformer\.resblocks\.(\d+)$"),# OpenCLIP
+        re.compile(r"^vision_model\.encoder\.layers\.(\d+)$"),  # CLIP / SigLIP
+        re.compile(r"^visual_encoder\.blocks\.(\d+)$"),  # BLIP
+        re.compile(r"^vision_model\.transformer\.resblocks\.(\d+)$"),  # OpenCLIP
     ]
 
     # Module name patterns for cross-attention / fusion layers.
@@ -80,10 +80,16 @@ class MultimodalModelAdapter(ModelAdapter):
 
         # Generous fallback for multimodal models
         allowed |= {
-            "input_ids", "attention_mask", "pixel_values", "labels",
-            "return_loss", "return_dict",
-            "output_attentions", "output_hidden_states",
-            "token_type_ids", "position_ids",
+            "input_ids",
+            "attention_mask",
+            "pixel_values",
+            "labels",
+            "return_loss",
+            "return_dict",
+            "output_attentions",
+            "output_hidden_states",
+            "token_type_ids",
+            "position_ids",
         }
 
         return {k: v for k, v in batch.items() if k in allowed}
@@ -108,7 +114,8 @@ class MultimodalModelAdapter(ModelAdapter):
             "itm_score",
         ):
             val = (
-                raw_output.get(attr) if isinstance(raw_output, dict)
+                raw_output.get(attr)
+                if isinstance(raw_output, dict)
                 else getattr(raw_output, attr, None)
             )
             if val is not None:
@@ -127,11 +134,7 @@ class MultimodalModelAdapter(ModelAdapter):
             Sorted list of hookable module names.
         """
         layers: List[str] = []
-        all_patterns = (
-            self._TEXT_PATTERNS
-            + self._VISION_PATTERNS
-            + self._FUSION_PATTERNS
-        )
+        all_patterns = self._TEXT_PATTERNS + self._VISION_PATTERNS + self._FUSION_PATTERNS
         for name, _ in model.named_modules():
             for pattern in all_patterns:
                 if pattern.match(name):
@@ -164,7 +167,10 @@ class MultimodalModelAdapter(ModelAdapter):
 
             if t_feat.shape[-1] != s_feat.shape[-1]:
                 proj = self._get_or_create_projection(
-                    key, s_feat.shape[-1], t_feat.shape[-1], s_feat.device,
+                    key,
+                    s_feat.shape[-1],
+                    t_feat.shape[-1],
+                    s_feat.device,
                 )
                 aligned_student[key] = proj(s_feat)
             else:
@@ -184,18 +190,12 @@ class MultimodalModelAdapter(ModelAdapter):
         """
         module_names = {n for n, _ in model.named_modules()}
 
-        has_text_encoder = any(
-            "text_model" in n or "text_encoder" in n
-            for n in module_names
-        )
+        has_text_encoder = any("text_model" in n or "text_encoder" in n for n in module_names)
         has_vision_encoder = any(
             "vision_model" in n or "visual_encoder" in n or "vision_tower" in n
             for n in module_names
         )
-        has_lm_head = any(
-            "language_model" in n or "lm_head" in n
-            for n in module_names
-        )
+        has_lm_head = any("language_model" in n or "lm_head" in n for n in module_names)
 
         # Multimodal = has both encoders but NOT a generative LM head
         return has_text_encoder and has_vision_encoder and not has_lm_head
@@ -205,7 +205,11 @@ class MultimodalModelAdapter(ModelAdapter):
     # ------------------------------------------------------------------
 
     def _get_or_create_projection(
-        self, key: str, in_dim: int, out_dim: int, device: torch.device,
+        self,
+        key: str,
+        in_dim: int,
+        out_dim: int,
+        device: torch.device,
     ) -> nn.Linear:
         proj_key = f"proj_{key}_{in_dim}_{out_dim}"
         if proj_key not in self._projections:

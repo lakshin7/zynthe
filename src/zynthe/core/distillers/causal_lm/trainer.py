@@ -18,11 +18,21 @@ from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-from .checkpoint import CheckpointMeta, TrainingState, save_training_checkpoint, smart_load_checkpoint
+from .checkpoint import (
+    CheckpointMeta,
+    TrainingState,
+    save_training_checkpoint,
+    smart_load_checkpoint,
+)
 from .distillation import CausalLMDistillationEngine, DistillationConfig
 from .fault_injection import FaultInjector
 from .determinism import trace_from_trainer, verify_reproducibility
-from .metrics import DistillationHealthMetrics, MetricStabilityMonitor, TokenMetricsAccumulator, compute_distill_alignment
+from .metrics import (
+    DistillationHealthMetrics,
+    MetricStabilityMonitor,
+    TokenMetricsAccumulator,
+    compute_distill_alignment,
+)
 from .determinism import runtime_determinism_env
 from .validation import TrainingHealthReport, gradient_sanity_check, validate_distillation_numerics
 
@@ -62,7 +72,11 @@ class SafeCausalLMTrainer:
         distill_cfg = self.config.get("distillation", {})
         checkpoint_cfg = self.config.get("checkpoint", {})
 
-        self.seed = int(train_cfg.get("seed", self.config.get("seed", self.config.get("runtime", {}).get("seed", 42))))
+        self.seed = int(
+            train_cfg.get(
+                "seed", self.config.get("seed", self.config.get("runtime", {}).get("seed", 42))
+            )
+        )
         self._set_seed(self.seed)
 
         self.epochs = int(train_cfg.get("epochs", train_cfg.get("num_epochs", 3)))
@@ -76,9 +90,14 @@ class SafeCausalLMTrainer:
 
         self.checkpoint_every_epoch = bool(checkpoint_cfg.get("save_every_epoch", True))
         self.strict_first = bool(checkpoint_cfg.get("load_strict_first", True))
-        self.allow_shape_mismatch_fallback = bool(checkpoint_cfg.get("allow_shape_mismatch_fallback", True))
+        self.allow_shape_mismatch_fallback = bool(
+            checkpoint_cfg.get("allow_shape_mismatch_fallback", True)
+        )
 
-        self.use_amp = bool(train_cfg.get("use_amp", train_cfg.get("mixed_precision", True))) and self.device.type == "cuda"
+        self.use_amp = (
+            bool(train_cfg.get("use_amp", train_cfg.get("mixed_precision", True)))
+            and self.device.type == "cuda"
+        )
         self.scaler = GradScaler("cuda", enabled=self.use_amp)
 
         self.distill_engine = CausalLMDistillationEngine(
@@ -88,7 +107,11 @@ class SafeCausalLMTrainer:
                 use_ce=bool(distill_cfg.get("use_ce", True)),
                 ignore_index=int(distill_cfg.get("ignore_index", -100)),
                 shift_labels=bool(distill_cfg.get("shift_labels", True)),
-                logit_clip=float(distill_cfg.get("logit_clip", 80.0)) if distill_cfg.get("logit_clip", 80.0) is not None else None,
+                logit_clip=(
+                    float(distill_cfg.get("logit_clip", 80.0))
+                    if distill_cfg.get("logit_clip", 80.0) is not None
+                    else None
+                ),
                 min_valid_tokens=int(distill_cfg.get("min_valid_tokens", 1)),
             )
         )
@@ -98,14 +121,20 @@ class SafeCausalLMTrainer:
             p.requires_grad = False
         self.student.train()
 
-        self.optimizer = AdamW(self.student.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        self.optimizer = AdamW(
+            self.student.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+        )
         self.scheduler: Optional[LambdaLR] = None
 
         self.runtime = TrainerRuntimeState(epoch=0, global_step=0, best_val_token_loss=float("inf"))
         self.health = DistillationHealthMetrics()
         self.train_losses: List[float] = []
         self.val_losses: List[float] = []
-        self.metrics_history: Dict[str, List[float]] = {"token_loss": [], "perplexity": [], "token_accuracy": []}
+        self.metrics_history: Dict[str, List[float]] = {
+            "token_loss": [],
+            "perplexity": [],
+            "token_accuracy": [],
+        }
         self.step_loss_history: List[float] = []
         self.metric_stability = MetricStabilityMonitor(
             freeze_window=int(train_cfg.get("frozen_loss_window", 10)),
@@ -117,7 +146,9 @@ class SafeCausalLMTrainer:
         self.gradient_zero_tolerance = float(train_cfg.get("gradient_zero_tolerance", 1e-12))
         self._numerics_validated_once = False
         self.latest_health_report: Optional[TrainingHealthReport] = None
-        self.fault_injector = FaultInjector.from_mapping(self.config.get("debug", {}).get("fault_injection", {}))
+        self.fault_injector = FaultInjector.from_mapping(
+            self.config.get("debug", {}).get("fault_injection", {})
+        )
 
         self.dataset_hash = self._compute_dataset_hash()
         self.run_metadata = self._build_run_metadata()
@@ -127,7 +158,9 @@ class SafeCausalLMTrainer:
     # Public API
     # ------------------------------------------------------------------
     def fit(self, train_loader, val_loader) -> Dict[str, float]:
-        total_steps = max(1, math.ceil(len(train_loader) / self.grad_accum_steps) * max(self.epochs, 1))
+        total_steps = max(
+            1, math.ceil(len(train_loader) / self.grad_accum_steps) * max(self.epochs, 1)
+        )
         warmup_steps = int(self.config.get("train", {}).get("warmup_steps", 0))
         self.scheduler = self._build_scheduler(total_steps=total_steps, warmup_steps=warmup_steps)
 
@@ -360,14 +393,21 @@ class SafeCausalLMTrainer:
                 self.health.bad_grad_steps += 1
                 self.health.skipped_steps += 1
                 self.optimizer.zero_grad(set_to_none=True)
-                LOG.warning("Bad gradients detected (nan=%s inf=%s) at step=%d", grad_report.has_nan_grad, grad_report.has_inf_grad, current_step)
+                LOG.warning(
+                    "Bad gradients detected (nan=%s inf=%s) at step=%d",
+                    grad_report.has_nan_grad,
+                    grad_report.has_inf_grad,
+                    current_step,
+                )
                 continue
             if grad_report.global_grad_norm <= self.gradient_zero_tolerance:
                 self.health.zero_grad_steps += 1
             if grad_report.frozen_loss_detected:
                 self.health.frozen_loss_steps += 1
 
-            should_step = ((batch_idx + 1) % self.grad_accum_steps == 0) or (batch_idx + 1 == len(train_loader))
+            should_step = ((batch_idx + 1) % self.grad_accum_steps == 0) or (
+                batch_idx + 1 == len(train_loader)
+            )
             if should_step:
                 step_success = self._safe_backward_step()
                 if not step_success:
@@ -379,7 +419,11 @@ class SafeCausalLMTrainer:
             if stability["frozen_loss"]:
                 self.health.frozen_loss_steps += 1
             if stability["perplexity_exploded"]:
-                LOG.warning("Perplexity guard triggered at step=%d: ppl=%.4f", current_step, stability["perplexity"])
+                LOG.warning(
+                    "Perplexity guard triggered at step=%d: ppl=%.4f",
+                    current_step,
+                    stability["perplexity"],
+                )
 
             if (batch_idx + 1) % self.log_interval == 0:
                 step_metrics = token_metrics.compute()
@@ -437,7 +481,9 @@ class SafeCausalLMTrainer:
             self.scaler.unscale_(self.optimizer)
 
         grad_norm = torch.nn.utils.clip_grad_norm_(self.student.parameters(), self.max_grad_norm)
-        grad_norm_value = float(grad_norm.item()) if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+        grad_norm_value = (
+            float(grad_norm.item()) if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+        )
         if not math.isfinite(grad_norm_value):
             self.health.nan_events += 1
             self.health.skipped_steps += 1
@@ -591,9 +637,13 @@ class SafeCausalLMTrainer:
 
     def _model_sizes(self) -> Dict[str, int]:
         return {
-            "teacher_trainable": int(sum(p.numel() for p in self.teacher.parameters() if p.requires_grad)),
+            "teacher_trainable": int(
+                sum(p.numel() for p in self.teacher.parameters() if p.requires_grad)
+            ),
             "teacher_total": int(sum(p.numel() for p in self.teacher.parameters())),
-            "student_trainable": int(sum(p.numel() for p in self.student.parameters() if p.requires_grad)),
+            "student_trainable": int(
+                sum(p.numel() for p in self.student.parameters() if p.requires_grad)
+            ),
             "student_total": int(sum(p.numel() for p in self.student.parameters())),
         }
 

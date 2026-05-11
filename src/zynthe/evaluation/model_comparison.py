@@ -14,12 +14,12 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from torch.utils.data import DataLoader
 import numpy as np
 from sklearn.metrics import (
-    accuracy_score, 
-    precision_score, 
-    recall_score, 
+    accuracy_score,
+    precision_score,
+    recall_score,
     f1_score,
     confusion_matrix,
-    classification_report
+    classification_report,
 )
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 class ModelComparator:
     """Compare Teacher and Student models with comprehensive analysis."""
-    
+
     def __init__(
-        self, 
+        self,
         teacher: torch.nn.Module,
         student: torch.nn.Module,
         *,
@@ -42,7 +42,7 @@ class ModelComparator:
     ):
         """
         Initialize model comparator with pre-loaded models.
-        
+
         Args:
             teacher: Pre-loaded teacher model
             student: Pre-loaded student model
@@ -59,23 +59,24 @@ class ModelComparator:
                 device = "cpu"
         self.device = device
         self.tokenizer = tokenizer
-        
+
         logger.info(f"[CHECK] ModelComparator on device: {device}")
         self.teacher = teacher.to(device)
         self.teacher.eval()
-        
+
         self.student = student.to(device)
         self.student.eval()
-        
+
         # Model statistics
         self.teacher_params = sum(p.numel() for p in self.teacher.parameters())
         self.student_params = sum(p.numel() for p in self.student.parameters())
         self.compression_ratio = self.teacher_params / max(self.student_params, 1)
-        
-        logger.info(f"\n[INFO] Model Statistics:")
+
+        logger.info("\n[INFO] Model Statistics:")
         logger.info(f"   Teacher: {self.teacher_params:,} parameters")
         logger.info(f"   Student: {self.student_params:,} parameters")
         logger.info(f"   Compression: {self.compression_ratio:.2f}x smaller")
+
     @classmethod
     def from_paths(
         cls,
@@ -98,31 +99,28 @@ class ModelComparator:
         teacher = AutoModelForSequenceClassification.from_pretrained(teacher_path)
         student = AutoModelForSequenceClassification.from_pretrained(student_path)
         return cls(teacher, student, tokenizer=tokenizer, device=device)
-    
+
     @staticmethod
     def _convert_to_list(arr):
         """Convert numpy array or scalar to list."""
-        if hasattr(arr, 'tolist'):
+        if hasattr(arr, "tolist"):
             return arr.tolist()
         elif isinstance(arr, (int, float, np.number)):
             return [float(arr)]
         else:
             return list(np.atleast_1d(arr))
-        
+
     def evaluate_model(
-        self, 
-        model: torch.nn.Module,
-        dataloader: DataLoader,
-        model_name: str = "Model"
+        self, model: torch.nn.Module, dataloader: DataLoader, model_name: str = "Model"
     ) -> Dict:
         """
         Evaluate a single model on the given dataloader.
-        
+
         Args:
             model: The model to evaluate
             dataloader: DataLoader with evaluation data
             model_name: Name for logging
-            
+
         Returns:
             Dictionary with all metrics
         """
@@ -131,74 +129,70 @@ class ModelComparator:
         all_labels = []
         all_logits = []
         total_loss = 0.0
-        
+
         logger.info(f"\n[TEST] Evaluating {model_name}...")
         with torch.no_grad():
             for batch in tqdm(dataloader, desc=f"Evaluating {model_name}"):
                 # Move batch to device
-                input_ids = batch['input_ids'].to(self.device)
-                attention_mask = batch['attention_mask'].to(self.device)
-                labels = batch['labels'].to(self.device)
-                
+                input_ids = batch["input_ids"].to(self.device)
+                attention_mask = batch["attention_mask"].to(self.device)
+                labels = batch["labels"].to(self.device)
+
                 # Forward pass
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    labels=labels
-                )
-                
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+
                 # Get predictions
                 logits = outputs.logits
                 predictions = torch.argmax(logits, dim=-1)
-                
+
                 # Store results
                 all_predictions.extend(predictions.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
                 all_logits.extend(logits.cpu().numpy())
                 total_loss += outputs.loss.item()
-        
+
         # Convert to numpy
         predictions = np.array(all_predictions)
         labels = np.array(all_labels)
         logits = np.array(all_logits)
-        
+
         # Compute metrics
         accuracy = accuracy_score(labels, predictions)
-        precision = precision_score(labels, predictions, average='macro', zero_division=0)
-        recall = recall_score(labels, predictions, average='macro', zero_division=0)
-        f1 = f1_score(labels, predictions, average='macro', zero_division=0)
-        
+        precision = precision_score(labels, predictions, average="macro", zero_division=0)
+        recall = recall_score(labels, predictions, average="macro", zero_division=0)
+        f1 = f1_score(labels, predictions, average="macro", zero_division=0)
+
         # Per-class metrics
         precision_per_class = precision_score(labels, predictions, average=None, zero_division=0)
         recall_per_class = recall_score(labels, predictions, average=None, zero_division=0)
         f1_per_class = f1_score(labels, predictions, average=None, zero_division=0)
-        
+
         # Confusion matrix
         cm = confusion_matrix(labels, predictions)
-        
+
         # Classification report
         class_report = classification_report(labels, predictions, output_dict=True)
-        
+
         avg_loss = total_loss / len(dataloader)
-        
+
         results = {
-            'model_name': model_name,
-            'accuracy': float(accuracy),
-            'precision': float(precision),
-            'recall': float(recall),
-            'f1': float(f1),
-            'loss': float(avg_loss),
-            'precision_per_class': self._convert_to_list(precision_per_class),
-            'recall_per_class': self._convert_to_list(recall_per_class),
-            'f1_per_class': self._convert_to_list(f1_per_class),
-            'confusion_matrix': cm.tolist(),
-            'classification_report': class_report,
-            'predictions': predictions.tolist(),
-            'labels': labels.tolist(),
-            'logits': logits.tolist(),
-            'num_parameters': sum(p.numel() for p in model.parameters())
+            "model_name": model_name,
+            "accuracy": float(accuracy),
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "loss": float(avg_loss),
+            "precision_per_class": self._convert_to_list(precision_per_class),
+            "recall_per_class": self._convert_to_list(recall_per_class),
+            "f1_per_class": self._convert_to_list(f1_per_class),
+            "confusion_matrix": cm.tolist(),
+            "classification_report": class_report,
+            "predictions": predictions.tolist(),
+            "labels": labels.tolist(),
+            "logits": logits.tolist(),
+            "num_parameters": sum(p.numel() for p in model.parameters()),
         }
-        
+
         logger.info(f"\n[OK] {model_name} Results:")
         logger.info(f"   Accuracy:  {accuracy:.4f}")
         logger.info(f"   Precision: {precision:.4f}")
@@ -206,50 +200,38 @@ class ModelComparator:
         logger.info(f"   F1-Score:  {f1:.4f}")
         logger.info(f"   Avg Loss:  {avg_loss:.4f}")
         return results
-    
+
     def compare_models(self, dataloader: DataLoader) -> Tuple[Dict, Dict]:
         """
         Compare both teacher and student models.
-        
+
         Args:
             dataloader: DataLoader with evaluation data
-            
+
         Returns:
             Tuple of (teacher_results, student_results)
         """
-        logger.info("\n" + "="*60)
+        logger.info("\n" + "=" * 60)
         logger.info("[TARGET] TEACHER vs STUDENT COMPARISON")
-        logger.info("="*60)
+        logger.info("=" * 60)
         # Evaluate teacher
-        teacher_results = self.evaluate_model(
-            self.teacher, 
-            dataloader, 
-            "Teacher Model"
-        )
-        
+        teacher_results = self.evaluate_model(self.teacher, dataloader, "Teacher Model")
+
         # Evaluate student
-        student_results = self.evaluate_model(
-            self.student, 
-            dataloader, 
-            "Student Model"
-        )
-        
+        student_results = self.evaluate_model(self.student, dataloader, "Student Model")
+
         # Add compression info
-        teacher_results['compression_ratio'] = 1.0
-        student_results['compression_ratio'] = self.compression_ratio
-        
+        teacher_results["compression_ratio"] = 1.0
+        student_results["compression_ratio"] = self.compression_ratio
+
         return teacher_results, student_results
-    
+
     def visualize_comparison(
-        self,
-        teacher_results: Dict,
-        student_results: Dict,
-        save_dir: str,
-        show_plots: bool = False
+        self, teacher_results: Dict, student_results: Dict, save_dir: str, show_plots: bool = False
     ):
         """
         Create comprehensive visualizations comparing models.
-        
+
         Args:
             teacher_results: Teacher model evaluation results
             student_results: Student model evaluation results
@@ -258,276 +240,348 @@ class ModelComparator:
         """
         save_dir_path = Path(save_dir)
         save_dir_path.mkdir(parents=True, exist_ok=True)
-        
+
         logger.info("\n[INFO] Creating comparison visualizations...")
         # 1. Metrics Bar Chart
         self._plot_metrics_comparison(teacher_results, student_results, save_dir_path)
-        
+
         # 2. Confusion Matrices Side-by-Side
         self._plot_confusion_matrices(teacher_results, student_results, save_dir_path)
-        
+
         # 3. Per-Class Performance
         self._plot_per_class_metrics(teacher_results, student_results, save_dir_path)
-        
+
         # 4. Model Size vs Performance
         self._plot_efficiency_chart(teacher_results, student_results, save_dir_path)
-        
+
         # 5. Detailed Comparison Table
         self._create_comparison_table(teacher_results, student_results, save_dir_path)
-        
+
         logger.info(f"[OK] Visualizations saved to: {save_dir_path}")
         if not show_plots:
-            plt.close('all')
-    
+            plt.close("all")
+
     def _plot_metrics_comparison(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot main metrics comparison bar chart."""
-        metrics = ['accuracy', 'precision', 'recall', 'f1']
+        metrics = ["accuracy", "precision", "recall", "f1"]
         teacher_vals = [teacher_res[m] for m in metrics]
         student_vals = [student_res[m] for m in metrics]
-        
+
         x = np.arange(len(metrics))
         width = 0.35
-        
+
         fig, ax = plt.subplots(figsize=(12, 6))
-        bars1 = ax.bar(x - width/2, teacher_vals, width, label='Teacher', color='#2E86AB', alpha=0.8)
-        bars2 = ax.bar(x + width/2, student_vals, width, label='Student', color='#A23B72', alpha=0.8)
-        
-        ax.set_xlabel('Metrics', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Score', fontsize=12, fontweight='bold')
-        ax.set_title('Teacher vs Student: Performance Comparison', fontsize=14, fontweight='bold', pad=20)
+        bars1 = ax.bar(
+            x - width / 2, teacher_vals, width, label="Teacher", color="#2E86AB", alpha=0.8
+        )
+        bars2 = ax.bar(
+            x + width / 2, student_vals, width, label="Student", color="#A23B72", alpha=0.8
+        )
+
+        ax.set_xlabel("Metrics", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Score", fontsize=12, fontweight="bold")
+        ax.set_title(
+            "Teacher vs Student: Performance Comparison", fontsize=14, fontweight="bold", pad=20
+        )
         ax.set_xticks(x)
         ax.set_xticklabels([m.capitalize() for m in metrics])
         ax.legend(fontsize=11)
-        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.grid(axis="y", alpha=0.3, linestyle="--")
         ax.set_ylim(0, 1.0)
-        
+
         # Add value labels on bars
         for bars in [bars1, bars2]:
             for bar in bars:
                 height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{height:.3f}',
-                       ha='center', va='bottom', fontsize=9)
-        
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height,
+                    f"{height:.3f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+
         plt.tight_layout()
-        plt.savefig(save_dir / 'metrics_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(save_dir / "metrics_comparison.png", dpi=300, bbox_inches="tight")
         plt.close()
         logger.info("    Saved: metrics_comparison.png")
+
     def _plot_confusion_matrices(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot confusion matrices side-by-side."""
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-        
+
         # Teacher confusion matrix
-        cm_teacher = np.array(teacher_res['confusion_matrix'])
-        sns.heatmap(cm_teacher, annot=True, fmt='d', cmap='Blues', ax=axes[0],
-                   cbar_kws={'label': 'Count'})
-        axes[0].set_title('Teacher Model\nConfusion Matrix', fontsize=12, fontweight='bold')
-        axes[0].set_xlabel('Predicted', fontsize=11)
-        axes[0].set_ylabel('Actual', fontsize=11)
-        
+        cm_teacher = np.array(teacher_res["confusion_matrix"])
+        sns.heatmap(
+            cm_teacher, annot=True, fmt="d", cmap="Blues", ax=axes[0], cbar_kws={"label": "Count"}
+        )
+        axes[0].set_title("Teacher Model\nConfusion Matrix", fontsize=12, fontweight="bold")
+        axes[0].set_xlabel("Predicted", fontsize=11)
+        axes[0].set_ylabel("Actual", fontsize=11)
+
         # Student confusion matrix
-        cm_student = np.array(student_res['confusion_matrix'])
-        sns.heatmap(cm_student, annot=True, fmt='d', cmap='Purples', ax=axes[1],
-                   cbar_kws={'label': 'Count'})
-        axes[1].set_title('Student Model\nConfusion Matrix', fontsize=12, fontweight='bold')
-        axes[1].set_xlabel('Predicted', fontsize=11)
-        axes[1].set_ylabel('Actual', fontsize=11)
-        
+        cm_student = np.array(student_res["confusion_matrix"])
+        sns.heatmap(
+            cm_student, annot=True, fmt="d", cmap="Purples", ax=axes[1], cbar_kws={"label": "Count"}
+        )
+        axes[1].set_title("Student Model\nConfusion Matrix", fontsize=12, fontweight="bold")
+        axes[1].set_xlabel("Predicted", fontsize=11)
+        axes[1].set_ylabel("Actual", fontsize=11)
+
         plt.tight_layout()
-        plt.savefig(save_dir / 'confusion_matrices_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(save_dir / "confusion_matrices_comparison.png", dpi=300, bbox_inches="tight")
         plt.close()
         logger.info("    Saved: confusion_matrices_comparison.png")
+
     def _plot_per_class_metrics(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot per-class performance metrics."""
-        num_classes = len(teacher_res['f1_per_class'])
-        metrics = ['precision_per_class', 'recall_per_class', 'f1_per_class']
-        metric_names = ['Precision', 'Recall', 'F1-Score']
-        
+        num_classes = len(teacher_res["f1_per_class"])
+        metrics = ["precision_per_class", "recall_per_class", "f1_per_class"]
+        metric_names = ["Precision", "Recall", "F1-Score"]
+
         fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-        
+
         for idx, (metric, name) in enumerate(zip(metrics, metric_names)):
             teacher_vals = teacher_res[metric]
             student_vals = student_res[metric]
-            
+
             x = np.arange(num_classes)
             width = 0.35
-            
-            axes[idx].bar(x - width/2, teacher_vals, width, label='Teacher', color='#2E86AB', alpha=0.8)
-            axes[idx].bar(x + width/2, student_vals, width, label='Student', color='#A23B72', alpha=0.8)
-            
-            axes[idx].set_xlabel('Class', fontsize=11, fontweight='bold')
-            axes[idx].set_ylabel(name, fontsize=11, fontweight='bold')
-            axes[idx].set_title(f'{name} per Class', fontsize=12, fontweight='bold')
+
+            axes[idx].bar(
+                x - width / 2, teacher_vals, width, label="Teacher", color="#2E86AB", alpha=0.8
+            )
+            axes[idx].bar(
+                x + width / 2, student_vals, width, label="Student", color="#A23B72", alpha=0.8
+            )
+
+            axes[idx].set_xlabel("Class", fontsize=11, fontweight="bold")
+            axes[idx].set_ylabel(name, fontsize=11, fontweight="bold")
+            axes[idx].set_title(f"{name} per Class", fontsize=12, fontweight="bold")
             axes[idx].set_xticks(x)
-            axes[idx].set_xticklabels([f'Class {i}' for i in range(num_classes)])
+            axes[idx].set_xticklabels([f"Class {i}" for i in range(num_classes)])
             axes[idx].legend()
-            axes[idx].grid(axis='y', alpha=0.3, linestyle='--')
+            axes[idx].grid(axis="y", alpha=0.3, linestyle="--")
             axes[idx].set_ylim([0, 1.0])
-        
+
         plt.tight_layout()
-        plt.savefig(save_dir / 'per_class_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(save_dir / "per_class_comparison.png", dpi=300, bbox_inches="tight")
         plt.close()
         logger.info("    Saved: per_class_comparison.png")
+
     def _plot_efficiency_chart(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Plot model efficiency (size vs performance)."""
         fig, ax = plt.subplots(figsize=(10, 6))
-        
-        models = ['Teacher', 'Student']
-        params = [teacher_res['num_parameters'] / 1e6, student_res['num_parameters'] / 1e6]  # in millions
-        accuracies = [teacher_res['accuracy'], student_res['accuracy']]
-        colors = ['#2E86AB', '#A23B72']
-        
+
+        models = ["Teacher", "Student"]
+        params = [
+            teacher_res["num_parameters"] / 1e6,
+            student_res["num_parameters"] / 1e6,
+        ]  # in millions
+        accuracies = [teacher_res["accuracy"], student_res["accuracy"]]
+        colors = ["#2E86AB", "#A23B72"]
+
         # Scatter plot with size representing accuracy
-        _ = ax.scatter(params, accuracies, s=[a*1000 for a in accuracies], 
-                           c=colors, alpha=0.6, edgecolors='black', linewidth=2)
-        
+        _ = ax.scatter(
+            params,
+            accuracies,
+            s=[a * 1000 for a in accuracies],
+            c=colors,
+            alpha=0.6,
+            edgecolors="black",
+            linewidth=2,
+        )
+
         # Add labels
         for i, (model, param, acc) in enumerate(zip(models, params, accuracies)):
-            ax.annotate(f'{model}\n{param:.1f}M params\nAcc: {acc:.3f}',
-                       xy=(param, acc), xytext=(10, 10),
-                       textcoords='offset points', fontsize=10,
-                       bbox=dict(boxstyle='round,pad=0.5', fc=colors[i], alpha=0.3))
-        
-        ax.set_xlabel('Model Size (Million Parameters)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
-        ax.set_title('Model Efficiency: Size vs Performance', fontsize=14, fontweight='bold', pad=20)
-        ax.grid(True, alpha=0.3, linestyle='--')
+            ax.annotate(
+                f"{model}\n{param:.1f}M params\nAcc: {acc:.3f}",
+                xy=(param, acc),
+                xytext=(10, 10),
+                textcoords="offset points",
+                fontsize=10,
+                bbox=dict(boxstyle="round,pad=0.5", fc=colors[i], alpha=0.3),
+            )
+
+        ax.set_xlabel("Model Size (Million Parameters)", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Accuracy", fontsize=12, fontweight="bold")
+        ax.set_title(
+            "Model Efficiency: Size vs Performance", fontsize=14, fontweight="bold", pad=20
+        )
+        ax.grid(True, alpha=0.3, linestyle="--")
         ax.set_ylim(min(accuracies) - 0.05, 1.0)
-        
+
         # Add compression annotation
-        compression = teacher_res['num_parameters'] / student_res['num_parameters']
-        accuracy_drop = (teacher_res['accuracy'] - student_res['accuracy']) * 100
-        ax.text(0.05, 0.95, 
-               f'Compression: {compression:.2f}x\nAccuracy Drop: {accuracy_drop:.2f}%',
-               transform=ax.transAxes, fontsize=11,
-               verticalalignment='top',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-        
+        compression = teacher_res["num_parameters"] / student_res["num_parameters"]
+        accuracy_drop = (teacher_res["accuracy"] - student_res["accuracy"]) * 100
+        ax.text(
+            0.05,
+            0.95,
+            f"Compression: {compression:.2f}x\nAccuracy Drop: {accuracy_drop:.2f}%",
+            transform=ax.transAxes,
+            fontsize=11,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
+
         plt.tight_layout()
-        plt.savefig(save_dir / 'efficiency_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(save_dir / "efficiency_comparison.png", dpi=300, bbox_inches="tight")
         plt.close()
         logger.info("    Saved: efficiency_comparison.png")
+
     def _create_comparison_table(self, teacher_res: Dict, student_res: Dict, save_dir: Path):
         """Create detailed comparison table as image."""
         fig, ax = plt.subplots(figsize=(12, 8))
-        ax.axis('tight')
-        ax.axis('off')
-        
+        ax.axis("tight")
+        ax.axis("off")
+
         # Prepare data
         metrics_data = [
-            ['Metric', 'Teacher', 'Student', 'Difference'],
-            ['Parameters', f"{teacher_res['num_parameters']:,}", f"{student_res['num_parameters']:,}", 
-             f"{teacher_res['compression_ratio']:.2f}x smaller"],
-            ['Accuracy', f"{teacher_res['accuracy']:.4f}", f"{student_res['accuracy']:.4f}",
-             f"{(teacher_res['accuracy'] - student_res['accuracy']):.4f}"],
-            ['Precision', f"{teacher_res['precision']:.4f}", f"{student_res['precision']:.4f}",
-             f"{(teacher_res['precision'] - student_res['precision']):.4f}"],
-            ['Recall', f"{teacher_res['recall']:.4f}", f"{student_res['recall']:.4f}",
-             f"{(teacher_res['recall'] - student_res['recall']):.4f}"],
-            ['F1-Score', f"{teacher_res['f1']:.4f}", f"{student_res['f1']:.4f}",
-             f"{(teacher_res['f1'] - student_res['f1']):.4f}"],
-            ['Avg Loss', f"{teacher_res['loss']:.4f}", f"{student_res['loss']:.4f}",
-             f"{(teacher_res['loss'] - student_res['loss']):.4f}"],
+            ["Metric", "Teacher", "Student", "Difference"],
+            [
+                "Parameters",
+                f"{teacher_res['num_parameters']:,}",
+                f"{student_res['num_parameters']:,}",
+                f"{teacher_res['compression_ratio']:.2f}x smaller",
+            ],
+            [
+                "Accuracy",
+                f"{teacher_res['accuracy']:.4f}",
+                f"{student_res['accuracy']:.4f}",
+                f"{(teacher_res['accuracy'] - student_res['accuracy']):.4f}",
+            ],
+            [
+                "Precision",
+                f"{teacher_res['precision']:.4f}",
+                f"{student_res['precision']:.4f}",
+                f"{(teacher_res['precision'] - student_res['precision']):.4f}",
+            ],
+            [
+                "Recall",
+                f"{teacher_res['recall']:.4f}",
+                f"{student_res['recall']:.4f}",
+                f"{(teacher_res['recall'] - student_res['recall']):.4f}",
+            ],
+            [
+                "F1-Score",
+                f"{teacher_res['f1']:.4f}",
+                f"{student_res['f1']:.4f}",
+                f"{(teacher_res['f1'] - student_res['f1']):.4f}",
+            ],
+            [
+                "Avg Loss",
+                f"{teacher_res['loss']:.4f}",
+                f"{student_res['loss']:.4f}",
+                f"{(teacher_res['loss'] - student_res['loss']):.4f}",
+            ],
         ]
-        
-        table = ax.table(cellText=metrics_data, cellLoc='center', loc='center',
-                        colWidths=[0.25, 0.25, 0.25, 0.25])
-        
+
+        table = ax.table(
+            cellText=metrics_data,
+            cellLoc="center",
+            loc="center",
+            colWidths=[0.25, 0.25, 0.25, 0.25],
+        )
+
         table.auto_set_font_size(False)
         table.set_fontsize(10)
         table.scale(1, 2)
-        
+
         # Style header row
         for i in range(4):
-            table[(0, i)].set_facecolor('#2E86AB')
-            table[(0, i)].set_text_props(weight='bold', color='white')
-        
+            table[(0, i)].set_facecolor("#2E86AB")
+            table[(0, i)].set_text_props(weight="bold", color="white")
+
         # Style data rows
         for i in range(1, len(metrics_data)):
             for j in range(4):
                 if i % 2 == 0:
-                    table[(i, j)].set_facecolor('#E8F4F8')
-        
-        plt.title('Teacher vs Student: Detailed Comparison', 
-                 fontsize=14, fontweight='bold', pad=20)
-        
-        plt.savefig(save_dir / 'comparison_table.png', dpi=300, bbox_inches='tight')
+                    table[(i, j)].set_facecolor("#E8F4F8")
+
+        plt.title("Teacher vs Student: Detailed Comparison", fontsize=14, fontweight="bold", pad=20)
+
+        plt.savefig(save_dir / "comparison_table.png", dpi=300, bbox_inches="tight")
         plt.close()
         logger.info("    Saved: comparison_table.png")
-    def save_results(
-        self,
-        teacher_results: Dict,
-        student_results: Dict,
-        save_dir: str
-    ):
+
+    def save_results(self, teacher_results: Dict, student_results: Dict, save_dir: str):
         """Save comparison results as JSON."""
         save_dir_path = Path(save_dir)
         save_dir_path.mkdir(parents=True, exist_ok=True)
-        
+
         # Prepare summary
         summary = {
-            'teacher': {
-                k: v for k, v in teacher_results.items() 
-                if k not in ['predictions', 'labels', 'logits']  # Exclude large arrays
+            "teacher": {
+                k: v
+                for k, v in teacher_results.items()
+                if k not in ["predictions", "labels", "logits"]  # Exclude large arrays
             },
-            'student': {
-                k: v for k, v in student_results.items()
-                if k not in ['predictions', 'labels', 'logits']
+            "student": {
+                k: v
+                for k, v in student_results.items()
+                if k not in ["predictions", "labels", "logits"]
             },
-            'comparison': {
-                'accuracy_diff': teacher_results['accuracy'] - student_results['accuracy'],
-                'f1_diff': teacher_results['f1'] - student_results['f1'],
-                'compression_ratio': student_results['compression_ratio'],
-                'parameter_reduction': (1 - 1/student_results['compression_ratio']) * 100,
-            }
+            "comparison": {
+                "accuracy_diff": teacher_results["accuracy"] - student_results["accuracy"],
+                "f1_diff": teacher_results["f1"] - student_results["f1"],
+                "compression_ratio": student_results["compression_ratio"],
+                "parameter_reduction": (1 - 1 / student_results["compression_ratio"]) * 100,
+            },
         }
-        
+
         # Save JSON
-        with open(save_dir_path / 'comparison_results.json', 'w') as f:
+        with open(save_dir_path / "comparison_results.json", "w") as f:
             json.dump(summary, f, indent=2)
-        
+
         logger.info(f"\n[SAVE] Results saved to: {save_dir_path / 'comparison_results.json'}")
-    def generate_report(
-        self,
-        teacher_results: Dict,
-        student_results: Dict,
-        save_dir: str
-    ):
+
+    def generate_report(self, teacher_results: Dict, student_results: Dict, save_dir: str):
         """Generate a comprehensive markdown report."""
         save_dir_path = Path(save_dir)
-        
+
         report = []
         report.append("# [INFO] Teacher vs Student Model Comparison Report\n")
         report.append(f"Generated on: {save_dir_path.name}\n")
         report.append("---\n\n")
-        
+
         # Executive Summary
         report.append("## [LIST] Executive Summary\n\n")
-        compression = student_results['compression_ratio']
-        acc_diff = (teacher_results['accuracy'] - student_results['accuracy']) * 100
-        f1_diff = (teacher_results['f1'] - student_results['f1']) * 100
-        
+        compression = student_results["compression_ratio"]
+        acc_diff = (teacher_results["accuracy"] - student_results["accuracy"]) * 100
+        f1_diff = (teacher_results["f1"] - student_results["f1"]) * 100
+
         report.append(f"- **Compression Ratio**: {compression:.2f}x smaller\n")
         report.append(f"- **Parameter Reduction**: {(1 - 1/compression) * 100:.1f}%\n")
         report.append(f"- **Accuracy Drop**: {acc_diff:.2f}%\n")
         report.append(f"- **F1-Score Drop**: {f1_diff:.2f}%\n\n")
-        
+
         # Model Statistics
         report.append("## [ARCH] Model Statistics\n\n")
         report.append("| Metric | Teacher | Student |\n")
         report.append("|--------|---------|----------|\n")
-        report.append(f"| Parameters | {teacher_results['num_parameters']:,} | {student_results['num_parameters']:,} |\n")
+        report.append(
+            f"| Parameters | {teacher_results['num_parameters']:,} | {student_results['num_parameters']:,} |\n"
+        )
         report.append(f"| Size Ratio | 1.0x | {1/compression:.3f}x |\n\n")
-        
+
         # Performance Metrics
         report.append("## [INFO] Performance Metrics\n\n")
         report.append("| Metric | Teacher | Student | Difference |\n")
         report.append("|--------|---------|---------|------------|\n")
-        report.append(f"| Accuracy | {teacher_results['accuracy']:.4f} | {student_results['accuracy']:.4f} | {teacher_results['accuracy'] - student_results['accuracy']:.4f} |\n")
-        report.append(f"| Precision | {teacher_results['precision']:.4f} | {student_results['precision']:.4f} | {teacher_results['precision'] - student_results['precision']:.4f} |\n")
-        report.append(f"| Recall | {teacher_results['recall']:.4f} | {student_results['recall']:.4f} | {teacher_results['recall'] - student_results['recall']:.4f} |\n")
-        report.append(f"| F1-Score | {teacher_results['f1']:.4f} | {student_results['f1']:.4f} | {teacher_results['f1'] - student_results['f1']:.4f} |\n\n")
-        
+        report.append(
+            f"| Accuracy | {teacher_results['accuracy']:.4f} | {student_results['accuracy']:.4f} | {teacher_results['accuracy'] - student_results['accuracy']:.4f} |\n"
+        )
+        report.append(
+            f"| Precision | {teacher_results['precision']:.4f} | {student_results['precision']:.4f} | {teacher_results['precision'] - student_results['precision']:.4f} |\n"
+        )
+        report.append(
+            f"| Recall | {teacher_results['recall']:.4f} | {student_results['recall']:.4f} | {teacher_results['recall'] - student_results['recall']:.4f} |\n"
+        )
+        report.append(
+            f"| F1-Score | {teacher_results['f1']:.4f} | {student_results['f1']:.4f} | {teacher_results['f1'] - student_results['f1']:.4f} |\n\n"
+        )
+
         # Visualizations
         report.append("## [INFO] Visualizations\n\n")
         report.append("### Metrics Comparison\n")
@@ -538,25 +592,27 @@ class ModelComparator:
         report.append("![Per-Class Metrics](per_class_comparison.png)\n\n")
         report.append("### Efficiency Analysis\n")
         report.append("![Efficiency](efficiency_comparison.png)\n\n")
-        
+
         # Conclusion
         report.append("## [TARGET] Conclusion\n\n")
         if abs(acc_diff) < 2.0:
             verdict = "[OK] **Excellent**: Student model maintains near-identical performance with significant size reduction."
         elif abs(acc_diff) < 5.0:
-            verdict = " **Good**: Student model shows acceptable performance with good compression ratio."
+            verdict = (
+                " **Good**: Student model shows acceptable performance with good compression ratio."
+            )
         else:
             verdict = " **Fair**: Student model shows noticeable performance drop. Consider retraining with adjusted hyperparameters."
-        
+
         report.append(f"{verdict}\n\n")
         report.append(f"The student model achieves **{compression:.2f}x compression** ")
         report.append(f"with only **{abs(acc_diff):.2f}%** accuracy difference, ")
         report.append(f"making it a {('viable' if abs(acc_diff) < 3 else 'reasonable')} ")
         report.append("candidate for deployment in resource-constrained environments.\n")
-        
+
         # Save report
-        report_path = save_dir_path / 'COMPARISON_REPORT.md'
-        with open(report_path, 'w') as f:
+        report_path = save_dir_path / "COMPARISON_REPORT.md"
+        with open(report_path, "w") as f:
             f.writelines(report)
-        
+
         logger.info(f"\n[NOTE] Report generated: {report_path}")

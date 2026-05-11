@@ -9,8 +9,19 @@ from collections import deque
 from collections.abc import Iterable as IterableABC
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
-
+from typing import (
+    Any,
+    Deque,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 Number = Union[int, float]
 ReducerSpec = Union[str, Sequence[str], Mapping[str, Sequence[str]]]

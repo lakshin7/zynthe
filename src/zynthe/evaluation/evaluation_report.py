@@ -25,6 +25,7 @@ class EvaluationReport:
     Additional metadata fields are retained for backward compatibility with
     existing trainer and visualization paths.
     """
+
     # Canonical fields
     loss: Optional[float] = None
     metrics: Dict[str, Any] = field(default_factory=dict)
@@ -84,9 +85,11 @@ class EvaluationReport:
 
         class _NumpySafeEncoder(json.JSONEncoder):
             """Handle numpy types that json.dump can't serialize."""
+
             def default(self, obj):
                 try:
                     import numpy as np
+
                     if isinstance(obj, np.ndarray):
                         return obj.tolist()
                     if isinstance(obj, (np.integer,)):
@@ -99,7 +102,7 @@ class EvaluationReport:
                     pass
                 return super().default(obj)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, cls=_NumpySafeEncoder)
 
     def save_markdown(self, filepath: str | Path) -> None:
@@ -137,22 +140,22 @@ class EvaluationReport:
             for key, value in self.distillation_metrics.items():
                 lines.append(f"- {key}: {value}")
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
     @classmethod
     def load_json(cls, filepath: str | Path) -> "EvaluationReport":
         """Deserialize from a JSON file."""
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
         # Backward compatibility for older report schema.
-        if 'metrics' not in data and 'core_metrics' in data:
-            data['metrics'] = data.pop('core_metrics')
-        if 'loss' not in data and isinstance(data.get('metrics'), dict):
-            maybe_loss = data['metrics'].get('loss')
+        if "metrics" not in data and "core_metrics" in data:
+            data["metrics"] = data.pop("core_metrics")
+        if "loss" not in data and isinstance(data.get("metrics"), dict):
+            maybe_loss = data["metrics"].get("loss")
             if isinstance(maybe_loss, (int, float)):
-                data['loss'] = float(maybe_loss)
-        data.setdefault('timestamp', datetime.now(timezone.utc).isoformat())
+                data["loss"] = float(maybe_loss)
+        data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
         # Strip synthetic keys that to_dict() adds but aren't constructor args.
-        data.pop('core_metrics', None)
+        data.pop("core_metrics", None)
         return cls(**data)

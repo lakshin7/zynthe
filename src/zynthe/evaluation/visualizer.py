@@ -10,6 +10,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def plot_teacher_student_comparison(
     student_train_losses: List[float],
     student_val_losses: List[float],
@@ -45,13 +46,37 @@ def plot_teacher_student_comparison(
     # --- Loss comparison ---
     ax_loss.set_title("Teacher vs Student Loss Curves", fontsize=14, fontweight="bold")
     if teacher_train_losses:
-        ax_loss.plot(range(1, len(teacher_train_losses)+1), teacher_train_losses, label="Teacher Train", color="#9467bd", marker="o")
+        ax_loss.plot(
+            range(1, len(teacher_train_losses) + 1),
+            teacher_train_losses,
+            label="Teacher Train",
+            color="#9467bd",
+            marker="o",
+        )
     if teacher_val_losses:
-        ax_loss.plot(range(1, len(teacher_val_losses)+1), teacher_val_losses, label="Teacher Val", color="#c5b0d5", marker="s")
+        ax_loss.plot(
+            range(1, len(teacher_val_losses) + 1),
+            teacher_val_losses,
+            label="Teacher Val",
+            color="#c5b0d5",
+            marker="s",
+        )
     if student_train_losses:
-        ax_loss.plot(range(1, len(student_train_losses)+1), student_train_losses, label="Student Train", color="#1f77b4", marker="o")
+        ax_loss.plot(
+            range(1, len(student_train_losses) + 1),
+            student_train_losses,
+            label="Student Train",
+            color="#1f77b4",
+            marker="o",
+        )
     if student_val_losses:
-        ax_loss.plot(range(1, len(student_val_losses)+1), student_val_losses, label="Student Val", color="#ff7f0e", marker="s")
+        ax_loss.plot(
+            range(1, len(student_val_losses) + 1),
+            student_val_losses,
+            label="Student Val",
+            color="#ff7f0e",
+            marker="s",
+        )
     ax_loss.set_xlabel("Epoch", fontsize=12)
     ax_loss.set_ylabel("Loss", fontsize=12)
     ax_loss.grid(alpha=0.3)
@@ -59,23 +84,49 @@ def plot_teacher_student_comparison(
 
     # --- Accuracy / F1 comparison ---
     ax_acc.set_title("Teacher vs Student Validation Metrics", fontsize=14, fontweight="bold")
-    teacher_acc = teacher_metrics.get('accuracy', []) if isinstance(teacher_metrics, dict) else []
-    student_acc = student_metrics.get('accuracy', []) if isinstance(student_metrics, dict) else []
-    teacher_f1 = teacher_metrics.get('f1', []) if isinstance(teacher_metrics, dict) else []
-    student_f1 = student_metrics.get('f1', []) if isinstance(student_metrics, dict) else []
+    teacher_acc = teacher_metrics.get("accuracy", []) if isinstance(teacher_metrics, dict) else []
+    student_acc = student_metrics.get("accuracy", []) if isinstance(student_metrics, dict) else []
+    teacher_f1 = teacher_metrics.get("f1", []) if isinstance(teacher_metrics, dict) else []
+    student_f1 = student_metrics.get("f1", []) if isinstance(student_metrics, dict) else []
 
     plotted_any = False
     if teacher_acc:
-        ax_acc.plot(range(1, len(teacher_acc)+1), teacher_acc, label="Teacher Acc", color="#2ca02c", marker="o")
+        ax_acc.plot(
+            range(1, len(teacher_acc) + 1),
+            teacher_acc,
+            label="Teacher Acc",
+            color="#2ca02c",
+            marker="o",
+        )
         plotted_any = True
     if student_acc:
-        ax_acc.plot(range(1, len(student_acc)+1), student_acc, label="Student Acc", color="#17becf", marker="o")
+        ax_acc.plot(
+            range(1, len(student_acc) + 1),
+            student_acc,
+            label="Student Acc",
+            color="#17becf",
+            marker="o",
+        )
         plotted_any = True
     if teacher_f1:
-        ax_acc.plot(range(1, len(teacher_f1)+1), teacher_f1, label="Teacher F1", color="#8c564b", linestyle="--", marker="s")
+        ax_acc.plot(
+            range(1, len(teacher_f1) + 1),
+            teacher_f1,
+            label="Teacher F1",
+            color="#8c564b",
+            linestyle="--",
+            marker="s",
+        )
         plotted_any = True
     if student_f1:
-        ax_acc.plot(range(1, len(student_f1)+1), student_f1, label="Student F1", color="#e377c2", linestyle="--", marker="s")
+        ax_acc.plot(
+            range(1, len(student_f1) + 1),
+            student_f1,
+            label="Student F1",
+            color="#e377c2",
+            linestyle="--",
+            marker="s",
+        )
         plotted_any = True
 
     if plotted_any:
@@ -85,13 +136,15 @@ def plot_teacher_student_comparison(
         ax_acc.grid(alpha=0.3)
         ax_acc.legend(loc="best", fontsize=10, ncol=2)
     else:
-        ax_acc.text(0.5, 0.5, "No metric data available", ha='center', va='center', fontsize=12)
+        ax_acc.text(0.5, 0.5, "No metric data available", ha="center", va="center", fontsize=12)
         ax_acc.set_axis_off()
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Teacher vs Student comparison saved to: {save_path}")
+
+
 def plot_training_curves(
     train_losses: List[float],
     val_losses: List[float],
@@ -287,9 +340,7 @@ def plot_training_curves(
         if len(train_losses) > 1:
             t_max_epoch = int(np.argmax(train_losses)) + 1
             t_max_val = float(np.max(train_losses))
-            ax_loss.scatter(
-                [t_max_epoch], [t_max_val], color="#1f77b4", s=60, marker="X", zorder=5
-            )
+            ax_loss.scatter([t_max_epoch], [t_max_val], color="#1f77b4", s=60, marker="X", zorder=5)
             if annotate:
                 ax_loss.annotate(
                     f"worst train\n{t_max_val:.4f}",
@@ -302,9 +353,7 @@ def plot_training_curves(
         if len(val_losses) > 1:
             v_max_epoch = int(np.argmax(val_losses)) + 1
             v_max_val = float(np.max(val_losses))
-            ax_loss.scatter(
-                [v_max_epoch], [v_max_val], color="#ff7f0e", s=60, marker="X", zorder=5
-            )
+            ax_loss.scatter([v_max_epoch], [v_max_val], color="#ff7f0e", s=60, marker="X", zorder=5)
             if annotate:
                 ax_loss.annotate(
                     f"worst val\n{v_max_val:.4f}",
@@ -366,9 +415,7 @@ def plot_training_curves(
                     xytext=(0, -28),
                     ha="center",
                     fontsize=8,
-                    bbox=dict(
-                        boxstyle="round,pad=0.15", fc="white", ec=color, alpha=0.65
-                    ),
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color, alpha=0.65),
                 )
         if highlight_extrema and len(values) > 1:
             worst_epoch = int(np.argmin(values)) + 1
@@ -415,6 +462,8 @@ def plot_training_curves(
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Enhanced training curves saved to: {save_path}")
+
+
 def plot_epoch_micro_series(
     title_prefix: str,
     epoch_idx: int,
@@ -495,9 +544,15 @@ def plot_epoch_micro_series(
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Micro-series saved to: {save_path}")
+
+
 def plot_metric_grid(metrics: Dict[str, List[float]], save_path: str, columns: int = 2) -> None:
     """Plot each metric on its own axis to highlight subtle differences."""
-    metric_series = [(name, values) for name, values in metrics.items() if isinstance(values, (list, tuple)) and values]
+    metric_series = [
+        (name, values)
+        for name, values in metrics.items()
+        if isinstance(values, (list, tuple)) and values
+    ]
     if not metric_series:
         logger.info("[PLOT] No metric history provided for grid plot.")
         return
@@ -508,56 +563,64 @@ def plot_metric_grid(metrics: Dict[str, List[float]], save_path: str, columns: i
 
     for ax, (name, values) in zip(axes, metric_series):
         epochs = range(1, len(values) + 1)
-        ax.plot(epochs, values, marker='o', linewidth=2, color='#1f77b4')
-        ax.set_title(name.capitalize(), fontsize=12, fontweight='bold')
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Score')
+        ax.plot(epochs, values, marker="o", linewidth=2, color="#1f77b4")
+        ax.set_title(name.capitalize(), fontsize=12, fontweight="bold")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Score")
         ax.set_ylim(0, 1.05)
         ax.grid(True, alpha=0.3)
-    for ax in axes[len(metric_series):]:
-        ax.axis('off')
+    for ax in axes[len(metric_series) :]:
+        ax.axis("off")
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Metric grid saved to: {save_path}")
+
+
 def plot_calibration_curve(calibration: Dict[str, Any], save_path: str) -> None:
     """Render a reliability diagram from calibration statistics."""
     if not calibration:
         logger.info("[PLOT] Calibration data missing; skipping reliability plot.")
         return
-    prob_true = calibration.get('prob_true')
-    prob_pred = calibration.get('prob_pred')
+    prob_true = calibration.get("prob_true")
+    prob_pred = calibration.get("prob_pred")
     if prob_true is None or prob_pred is None:
         logger.info("[PLOT] Calibration arrays not found; skipping reliability plot.")
         return
 
     plt.figure(figsize=(6, 5))
-    plt.plot(prob_pred, prob_true, marker='o', label='Model')
-    plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Perfect Calibration')
-    plt.fill_between(prob_pred, prob_true, prob_pred, alpha=0.2, color='#1f77b4')
-    plt.xlabel('Predicted Probability')
-    plt.ylabel('Observed Frequency')
-    plt.title('Reliability Diagram', fontsize=13, fontweight='bold')
+    plt.plot(prob_pred, prob_true, marker="o", label="Model")
+    plt.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Perfect Calibration")
+    plt.fill_between(prob_pred, prob_true, prob_pred, alpha=0.2, color="#1f77b4")
+    plt.xlabel("Predicted Probability")
+    plt.ylabel("Observed Frequency")
+    plt.title("Reliability Diagram", fontsize=13, fontweight="bold")
 
-    brier = calibration.get('brier_score')
+    brier = calibration.get("brier_score")
     if isinstance(brier, (int, float, np.floating)):
-        plt.text(0.05, 0.9, f'Brier Score: {brier:.4f}', transform=plt.gca().transAxes)
+        plt.text(0.05, 0.9, f"Brier Score: {brier:.4f}", transform=plt.gca().transAxes)
 
-    plt.legend(loc='best')
+    plt.legend(loc="best")
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Calibration curve saved to: {save_path}")
+
+
 def plot_runtime_profile(runtime: Dict[str, Any], save_path: str) -> None:
     """Visualize latency distribution and throughput statistics."""
     if not runtime:
         logger.info("[PLOT] Runtime stats unavailable; skipping profile plot.")
         return
 
-    numeric_items = {k: v for k, v in runtime.items() if isinstance(v, (int, float, np.floating)) and k not in {'batches', 'batches_completed'}}
+    numeric_items = {
+        k: v
+        for k, v in runtime.items()
+        if isinstance(v, (int, float, np.floating)) and k not in {"batches", "batches_completed"}
+    }
     if not numeric_items:
         logger.info("[PLOT] Runtime stats lack numeric values; skipping profile plot.")
         return
@@ -566,48 +629,65 @@ def plot_runtime_profile(runtime: Dict[str, Any], save_path: str) -> None:
     values_array = np.asarray([numeric_items[name] for name in metrics_names], dtype=float)
 
     plt.figure(figsize=(max(6, len(metrics_names) * 1.2), 4))
-    bars = plt.bar(metrics_names, values_array, color='#1f77b4', alpha=0.8)
-    plt.ylabel('Milliseconds / Throughput')
-    plt.xticks(rotation=30, ha='right')
-    plt.title('Runtime Profile', fontsize=13, fontweight='bold')
+    bars = plt.bar(metrics_names, values_array, color="#1f77b4", alpha=0.8)
+    plt.ylabel("Milliseconds / Throughput")
+    plt.xticks(rotation=30, ha="right")
+    plt.title("Runtime Profile", fontsize=13, fontweight="bold")
     for bar, value in zip(bars, values_array):
-        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f'{float(value):.2f}', ha='center', va='bottom', fontsize=9)
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            f"{float(value):.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
 
-    batches = runtime.get('batches') or runtime.get('batches_completed')
+    batches = runtime.get("batches") or runtime.get("batches_completed")
     if batches:
-        plt.text(0.02, 0.92, f'Batches: {batches}', transform=plt.gca().transAxes)
+        plt.text(0.02, 0.92, f"Batches: {batches}", transform=plt.gca().transAxes)
 
-    throughput = runtime.get('throughput_samples_per_s')
+    throughput = runtime.get("throughput_samples_per_s")
     if throughput:
-        plt.text(0.02, 0.84, f'Throughput: {throughput:.2f} samples/s', transform=plt.gca().transAxes)
+        plt.text(
+            0.02, 0.84, f"Throughput: {throughput:.2f} samples/s", transform=plt.gca().transAxes
+        )
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Runtime profile saved to: {save_path}")
+
+
 def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
     """Plot a comprehensive dashboard from an EvaluationReport."""
-    metrics = getattr(report, 'metrics', {}) or getattr(report, 'core_metrics', {}) or {}
-    dist_metrics = getattr(report, 'distillation_metrics', {}) or {}
-    runtime = getattr(report, 'runtime', None) or {}
-    calibration = getattr(report, 'calibration', None) or {}
-    metadata = getattr(report, 'metadata', {}) or {}
-    train_losses = metadata.get('train_losses', []) if isinstance(metadata, dict) else []
-    val_losses = metadata.get('val_losses', []) if isinstance(metadata, dict) else []
-    metric_history = metadata.get('metrics_history', {}) if isinstance(metadata, dict) else {}
+    metrics = getattr(report, "metrics", {}) or getattr(report, "core_metrics", {}) or {}
+    dist_metrics = getattr(report, "distillation_metrics", {}) or {}
+    runtime = getattr(report, "runtime", None) or {}
+    calibration = getattr(report, "calibration", None) or {}
+    metadata = getattr(report, "metadata", {}) or {}
+    train_losses = metadata.get("train_losses", []) if isinstance(metadata, dict) else []
+    val_losses = metadata.get("val_losses", []) if isinstance(metadata, dict) else []
+    metric_history = metadata.get("metrics_history", {}) if isinstance(metadata, dict) else {}
 
-    panel_specs = ['core_metrics']
+    panel_specs = ["core_metrics"]
     if isinstance(dist_metrics, dict) and dist_metrics:
-        panel_specs.append('distillation')
+        panel_specs.append("distillation")
     if isinstance(runtime, dict) and runtime:
-        panel_specs.append('runtime')
-    if isinstance(calibration, dict) and calibration.get('prob_true') is not None and calibration.get('prob_pred') is not None:
-        panel_specs.append('calibration')
+        panel_specs.append("runtime")
+    if (
+        isinstance(calibration, dict)
+        and calibration.get("prob_true") is not None
+        and calibration.get("prob_pred") is not None
+    ):
+        panel_specs.append("calibration")
     if train_losses or val_losses:
-        panel_specs.append('training_curves')
-    if isinstance(metric_history, dict) and any(isinstance(v, (list, tuple)) and v for v in metric_history.values()):
-        panel_specs.append('metric_grid')
+        panel_specs.append("training_curves")
+    if isinstance(metric_history, dict) and any(
+        isinstance(v, (list, tuple)) and v for v in metric_history.values()
+    ):
+        panel_specs.append("metric_grid")
 
     cols = 2
     rows = max(1, math.ceil(len(panel_specs) / cols))
@@ -616,155 +696,163 @@ def plot_evaluation_dashboard(report: "EvaluationReport", save_path: str):
     fig.suptitle(
         f"Evaluation Dashboard: {getattr(report, 'model_name', 'model')} ({getattr(report, 'modality', 'text').capitalize()})",
         fontsize=16,
-        fontweight='bold',
+        fontweight="bold",
     )
 
     for ax, panel in zip(axes, panel_specs):
-        if panel == 'core_metrics':
-            numeric = {
-                k: v for k, v in metrics.items()
-                if isinstance(v, (int, float, np.floating))
-            }
+        if panel == "core_metrics":
+            numeric = {k: v for k, v in metrics.items() if isinstance(v, (int, float, np.floating))}
             if not numeric:
-                ax.text(0.5, 0.5, 'No core metrics', ha='center', va='center')
-                ax.axis('off')
+                ax.text(0.5, 0.5, "No core metrics", ha="center", va="center")
+                ax.axis("off")
                 continue
             names = list(numeric.keys())
             values = [float(numeric[name]) for name in names]
-            ax.bar(names, values, color='#1f77b4')
-            ax.set_title('Core Metrics')
-            ax.tick_params(axis='x', rotation=30)
-            ax.grid(axis='y', alpha=0.3)
-        elif panel == 'distillation':
+            ax.bar(names, values, color="#1f77b4")
+            ax.set_title("Core Metrics")
+            ax.tick_params(axis="x", rotation=30)
+            ax.grid(axis="y", alpha=0.3)
+        elif panel == "distillation":
             numeric = {
-                k: v for k, v in dist_metrics.items()
+                k: v for k, v in dist_metrics.items() if isinstance(v, (int, float, np.floating))
+            }
+            if not numeric:
+                ax.text(0.5, 0.5, "No distillation metrics", ha="center", va="center")
+                ax.axis("off")
+                continue
+            ax.barh(list(numeric.keys()), [float(v) for v in numeric.values()], color="#ff7f0e")
+            ax.set_title("Distillation Metrics")
+            ax.grid(axis="x", alpha=0.3)
+        elif panel == "runtime":
+            numeric = {
+                k: v
+                for k, v in runtime.items()
                 if isinstance(v, (int, float, np.floating))
+                and k not in {"batches", "batches_completed"}
             }
             if not numeric:
-                ax.text(0.5, 0.5, 'No distillation metrics', ha='center', va='center')
-                ax.axis('off')
+                ax.text(0.5, 0.5, "No runtime metrics", ha="center", va="center")
+                ax.axis("off")
                 continue
-            ax.barh(list(numeric.keys()), [float(v) for v in numeric.values()], color='#ff7f0e')
-            ax.set_title('Distillation Metrics')
-            ax.grid(axis='x', alpha=0.3)
-        elif panel == 'runtime':
-            numeric = {
-                k: v for k, v in runtime.items()
-                if isinstance(v, (int, float, np.floating)) and k not in {'batches', 'batches_completed'}
-            }
-            if not numeric:
-                ax.text(0.5, 0.5, 'No runtime metrics', ha='center', va='center')
-                ax.axis('off')
-                continue
-            ax.bar(list(numeric.keys()), [float(v) for v in numeric.values()], color='#17becf')
-            ax.set_title('Runtime Profile')
-            ax.tick_params(axis='x', rotation=30)
-            ax.grid(axis='y', alpha=0.3)
-        elif panel == 'calibration':
-            prob_true = np.asarray(calibration.get('prob_true', []), dtype=float)
-            prob_pred = np.asarray(calibration.get('prob_pred', []), dtype=float)
+            ax.bar(list(numeric.keys()), [float(v) for v in numeric.values()], color="#17becf")
+            ax.set_title("Runtime Profile")
+            ax.tick_params(axis="x", rotation=30)
+            ax.grid(axis="y", alpha=0.3)
+        elif panel == "calibration":
+            prob_true = np.asarray(calibration.get("prob_true", []), dtype=float)
+            prob_pred = np.asarray(calibration.get("prob_pred", []), dtype=float)
             if prob_true.size == 0 or prob_pred.size == 0:
-                ax.text(0.5, 0.5, 'No calibration data', ha='center', va='center')
-                ax.axis('off')
+                ax.text(0.5, 0.5, "No calibration data", ha="center", va="center")
+                ax.axis("off")
                 continue
-            ax.plot(prob_pred, prob_true, marker='o', label='Model')
-            ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal')
-            ax.set_xlabel('Predicted Probability')
-            ax.set_ylabel('Observed Frequency')
-            ax.set_title('Calibration')
-            ax.legend(loc='best')
+            ax.plot(prob_pred, prob_true, marker="o", label="Model")
+            ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Ideal")
+            ax.set_xlabel("Predicted Probability")
+            ax.set_ylabel("Observed Frequency")
+            ax.set_title("Calibration")
+            ax.legend(loc="best")
             ax.grid(alpha=0.3)
-        elif panel == 'training_curves':
+        elif panel == "training_curves":
             if train_losses:
-                ax.plot(range(1, len(train_losses) + 1), train_losses, marker='o', label='Train Loss')
+                ax.plot(
+                    range(1, len(train_losses) + 1), train_losses, marker="o", label="Train Loss"
+                )
             if val_losses:
-                ax.plot(range(1, len(val_losses) + 1), val_losses, marker='s', label='Val Loss')
-            ax.set_title('Training Curves')
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel('Loss')
-            ax.legend(loc='best')
+                ax.plot(range(1, len(val_losses) + 1), val_losses, marker="s", label="Val Loss")
+            ax.set_title("Training Curves")
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Loss")
+            ax.legend(loc="best")
             ax.grid(alpha=0.3)
-        elif panel == 'metric_grid':
+        elif panel == "metric_grid":
             plotted = False
             for key, values in metric_history.items():
                 if isinstance(values, (list, tuple)) and values:
                     ax.plot(range(1, len(values) + 1), values, label=str(key))
                     plotted = True
             if not plotted:
-                ax.text(0.5, 0.5, 'No metric history', ha='center', va='center')
-                ax.axis('off')
+                ax.text(0.5, 0.5, "No metric history", ha="center", va="center")
+                ax.axis("off")
                 continue
-            ax.set_title('Metric History')
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel('Value')
-            ax.legend(loc='best', fontsize=8)
+            ax.set_title("Metric History")
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Value")
+            ax.legend(loc="best", fontsize=8)
             ax.grid(alpha=0.3)
 
-    for ax in axes[len(panel_specs):]:
-        ax.axis('off')
+    for ax in axes[len(panel_specs) :]:
+        ax.axis("off")
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     out_dir = os.path.dirname(save_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Evaluation dashboard saved to: {save_path}")
+
+
 def plot_distillation_gap(teacher_metrics: Dict, student_metrics: Dict, save_path: str):
     """Plot the gap between teacher and student performance."""
     import matplotlib.pyplot as plt
     import numpy as np
-    
+
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
+
     common_keys = set(teacher_metrics.keys()).intersection(set(student_metrics.keys()))
     plot_keys = [k for k in common_keys if isinstance(teacher_metrics[k], (int, float))]
-    
+
     if not plot_keys:
         return
-        
+
     teacher_vals = [teacher_metrics[k] for k in plot_keys]
     student_vals = [student_metrics[k] for k in plot_keys]
-    
+
     fig, ax = plt.subplots(figsize=(10, 6))
     x = np.arange(len(plot_keys))
     width = 0.35
-    
-    ax.bar(x - width/2, teacher_vals, width, label='Teacher', color='#2E86AB')
-    ax.bar(x + width/2, student_vals, width, label='Student', color='#A23B72')
-    
-    ax.set_ylabel('Score')
-    ax.set_title('Teacher vs Student Performance Gap')
+
+    ax.bar(x - width / 2, teacher_vals, width, label="Teacher", color="#2E86AB")
+    ax.bar(x + width / 2, student_vals, width, label="Student", color="#A23B72")
+
+    ax.set_ylabel("Score")
+    ax.set_title("Teacher vs Student Performance Gap")
     ax.set_xticks(x)
     ax.set_xticklabels([k.capitalize() for k in plot_keys])
     ax.legend()
-    ax.grid(axis='y', alpha=0.3)
-    
+    ax.grid(axis="y", alpha=0.3)
+
     # Add gap labels
     for i in range(len(plot_keys)):
         gap = teacher_vals[i] - student_vals[i]
-        ax.annotate(f"-{gap:.3f}", 
-                    xy=(i, max(teacher_vals[i], student_vals[i])),
-                    xytext=(0, 5), textcoords="offset points", ha='center', fontsize=9, color='red')
-                    
+        ax.annotate(
+            f"-{gap:.3f}",
+            xy=(i, max(teacher_vals[i], student_vals[i])),
+            xytext=(0, 5),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+            color="red",
+        )
+
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Distillation gap saved to: {save_path}")
+
+
 def plot_extended_metrics(report: "EvaluationReport", save_path: str):
     """Plot extended/custom distillation metrics."""
-    metrics = getattr(report, 'distillation_metrics', None)
+    metrics = getattr(report, "distillation_metrics", None)
     if not isinstance(metrics, dict) or not metrics:
         logger.info("[PLOT] No extended metrics available; skipping extended metrics plot.")
         return
 
     scalar_metrics = {
-        key: value for key, value in metrics.items()
-        if isinstance(value, (int, float, np.floating))
+        key: value for key, value in metrics.items() if isinstance(value, (int, float, np.floating))
     }
     series_metrics = {
-        key: value for key, value in metrics.items()
-        if isinstance(value, (list, tuple)) and value
+        key: value for key, value in metrics.items() if isinstance(value, (list, tuple)) and value
     }
 
     if not scalar_metrics and not series_metrics:
@@ -780,25 +868,25 @@ def plot_extended_metrics(report: "EvaluationReport", save_path: str):
         idx += 1
         names = list(scalar_metrics.keys())
         vals = [float(scalar_metrics[name]) for name in names]
-        ax.bar(names, vals, color='#9467bd')
-        ax.set_title('Extended Scalars')
-        ax.tick_params(axis='x', rotation=30)
-        ax.grid(axis='y', alpha=0.3)
+        ax.bar(names, vals, color="#9467bd")
+        ax.set_title("Extended Scalars")
+        ax.tick_params(axis="x", rotation=30)
+        ax.grid(axis="y", alpha=0.3)
 
     if series_metrics:
         ax = axes[idx]
         for key, values in series_metrics.items():
-            ax.plot(range(1, len(values) + 1), values, marker='o', label=str(key))
-        ax.set_title('Extended Trends')
-        ax.set_xlabel('Step')
-        ax.set_ylabel('Value')
-        ax.legend(loc='best', fontsize=8)
+            ax.plot(range(1, len(values) + 1), values, marker="o", label=str(key))
+        ax.set_title("Extended Trends")
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Value")
+        ax.legend(loc="best", fontsize=8)
         ax.grid(alpha=0.3)
 
     plt.tight_layout()
     out_dir = os.path.dirname(save_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"[PLOT] Extended metrics saved to: {save_path}")

@@ -13,7 +13,11 @@ import torch
 from torch import nn
 
 from zynthe.core.models.model_loader import ModelLoader
-from zynthe.core.quant.calibration import CalibrationConfig, CalibrationRunner, build_calibration_loader
+from zynthe.core.quant.calibration import (
+    CalibrationConfig,
+    CalibrationRunner,
+    build_calibration_loader,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -86,7 +90,7 @@ def _estimate_model_size(model: nn.Module) -> int:
 
 
 def _bytes_to_megabytes(value: int) -> float:
-    return round(value / (1024 ** 2), 4)
+    return round(value / (1024**2), 4)
 
 
 class PTQRunner:
@@ -103,7 +107,9 @@ class PTQRunner:
         ).lower()
         self.fallback = (self.quant_cfg.get("fallback_strategy") or "float16").lower()
         self.dtype = _resolve_dtype(self.quant_cfg.get("dtype", torch.qint8))
-        self.device = _resolve_device(self.quant_cfg.get("device") or cfg.get("runtime", {}).get("device"))
+        self.device = _resolve_device(
+            self.quant_cfg.get("device") or cfg.get("runtime", {}).get("device")
+        )
         self.backend = (self.quant_cfg.get("backend") or _default_backend(self.device)).lower()
         self.target_modules = _resolve_target_modules(self.quant_cfg.get("modules"))
         self.calibration_cfg = self._build_calibration_cfg()
@@ -154,7 +160,9 @@ class PTQRunner:
         calibration_loader = None
         if self.strategy in {"static", "int8_static", "per_tensor"}:
             try:
-                calibration_loader = build_calibration_loader(self.cfg, tokenizer, self.calibration_cfg)
+                calibration_loader = build_calibration_loader(
+                    self.cfg, tokenizer, self.calibration_cfg
+                )
             except Exception as exc:
                 LOG.warning("Failed to build calibration loader: %s", exc)
 
@@ -315,7 +323,9 @@ class PTQRunner:
         clone_cpu = clone.to(torch.device("cpu"))
         setattr(clone_cpu, "qconfig", torch.quantization.get_default_qconfig(backend))
         prepared = torch.quantization.prepare(clone_cpu, inplace=False)
-        runner = CalibrationRunner(prepared, calibration_loader, torch.device("cpu"), calibration_cfg)
+        runner = CalibrationRunner(
+            prepared, calibration_loader, torch.device("cpu"), calibration_cfg
+        )
         used = runner.collect()
         LOG.info("Calibrated static PTQ with %d samples", used)
         quantized = torch.quantization.convert(prepared, inplace=False)

@@ -13,12 +13,12 @@ Core Components:
 
 Usage:
     from zynthe.core.pipelines import PipelineBuilder
-    
+
     # Single distiller
     pipeline = PipelineBuilder() \
         .add_distiller('kd_hinton', temperature=4.0) \
         .build(teacher, student, device)
-    
+
     # Multi-stage
     pipeline = PipelineBuilder() \
         .add_stage('logit', weight=0.7) \
@@ -38,15 +38,15 @@ from .multi_stage_pipeline import MultiStagePipeline, ExecutionMode, PipelineSta
 from .pipeline_builder import PipelineBuilder
 
 __all__ = [
-    'BasePipeline',
-    'PipelineMetrics',
-    'SingleDistillerPipeline',
-    'PipelineRegistry',
-    'get_registry',
-    'MultiStagePipeline',
-    'ExecutionMode',
-    'PipelineStage',
-    'PipelineBuilder',
+    "BasePipeline",
+    "PipelineMetrics",
+    "SingleDistillerPipeline",
+    "PipelineRegistry",
+    "get_registry",
+    "MultiStagePipeline",
+    "ExecutionMode",
+    "PipelineStage",
+    "PipelineBuilder",
 ]
 
-__version__ = '1.0.0'
+__version__ = "1.0.0"

@@ -32,28 +32,30 @@ class VisionModelAdapter(ModelAdapter):
 
     # Module name patterns for hookable transformer/CNN layers.
     _LAYER_PATTERNS = [
-        re.compile(r"^vit\.encoder\.layer\.(\d+)$"),          # ViT (HF)
-        re.compile(r"^beit\.encoder\.layer\.(\d+)$"),          # BEiT
-        re.compile(r"^deit\.encoder\.layer\.(\d+)$"),          # DeiT
-        re.compile(r"^swin\.encoder\.layers\.(\d+)$"),         # Swin
-        re.compile(r"^convnext\.encoder\.stages\.(\d+)$"),     # ConvNeXt
-        re.compile(r"^encoder\.layer\.(\d+)$"),                # generic ViT
-        re.compile(r"^model\.encoder\.layers\.(\d+)$"),        # wrapped ViT
-        re.compile(r"^features\.(\d+)$"),                      # EfficientNet / MobileNet
-        re.compile(r"^layer(\d+)$"),                           # ResNet
+        re.compile(r"^vit\.encoder\.layer\.(\d+)$"),  # ViT (HF)
+        re.compile(r"^beit\.encoder\.layer\.(\d+)$"),  # BEiT
+        re.compile(r"^deit\.encoder\.layer\.(\d+)$"),  # DeiT
+        re.compile(r"^swin\.encoder\.layers\.(\d+)$"),  # Swin
+        re.compile(r"^convnext\.encoder\.stages\.(\d+)$"),  # ConvNeXt
+        re.compile(r"^encoder\.layer\.(\d+)$"),  # generic ViT
+        re.compile(r"^model\.encoder\.layers\.(\d+)$"),  # wrapped ViT
+        re.compile(r"^features\.(\d+)$"),  # EfficientNet / MobileNet
+        re.compile(r"^layer(\d+)$"),  # ResNet
     ]
 
     # Keys accepted by vision model forward methods.
-    _COMMON_KEYS = frozenset({
-        "pixel_values",
-        "labels",
-        "head_mask",
-        "output_attentions",
-        "output_hidden_states",
-        "return_dict",
-        "interpolate_pos_encoding",
-        "bool_masked_pos",
-    })
+    _COMMON_KEYS = frozenset(
+        {
+            "pixel_values",
+            "labels",
+            "head_mask",
+            "output_attentions",
+            "output_hidden_states",
+            "return_dict",
+            "interpolate_pos_encoding",
+            "bool_masked_pos",
+        }
+    )
 
     def __init__(self) -> None:
         self._forward_params_cache: Dict[int, frozenset] = {}
@@ -79,7 +81,8 @@ class VisionModelAdapter(ModelAdapter):
         # Vision-specific fields
         for attr in ("pooler_output", "last_hidden_state", "cls_token"):
             val = (
-                raw_output.get(attr) if isinstance(raw_output, dict)
+                raw_output.get(attr)
+                if isinstance(raw_output, dict)
                 else getattr(raw_output, attr, None)
             )
             if val is not None:
@@ -131,13 +134,19 @@ class VisionModelAdapter(ModelAdapter):
                     )
                 if aligned.shape[1] != t_feat.shape[1]:
                     proj = self._get_or_create_channel_projection(
-                        key, aligned.shape[1], t_feat.shape[1], aligned.device,
+                        key,
+                        aligned.shape[1],
+                        t_feat.shape[1],
+                        aligned.device,
                     )
                     aligned = proj(aligned)
                 aligned_student[key] = aligned
             elif t_feat.shape[-1] != s_feat.shape[-1]:
                 proj = self._get_or_create_projection(
-                    key, s_feat.shape[-1], t_feat.shape[-1], s_feat.device,
+                    key,
+                    s_feat.shape[-1],
+                    t_feat.shape[-1],
+                    s_feat.device,
                 )
                 aligned_student[key] = proj(s_feat)
             else:
@@ -168,15 +177,17 @@ class VisionModelAdapter(ModelAdapter):
         if model_id not in self._forward_params_cache:
             try:
                 sig = inspect.signature(model.forward)
-                self._forward_params_cache[model_id] = frozenset(
-                    sig.parameters.keys()
-                )
+                self._forward_params_cache[model_id] = frozenset(sig.parameters.keys())
             except (ValueError, TypeError):
                 self._forward_params_cache[model_id] = self._COMMON_KEYS
         return self._forward_params_cache[model_id]
 
     def _get_or_create_projection(
-        self, key: str, in_dim: int, out_dim: int, device: torch.device,
+        self,
+        key: str,
+        in_dim: int,
+        out_dim: int,
+        device: torch.device,
     ) -> nn.Linear:
         """Lazily create a linear projection for dimension alignment."""
         proj_key = f"proj_{key}_{in_dim}_{out_dim}"
@@ -187,7 +198,11 @@ class VisionModelAdapter(ModelAdapter):
         return self._projections[proj_key]
 
     def _get_or_create_channel_projection(
-        self, key: str, in_channels: int, out_channels: int, device: torch.device,
+        self,
+        key: str,
+        in_channels: int,
+        out_channels: int,
+        device: torch.device,
     ) -> nn.Conv2d:
         """Lazily create a 1x1 conv projection for channel alignment."""
         proj_key = f"conv_{key}_{in_channels}_{out_channels}"

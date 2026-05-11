@@ -4,11 +4,13 @@ Provides a unified interface for dataset-specific adapters and model-family
 specific preprocessors so new datasets/models can plug in without touching
 trainer or dataloader logic.
 """
+
 from __future__ import annotations
 from typing import Dict, Callable, Any, Optional, List
 import logging
 
 LOG = logging.getLogger(__name__)
+
 
 class SampleAdapter:
     """Dataset-specific normalization.
@@ -16,8 +18,10 @@ class SampleAdapter:
     Converts a raw dataset item (HF sample or JSONL dict) into a canonical
     intermediate representation: {"text": str, "label": int, ...extras }
     """
+
     def adapt(self, raw: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - interface
         raise NotImplementedError
+
 
 class ModelPreprocessor:
     """Model family specific feature creation.
@@ -25,12 +29,14 @@ class ModelPreprocessor:
     Takes a normalized sample and produces tensor features expected by the model.
     Returns a dict containing keys consumed by forward(): e.g. input_ids, attention_mask, labels.
     """
+
     def __init__(self, tokenizer, config: Dict[str, Any]):
         self.tokenizer = tokenizer
         self.config = config
 
     def prepare(self, sample: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - interface
         raise NotImplementedError
+
 
 class PreprocessRegistry:
     dataset_adapters: Dict[str, SampleAdapter] = {}
@@ -67,26 +73,31 @@ class PreprocessRegistry:
             ],
         ),
         ("t5", ["t5", "mt5", "flant5", "flan-t5"]),
-        ("gpt2", [
-            "gpt",
+        (
             "gpt2",
-            "gpt-neo",
-            "gpt-j",
-            "gptj",
-            "opt",
-            "llama",
-            "mistral",
-            "falcon",
-            "qwen",
-            "mpt",
-        ]),
+            [
+                "gpt",
+                "gpt2",
+                "gpt-neo",
+                "gpt-j",
+                "gptj",
+                "opt",
+                "llama",
+                "mistral",
+                "falcon",
+                "qwen",
+                "mpt",
+            ],
+        ),
         ("vit", ["vit", "vision_transformer", "beit", "swin", "deit", "convnext"]),
     ]
 
     GENERIC_DATASET_KEY = "generic_text"
 
     @classmethod
-    def register_dataset(cls, key: str, adapter: SampleAdapter, metadata: Optional[Dict[str, Any]] = None):
+    def register_dataset(
+        cls, key: str, adapter: SampleAdapter, metadata: Optional[Dict[str, Any]] = None
+    ):
         LOG.debug(f"Registering dataset adapter: {key}")
         cls.dataset_adapters[key] = adapter
         if metadata is not None:
@@ -128,7 +139,7 @@ class PreprocessRegistry:
                 "reason": "Exact registry match",
             }
 
-        parts = dataset_id.split('/')
+        parts = dataset_id.split("/")
         for part in parts:
             if part in cls.dataset_adapters:
                 return {
@@ -183,7 +194,9 @@ class PreprocessRegistry:
         return "generic"
 
     @classmethod
-    def get_model_preprocessor(cls, model_name: str, tokenizer, config: Dict[str, Any]) -> ModelPreprocessor:
+    def get_model_preprocessor(
+        cls, model_name: str, tokenizer, config: Dict[str, Any]
+    ) -> ModelPreprocessor:
         resolved = cls.resolve_model_preprocessor(model_name)
         if not resolved:
             raise RuntimeError(

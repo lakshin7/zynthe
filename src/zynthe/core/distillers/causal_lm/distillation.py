@@ -53,7 +53,9 @@ class CausalLMDistillationEngine:
     def _clip_logits(self, logits: torch.Tensor) -> torch.Tensor:
         if self.config.logit_clip is None:
             return logits
-        return torch.clamp(logits, min=-float(self.config.logit_clip), max=float(self.config.logit_clip))
+        return torch.clamp(
+            logits, min=-float(self.config.logit_clip), max=float(self.config.logit_clip)
+        )
 
     def _shift(
         self,
@@ -122,7 +124,9 @@ class CausalLMDistillationEngine:
 
         if self.config.use_ce:
             ce_loss = F.cross_entropy(s_valid, y_valid, reduction="mean")
-            total_loss = float(self.config.alpha) * kd_loss + (1.0 - float(self.config.alpha)) * ce_loss
+            total_loss = (
+                float(self.config.alpha) * kd_loss + (1.0 - float(self.config.alpha)) * ce_loss
+            )
         else:
             ce_loss = self._zeros_like(kd_loss)
             total_loss = kd_loss

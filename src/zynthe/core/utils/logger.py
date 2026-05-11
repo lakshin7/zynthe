@@ -25,7 +25,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Optional, Union, cast
 
-
 LevelType = Union[int, str]
 
 DEFAULT_LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
@@ -54,7 +53,10 @@ def _resolve_level(level: Optional[LevelType]) -> int:
 
 
 def _is_stream_handler_to_stdout(handler: logging.Handler) -> bool:
-    return isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stdout
+    return (
+        isinstance(handler, logging.StreamHandler)
+        and getattr(handler, "stream", None) is sys.stdout
+    )
 
 
 @dataclass
@@ -130,7 +132,9 @@ class ContextLogger(logging.LoggerAdapter):
         current.update(context)
         return ContextLogger(self.logger, current)
 
-    def process(self, msg: Any, kwargs: MutableMapping[str, Any]) -> tuple[Any, MutableMapping[str, Any]]:
+    def process(
+        self, msg: Any, kwargs: MutableMapping[str, Any]
+    ) -> tuple[Any, MutableMapping[str, Any]]:
         if self.extra:
             context_str = " ".join(f"{key}={value}" for key, value in sorted(self.extra.items()))
             msg = f"{msg} | {context_str}"
@@ -184,4 +188,3 @@ def log_duration(
         elapsed = time.perf_counter() - start
         text = success_message or f"{message} completed in {elapsed:.3f}s"
         logger.log(level, text)
-

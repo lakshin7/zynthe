@@ -137,7 +137,9 @@ def _safe_state_load(target: Any, state_dict: Dict[str, Any]) -> bool:
         return False
 
 
-def _load_compatible_model_weights(model: Any, ckpt_state: Dict[str, torch.Tensor]) -> CheckpointLoadReport:
+def _load_compatible_model_weights(
+    model: Any, ckpt_state: Dict[str, torch.Tensor]
+) -> CheckpointLoadReport:
     report = CheckpointLoadReport(strict_loaded=False, fallback_used=True)
     model_state = model.state_dict()
 
@@ -258,7 +260,9 @@ def smart_load_checkpoint(
             report.optimizer_reset = True
             _reset_optimizer_state(optimizer)
         if scheduler is not None and "scheduler_state_dict" in checkpoint:
-            report.scheduler_restored = _safe_state_load(scheduler, checkpoint["scheduler_state_dict"])
+            report.scheduler_restored = _safe_state_load(
+                scheduler, checkpoint["scheduler_state_dict"]
+            )
         if scaler is not None and "scaler_state_dict" in checkpoint:
             report.scaler_restored = _safe_state_load(scaler, checkpoint["scaler_state_dict"])
     else:

@@ -124,7 +124,9 @@ def validate_distillation_numerics(
     flat_y = labels.reshape(-1)
     valid = flat_y != int(ignore_index)
 
-    checks["mask_has_valid_tokens"] = bool(valid.any().item() if torch.is_tensor(valid.any()) else valid.any())
+    checks["mask_has_valid_tokens"] = bool(
+        valid.any().item() if torch.is_tensor(valid.any()) else valid.any()
+    )
     if not checks["mask_has_valid_tokens"]:
         return NumericalValidationReport(
             passed=False,
@@ -144,9 +146,13 @@ def validate_distillation_numerics(
 
     # Compute equivalent form explicitly from definition for consistency check.
     eps = 1e-12
-    kd_manual = (t_probs * (torch.log(t_probs.clamp_min(eps)) - s_log_probs)).sum(dim=-1).mean() * (temp * temp)
+    kd_manual = (t_probs * (torch.log(t_probs.clamp_min(eps)) - s_log_probs)).sum(dim=-1).mean() * (
+        temp * temp
+    )
 
-    checks["kl_formula_matches_manual"] = bool(torch.allclose(kd_reference, kd_manual, atol=atol, rtol=rtol))
+    checks["kl_formula_matches_manual"] = bool(
+        torch.allclose(kd_reference, kd_manual, atol=atol, rtol=rtol)
+    )
     checks["finite_student_logits"] = bool(torch.isfinite(s_valid).all().item())
     checks["finite_teacher_logits"] = bool(torch.isfinite(t_valid).all().item())
     checks["teacher_requires_grad_off"] = bool(not t.requires_grad)
@@ -157,7 +163,9 @@ def validate_distillation_numerics(
         checks["teacher_forward_under_no_grad"] = True
 
     # Teacher logits should not be scaled by GradScaler. In practice, no_grad + float logits implies this.
-    checks["teacher_logits_unscaled_by_amp"] = bool(not t.requires_grad and t.dtype in {torch.float16, torch.bfloat16, torch.float32})
+    checks["teacher_logits_unscaled_by_amp"] = bool(
+        not t.requires_grad and t.dtype in {torch.float16, torch.bfloat16, torch.float32}
+    )
 
     diagnostics.update(
         {
@@ -243,7 +251,9 @@ class _ToyModel(nn.Module):
         self.embed = nn.Embedding(vocab, hidden)
         self.lm_head = nn.Linear(hidden, vocab)
 
-    def forward(self, input_ids: torch.Tensor, labels: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def forward(
+        self, input_ids: torch.Tensor, labels: Optional[torch.Tensor] = None
+    ) -> Dict[str, torch.Tensor]:
         h = self.embed(input_ids)
         return {"logits": self.lm_head(h)}
 
@@ -337,7 +347,9 @@ def run_checkpoint_stress_tests(device: Optional[torch.device] = None) -> Checkp
         scenarios.append(
             CheckpointStressScenario(
                 name="partial_tensor_compatibility",
-                passed=bool(report_partial.loaded_tensors > 0 and report_partial.skipped_tensors > 0),
+                passed=bool(
+                    report_partial.loaded_tensors > 0 and report_partial.skipped_tensors > 0
+                ),
                 details=report_partial.__dict__,
             )
         )
@@ -376,7 +388,11 @@ def run_checkpoint_stress_tests(device: Optional[torch.device] = None) -> Checkp
         scenarios.append(
             CheckpointStressScenario(
                 name="optimizer_incompatibility_reset",
-                passed=bool(report_opt.optimizer_reset or report_opt.optimizer_restore_reason in {"incompatible_optimizer_state", "missing_optimizer_state"}),
+                passed=bool(
+                    report_opt.optimizer_reset
+                    or report_opt.optimizer_restore_reason
+                    in {"incompatible_optimizer_state", "missing_optimizer_state"}
+                ),
                 details=report_opt.__dict__,
             )
         )
@@ -404,7 +420,9 @@ def run_checkpoint_stress_tests(device: Optional[torch.device] = None) -> Checkp
         scenarios.append(
             CheckpointStressScenario(
                 name="parameter_reorder_or_rename",
-                passed=bool(len(report_reorder.unexpected_keys) > 0 and report_reorder.loaded_tensors > 0),
+                passed=bool(
+                    len(report_reorder.unexpected_keys) > 0 and report_reorder.loaded_tensors > 0
+                ),
                 details=report_reorder.__dict__,
             )
         )

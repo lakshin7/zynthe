@@ -13,6 +13,7 @@ from zynthe.evaluation.evaluation_report import EvaluationReport
 
 LOG = logging.getLogger(__name__)
 
+
 class Evaluator:
     def __init__(
         self,
@@ -68,7 +69,7 @@ class Evaluator:
                 if joined:
                     return joined
             except Exception:
-                pass
+                LOG.debug("Failed to join sample values for text normalization")
             return str(sample)
         if isinstance(sample, Sequence) and not isinstance(sample, (bytes, bytearray)):
             parts = [Evaluator._normalise_text(item) for item in sample]
@@ -92,16 +93,20 @@ class Evaluator:
 
         device_str = str(self.device)
         if isinstance(self.device, torch.device):
-            device_str = self.device.type if self.device.index is None else f"{self.device.type}:{self.device.index}"
+            device_str = (
+                self.device.type
+                if self.device.index is None
+                else f"{self.device.type}:{self.device.index}"
+            )
         peak_memory_bytes: List[int] = []
         if self.enable_runtime_profiling and torch.cuda.is_available() and "cuda" in device_str:
             try:
                 torch.cuda.reset_peak_memory_stats()
             except Exception:
                 LOG.debug("Could not reset CUDA peak memory stats", exc_info=True)
-        
+
         # Calculate total batches for progress tracking
-        total_batches = len(self.dataloader) if hasattr(self.dataloader, '__len__') else None
+        total_batches = len(self.dataloader) if hasattr(self.dataloader, "__len__") else None
         batch_count = 0
 
         def _batch_size(model_inputs: Mapping[str, Any]) -> int:
@@ -123,42 +128,44 @@ class Evaluator:
 
                 # Handle batch being dict or tuple/list
                 if isinstance(batch, dict):
-                    labels_raw = batch.get('labels')
-                    labels = labels_raw.to(self.device) if hasattr(labels_raw, 'to') else labels_raw
+                    labels_raw = batch.get("labels")
+                    labels = labels_raw.to(self.device) if hasattr(labels_raw, "to") else labels_raw
 
-                    if self.modality == 'vision':
-                        pixel_values = batch.get('pixel_values')
+                    if self.modality == "vision":
+                        pixel_values = batch.get("pixel_values")
                         if pixel_values is None:
-                            raise ValueError("Vision modality requires 'pixel_values' in each batch")
+                            raise ValueError(
+                                "Vision modality requires 'pixel_values' in each batch"
+                            )
                         model_inputs = {
-                            'pixel_values': pixel_values.to(self.device),
+                            "pixel_values": pixel_values.to(self.device),
                         }
-                    elif self.modality == 'multimodal':
+                    elif self.modality == "multimodal":
                         for key, value in batch.items():
-                            if key == 'labels':
+                            if key == "labels":
                                 continue
-                            if hasattr(value, 'to'):
+                            if hasattr(value, "to"):
                                 model_inputs[key] = value.to(self.device)
                             else:
                                 model_inputs[key] = value
-                        raw_input_ids = batch.get('input_ids')
+                        raw_input_ids = batch.get("input_ids")
                     else:
-                        raw_input_ids = batch.get('input_ids')
+                        raw_input_ids = batch.get("input_ids")
                         if raw_input_ids is None:
                             raise ValueError("Text modality requires 'input_ids' in each batch")
-                        model_inputs = {'input_ids': raw_input_ids.to(self.device)}
-                        raw_attention_mask = batch.get('attention_mask', None)
+                        model_inputs = {"input_ids": raw_input_ids.to(self.device)}
+                        raw_attention_mask = batch.get("attention_mask", None)
                         if raw_attention_mask is not None:
-                            model_inputs['attention_mask'] = raw_attention_mask.to(self.device)
+                            model_inputs["attention_mask"] = raw_attention_mask.to(self.device)
                 elif isinstance(batch, (tuple, list)):
                     input_ids, labels = batch[:2]
                     raw_input_ids = input_ids
                     input_ids = input_ids.to(self.device)
                     labels = labels.to(self.device)
-                    model_inputs = {'input_ids': input_ids}
+                    model_inputs = {"input_ids": input_ids}
                     if len(batch) > 2 and batch[2] is not None:
                         raw_attention_mask = batch[2]
-                        model_inputs['attention_mask'] = raw_attention_mask.to(self.device)
+                        model_inputs["attention_mask"] = raw_attention_mask.to(self.device)
                 else:
                     raise ValueError("Unsupported batch format")
 
@@ -168,9 +175,9 @@ class Evaluator:
                 except RuntimeError as e:
                     # For PTQ or quantized models on MPS/CPU, fallback to CPU evaluation
                     device_lower = str(self.device).lower()
-                    if 'mps' in device_lower or 'cpu' in device_lower:
+                    if "mps" in device_lower or "cpu" in device_lower:
                         cpu_model_inputs = {
-                            key: value.cpu() if hasattr(value, 'cpu') else value
+                            key: value.cpu() if hasattr(value, "cpu") else value
                             for key, value in model_inputs.items()
                         }
                         outputs = self.model(**cpu_model_inputs)
@@ -186,12 +193,12 @@ class Evaluator:
                         except Exception:
                             LOG.debug("Could not read CUDA memory stats", exc_info=True)
 
-                logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
+                logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
                 if self.loss_fn is not None:
                     if labels is None:
                         pass
-                    elif self.task_type == 'regression':
+                    elif self.task_type == "regression":
                         loss = self.loss_fn(logits.squeeze(), labels.float())
                     else:
                         loss = self.loss_fn(logits, labels)
@@ -201,42 +208,50 @@ class Evaluator:
                 total_samples += _batch_size(model_inputs)
 
                 # Predictions
-                if self.task_type == 'classification':
+                if self.task_type == "classification":
                     preds = torch.argmax(logits, dim=-1)
-                elif self.task_type == 'multi_label':
+                elif self.task_type == "multi_label":
                     preds = (torch.sigmoid(logits) > 0.5).int()
                 else:  # regression
                     preds = logits
 
                 prob_tensor = None
-                if self.task_type == 'classification':
+                if self.task_type == "classification":
                     prob_tensor = torch.softmax(logits, dim=-1)
-                elif self.task_type == 'multi_label':
+                elif self.task_type == "multi_label":
                     prob_tensor = torch.sigmoid(logits)
 
                 if prob_tensor is not None:
                     prob_cpu = prob_tensor.detach().cpu().numpy()
-                    if self.task_type == 'classification':
+                    if self.task_type == "classification":
                         all_probabilities.append(prob_cpu)
                     conf_tensor = (
                         prob_tensor.max(dim=-1)[0]
-                        if self.task_type == 'classification'
+                        if self.task_type == "classification"
                         else prob_tensor.mean(dim=-1)
                     )
                     confidence_samples.extend(conf_tensor.detach().cpu().tolist())
 
                 if (
-                    self.modality == 'text'
+                    self.modality == "text"
                     and self.store_batch_text
                     and raw_input_ids is not None
                     and hasattr(self.tokenizer, "batch_decode")
                 ):
                     try:
-                        decode_source = raw_input_ids.detach().cpu() if hasattr(raw_input_ids, "detach") else raw_input_ids
-                        decoded_batch = self.tokenizer.batch_decode(decode_source, skip_special_tokens=True)
+                        decode_source = (
+                            raw_input_ids.detach().cpu()
+                            if hasattr(raw_input_ids, "detach")
+                            else raw_input_ids
+                        )
+                        decoded_batch = self.tokenizer.batch_decode(
+                            decode_source, skip_special_tokens=True
+                        )
                         all_texts.extend(decoded_batch)
                     except Exception:
-                        LOG.debug("Failed to decode batch for evaluation explainability", exc_info=True)
+                        LOG.debug(
+                            "Failed to decode batch for evaluation explainability", exc_info=True
+                        )
 
                 # Safely convert preds and labels to list
                 if isinstance(preds, torch.Tensor):
@@ -257,37 +272,45 @@ class Evaluator:
                         all_labels.extend(labels)
                     else:
                         all_labels.append(labels)
-                
+
                 batch_count += 1
-                
+
                 # ========== REAL-TIME PROGRESS STREAMING ==========
                 # Send progress updates to UI via WebSocket
                 if self.progress_callback and batch_count % self.update_frequency == 0:
                     # Calculate running accuracy for classification tasks
                     running_accuracy = None
-                    if self.task_type in ['classification', 'multi_label'] and len(all_preds) > 0 and len(all_labels) > 0:
+                    if (
+                        self.task_type in ["classification", "multi_label"]
+                        and len(all_preds) > 0
+                        and len(all_labels) > 0
+                    ):
                         try:
                             correct = sum(p == l for p, l in zip(all_preds, all_labels))
                             running_accuracy = correct / len(all_preds)
                         except Exception:
                             running_accuracy = None
 
-                    running_confidence = float(np.mean(confidence_samples)) if confidence_samples else None
-                    rolling_loss = (total_loss / total_samples) if total_samples > 0 and self.loss_fn else None
+                    running_confidence = (
+                        float(np.mean(confidence_samples)) if confidence_samples else None
+                    )
+                    rolling_loss = (
+                        (total_loss / total_samples) if total_samples > 0 and self.loss_fn else None
+                    )
                     avg_latency = float(np.mean(latency_ms)) if latency_ms else None
 
                     progress_payload = {
-                        'type': 'evaluation_progress',
-                        'stage': 'evaluation',
-                        'batch': batch_count,
-                        'total_batches': total_batches,
-                        'progress': (batch_count / total_batches * 100) if total_batches else None,
-                        'samples_processed': total_samples,
-                        'current_accuracy': running_accuracy,
-                        'current_loss': rolling_loss,
-                        'mean_confidence': running_confidence,
-                        'latest_latency_ms': latency_ms[-1] if latency_ms else None,
-                        'avg_latency_ms': avg_latency,
+                        "type": "evaluation_progress",
+                        "stage": "evaluation",
+                        "batch": batch_count,
+                        "total_batches": total_batches,
+                        "progress": (batch_count / total_batches * 100) if total_batches else None,
+                        "samples_processed": total_samples,
+                        "current_accuracy": running_accuracy,
+                        "current_loss": rolling_loss,
+                        "mean_confidence": running_confidence,
+                        "latest_latency_ms": latency_ms[-1] if latency_ms else None,
+                        "avg_latency_ms": avg_latency,
                     }
 
                     try:
@@ -296,68 +319,86 @@ class Evaluator:
                         LOG.warning("Progress callback failed: %s", e)
                 # ================================================
 
-        avg_loss = (total_loss / total_samples) if self.loss_fn is not None and total_samples > 0 else None
+        avg_loss = (
+            (total_loss / total_samples) if self.loss_fn is not None and total_samples > 0 else None
+        )
 
         pred_probs_np: Optional[np.ndarray] = None
-        if self.task_type == 'classification' and all_probabilities:
+        if self.task_type == "classification" and all_probabilities:
             try:
                 pred_probs_np = np.concatenate(all_probabilities, axis=0)
             except ValueError:
-                LOG.warning("Could not concatenate probability tensors; skipping probability-based metrics")
+                LOG.warning(
+                    "Could not concatenate probability tensors; skipping probability-based metrics"
+                )
 
         metrics: Dict[str, Any] = {}
-        if self.task_type in ['classification', 'multi_label'] and all_labels and len(all_labels) == len(all_preds):
+        if (
+            self.task_type in ["classification", "multi_label"]
+            and all_labels
+            and len(all_labels) == len(all_preds)
+        ):
             metrics = zynthe.evaluation.metrics.compute_all_metrics(
                 all_preds,
                 all_labels,
                 pred_probs=pred_probs_np,
             )
-            if self.modality == 'vision' and pred_probs_np is not None and pred_probs_np.ndim == 2:
+            if self.modality == "vision" and pred_probs_np is not None and pred_probs_np.ndim == 2:
                 try:
                     labels_arr = np.asarray(all_labels, dtype=np.int64)
                     top1 = np.argmax(pred_probs_np, axis=1)
                     k = min(5, pred_probs_np.shape[1])
                     topk = np.argsort(pred_probs_np, axis=1)[:, -k:]
-                    metrics['top1_accuracy'] = float(np.mean(top1 == labels_arr))
-                    metrics['top5_accuracy'] = float(np.mean((topk == labels_arr[:, None]).any(axis=1)))
+                    metrics["top1_accuracy"] = float(np.mean(top1 == labels_arr))
+                    metrics["top5_accuracy"] = float(
+                        np.mean((topk == labels_arr[:, None]).any(axis=1))
+                    )
                     if k < 5:
-                        metrics['top5_k_used'] = int(k)
+                        metrics["top5_k_used"] = int(k)
                 except Exception:
                     LOG.debug("Failed to compute vision top-k metrics", exc_info=True)
 
         result: Dict[str, Any] = {
-            'loss': avg_loss,
-            'preds': all_preds,
-            'labels': all_labels,
-            'all_preds': all_preds,
-            'all_labels': all_labels,
-            'num_samples': total_samples,
-            'metrics': metrics,
-            'modality': self.modality,
+            "loss": avg_loss,
+            "preds": all_preds,
+            "labels": all_labels,
+            "all_preds": all_preds,
+            "all_labels": all_labels,
+            "num_samples": total_samples,
+            "metrics": metrics,
+            "modality": self.modality,
         }
 
-        if self.task_type in ['classification', 'multi_label']:
-            result.update({
-                'accuracy': metrics.get('accuracy'),
-                'f1': metrics.get('f1'),
-                'precision': metrics.get('precision'),
-                'recall': metrics.get('recall'),
-            })
+        if self.task_type in ["classification", "multi_label"]:
+            result.update(
+                {
+                    "accuracy": metrics.get("accuracy"),
+                    "f1": metrics.get("f1"),
+                    "precision": metrics.get("precision"),
+                    "recall": metrics.get("recall"),
+                }
+            )
 
         if pred_probs_np is not None:
-            result['probabilities'] = pred_probs_np.tolist()
+            result["probabilities"] = pred_probs_np.tolist()
 
-        runtime_stats = self._summarize_runtime(latency_ms, peak_memory_bytes, total_samples, batch_count)
+        runtime_stats = self._summarize_runtime(
+            latency_ms, peak_memory_bytes, total_samples, batch_count
+        )
         if runtime_stats:
-            result['runtime'] = runtime_stats
+            result["runtime"] = runtime_stats
 
-        diagnostics = self._build_diagnostics(metrics, avg_loss, batch_losses, confidence_samples, pred_probs_np)
+        diagnostics = self._build_diagnostics(
+            metrics, avg_loss, batch_losses, confidence_samples, pred_probs_np
+        )
         if diagnostics:
-            result['diagnostics'] = diagnostics
+            result["diagnostics"] = diagnostics
 
-        explainability = self._generate_explainability(all_texts, all_preds, all_labels, pred_probs_np)
+        explainability = self._generate_explainability(
+            all_texts, all_preds, all_labels, pred_probs_np
+        )
         if explainability:
-            result['explainability'] = explainability
+            result["explainability"] = explainability
 
         if self.explainer is not None:
             self.explainer.visualize(all_preds, all_labels)
@@ -374,22 +415,22 @@ class Evaluator:
             return None
         lat_array = np.asarray(latencies, dtype=np.float64)
         runtime: Dict[str, Any] = {
-            'mean_ms': float(lat_array.mean()),
-            'median_ms': float(np.median(lat_array)),
-            'p95_ms': float(np.percentile(lat_array, 95)),
-            'p99_ms': float(np.percentile(lat_array, 99)),
-            'max_ms': float(lat_array.max()),
-            'min_ms': float(lat_array.min()),
-            'batches': len(latencies),
+            "mean_ms": float(lat_array.mean()),
+            "median_ms": float(np.median(lat_array)),
+            "p95_ms": float(np.percentile(lat_array, 95)),
+            "p99_ms": float(np.percentile(lat_array, 99)),
+            "max_ms": float(lat_array.max()),
+            "min_ms": float(lat_array.min()),
+            "batches": len(latencies),
         }
         total_time = lat_array.sum() / 1000.0
         if total_samples > 0 and total_time > 0:
-            runtime['throughput_samples_per_s'] = float(total_samples / total_time)
-        runtime['batches_completed'] = total_batches
+            runtime["throughput_samples_per_s"] = float(total_samples / total_time)
+        runtime["batches_completed"] = total_batches
 
         if memory_bytes:
             mem_array = np.asarray(memory_bytes, dtype=np.float64)
-            runtime['peak_memory_mb'] = float(mem_array.max() / (1024 ** 2))
+            runtime["peak_memory_mb"] = float(mem_array.max() / (1024**2))
         return runtime
 
     def _build_diagnostics(
@@ -410,7 +451,7 @@ class Evaluator:
             )
         except Exception:
             LOG.debug("Failed to build diagnostics", exc_info=True)
-            return {'warnings': ['diagnostics_failed']}
+            return {"warnings": ["diagnostics_failed"]}
 
     def _generate_explainability(
         self,
@@ -433,16 +474,24 @@ class Evaluator:
     def generate_report(self) -> EvaluationReport:
         """Run evaluation and return a standardized EvaluationReport."""
         result = self.evaluate()
-        metrics = result.get('metrics', {}) if isinstance(result.get('metrics'), dict) else {}
+        metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}
         return EvaluationReport(
-            loss=result.get('loss'),
+            loss=result.get("loss"),
             metrics=metrics,
-            diagnostics=result.get('diagnostics', {}) if isinstance(result.get('diagnostics'), dict) else {},
-            runtime=result.get('runtime') if isinstance(result.get('runtime'), dict) else None,
-            calibration=metrics.get('calibration') if isinstance(metrics.get('calibration'), dict) else None,
-            explainability=result.get('explainability') if isinstance(result.get('explainability'), dict) else None,
+            diagnostics=(
+                result.get("diagnostics", {}) if isinstance(result.get("diagnostics"), dict) else {}
+            ),
+            runtime=result.get("runtime") if isinstance(result.get("runtime"), dict) else None,
+            calibration=(
+                metrics.get("calibration") if isinstance(metrics.get("calibration"), dict) else None
+            ),
+            explainability=(
+                result.get("explainability")
+                if isinstance(result.get("explainability"), dict)
+                else None
+            ),
             modality=self.modality,
             model_name=self.model.__class__.__name__,
             task_type=self.task_type,
-            metadata={'num_samples': int(result.get('num_samples', 0))},
+            metadata={"num_samples": int(result.get("num_samples", 0))},
         )

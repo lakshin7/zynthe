@@ -1,11 +1,10 @@
-
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Tuple, Union, cast
 
 import torch
 from transformers import (
@@ -167,10 +166,14 @@ class ModelLoader:
     ) -> Union[Tuple[PreTrainedModel, PreTrainedModel, Any], ModelBundle]:
         spec = self._build_spec()
         bundle = self._load_bundle(spec)
-        return bundle if (return_bundle or spec.return_wrapped) else (
-            bundle.teacher,
-            bundle.student,
-            bundle.tokenizer,
+        return (
+            bundle
+            if (return_bundle or spec.return_wrapped)
+            else (
+                bundle.teacher,
+                bundle.student,
+                bundle.tokenizer,
+            )
         )
 
     def resume_from_checkpoint(
@@ -207,12 +210,16 @@ class ModelLoader:
             model_class = AutoModel
 
         resolved_location = map_location or str(self.device)
-        model = model_class.from_pretrained(str(checkpoint_path), torch_dtype=self.model_cfg.get("torch_dtype"))
+        model = model_class.from_pretrained(
+            str(checkpoint_path), torch_dtype=self.model_cfg.get("torch_dtype")
+        )
 
         try:
             tokenizer = self._load_artifact_processor(str(checkpoint_path), model_type)
         except Exception as e:
-            logger.warning("Failed to load tokenizer from checkpoint, falling back to base tokenizer: %s", e)
+            logger.warning(
+                "Failed to load tokenizer from checkpoint, falling back to base tokenizer: %s", e
+            )
             spec = self._build_spec()
             tokenizer = self._load_tokenizer(spec)
 
@@ -246,9 +253,15 @@ class ModelLoader:
                     map_location=resolved_location,
                     strict=strict,
                 )
-                resume_state["restored_optimizer"] = bool(optimizer is not None and "optimizer_state_dict" in payload)
-                resume_state["restored_scheduler"] = bool(scheduler is not None and "scheduler_state_dict" in payload)
-                resume_state["restored_scaler"] = bool(scaler is not None and "scaler_state_dict" in payload)
+                resume_state["restored_optimizer"] = bool(
+                    optimizer is not None and "optimizer_state_dict" in payload
+                )
+                resume_state["restored_scheduler"] = bool(
+                    scheduler is not None and "scheduler_state_dict" in payload
+                )
+                resume_state["restored_scaler"] = bool(
+                    scaler is not None and "scaler_state_dict" in payload
+                )
                 if metadata is not None:
                     resume_state["epoch"] = int(metadata.epoch)
                     resume_state["global_step"] = int(metadata.global_step)
@@ -268,7 +281,11 @@ class ModelLoader:
     # ------------------------------------------------------------------
 
     def _build_spec(self) -> ModelLoadSpec:
-        teacher_name = self.model_cfg.get("name") or self.model_cfg.get("teacher_name") or self.model_cfg.get("teacher")
+        teacher_name = (
+            self.model_cfg.get("name")
+            or self.model_cfg.get("teacher_name")
+            or self.model_cfg.get("teacher")
+        )
         student_name = self.model_cfg.get("student_name", teacher_name)
         tokenizer_name = (
             self.model_cfg.get("tokenizer_name")
@@ -309,7 +326,9 @@ class ModelLoader:
             gradient_checkpointing=self.model_cfg.get("gradient_checkpointing", False),
             torch_dtype=self.model_cfg.get("torch_dtype"),
             quantization=quant_cfg.get("type"),
-            quantization_target=str(quant_cfg.get("target", quant_cfg.get("apply_to", "both"))).lower(),
+            quantization_target=str(
+                quant_cfg.get("target", quant_cfg.get("apply_to", "both"))
+            ).lower(),
             quantization_safe_fallback=bool(quant_cfg.get("safe_fallback", True)),
             adapter_path=quant_cfg.get("adapter"),
             extra_model_kwargs=self.model_cfg.get("model_kwargs", {}) or {},
@@ -430,16 +449,30 @@ class ModelLoader:
                     local_files_only=spec.local_files_only,
                     token=spec.hf_token,
                 )
-                architectures = [arch.lower() for arch in (getattr(cfg, 'architectures', None) or [])]
-                if getattr(cfg, "is_decoder", False) or any("causal" in arch for arch in architectures):
+                architectures = [
+                    arch.lower() for arch in (getattr(cfg, "architectures", None) or [])
+                ]
+                if getattr(cfg, "is_decoder", False) or any(
+                    "causal" in arch for arch in architectures
+                ):
                     resolved_model_type = "causallm"
                 else:
                     resolved_model_type = "sequenceclassification"
             except Exception as exc:
-                logger.warning("Auto model type resolution failed (%s); falling back to sequence classification", exc)
+                logger.warning(
+                    "Auto model type resolution failed (%s); falling back to sequence classification",
+                    exc,
+                )
                 resolved_model_type = "sequenceclassification"
 
-        if resolved_model_type in {"vision", "image", "image_classification", "image-classification", "vit", "deit"}:
+        if resolved_model_type in {
+            "vision",
+            "image",
+            "image_classification",
+            "image-classification",
+            "vit",
+            "deit",
+        }:
             model_class = AutoModelForImageClassification
             if "num_labels" in self.model_cfg:
                 model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels"))
@@ -449,9 +482,22 @@ class ModelLoader:
                 model_kwargs.setdefault("id2label", {idx: name for name, idx in label_map.items()})
         elif resolved_model_type in {"multimodal", "clip"}:
             model_class = CLIPModel
-        elif resolved_model_type in {"causallm", "causal_lm", "causal-lm", "decoder", "gpt", "lm", "language_modeling"}:
+        elif resolved_model_type in {
+            "causallm",
+            "causal_lm",
+            "causal-lm",
+            "decoder",
+            "gpt",
+            "lm",
+            "language_modeling",
+        }:
             model_class = AutoModelForCausalLM
-        elif resolved_model_type in {"sequenceclassification", "sequence_classification", "classification", "transformer"}:
+        elif resolved_model_type in {
+            "sequenceclassification",
+            "sequence_classification",
+            "classification",
+            "transformer",
+        }:
             model_class = AutoModelForSequenceClassification
             if "num_labels" in self.model_cfg:
                 model_kwargs.setdefault("num_labels", self.model_cfg.get("num_labels", 2))
@@ -537,9 +583,8 @@ class ModelLoader:
 
             # Safety: quantized loading is most stable on CUDA backends.
             if (
-                (role_kwargs.get("load_in_8bit") or role_kwargs.get("load_in_4bit"))
-                and self.device.type != "cuda"
-            ):
+                role_kwargs.get("load_in_8bit") or role_kwargs.get("load_in_4bit")
+            ) and self.device.type != "cuda":
                 if spec.quantization_safe_fallback:
                     logger.warning(
                         "Quantization requested for %s on device '%s'; disabling quantization for safety.",
@@ -590,8 +635,6 @@ class ModelLoader:
             logger.info("Logged into HuggingFace Hub with provided token")
         except Exception as exc:  # pragma: no cover - best effort login
             logger.warning("HuggingFace login failed: %s", exc)
-
-
 
 
 def _maybe_compile(
@@ -671,19 +714,19 @@ def load_models(
 
     # Auto-detect adapters if config requests it
     adapter_cfg = (
-        _cfg_get(cfg, "adapters", {})
-        if not isinstance(cfg, dict)
-        else cfg.get("adapters", {})
+        _cfg_get(cfg, "adapters", {}) if not isinstance(cfg, dict) else cfg.get("adapters", {})
     )
     if isinstance(adapter_cfg, dict) and adapter_cfg.get("auto_detect", False):
         try:
             from zynthe.core.adapters import AdapterRegistry
+
             registry = AdapterRegistry()
             bundle.teacher_adapter = registry.detect(bundle.teacher)
             bundle.student_adapter = registry.detect(bundle.student)
             logger.info(
                 "Auto-detected adapters: teacher=%s, student=%s",
-                bundle.teacher_adapter, bundle.student_adapter,
+                bundle.teacher_adapter,
+                bundle.student_adapter,
             )
         except ImportError:
             logger.warning("core.adapters not available; skipping adapter detection")
@@ -698,4 +741,3 @@ def model_summary(model: PreTrainedModel) -> Dict[str, Any]:
     return _summarize_model(model)
 
 
-from zynthe.core.models.model_saver import ModelSaver

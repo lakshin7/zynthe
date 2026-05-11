@@ -62,7 +62,13 @@ def verify_reproducibility(
     trace_a = run_builder()
     trace_b = run_builder()
 
-    steps = min(int(compare_steps), len(trace_a.losses), len(trace_b.losses), len(trace_a.grad_norms), len(trace_b.grad_norms))
+    steps = min(
+        int(compare_steps),
+        len(trace_a.losses),
+        len(trace_b.losses),
+        len(trace_a.grad_norms),
+        len(trace_b.grad_norms),
+    )
     if steps <= 0:
         return DeterminismReport(
             passed=False,
@@ -155,8 +161,12 @@ def trace_from_trainer(
         else:
             loss.backward()
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(trainer.student.parameters(), trainer.max_grad_norm)
-        grad_norm_val = float(grad_norm.item()) if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            trainer.student.parameters(), trainer.max_grad_norm
+        )
+        grad_norm_val = (
+            float(grad_norm.item()) if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+        )
         grad_norms.append(grad_norm_val)
         if not np.isfinite(grad_norm_val):
             has_nan_or_inf = True

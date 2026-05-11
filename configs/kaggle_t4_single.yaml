@@ -1,0 +1,56 @@
+# Kaggle T4 Single GPU Smoke Test Config
+# 1x NVIDIA T4: 16GB VRAM, Turing arch
+# Tests: BERT -> DistilBERT, single-stage distillation + evaluation
+# Expected: ~5-8 minutes
+
+model:
+  name: "bert-base-uncased"
+  student_name: "distilbert-base-uncased"
+  type: "sequence_classification"
+  tokenizer_name: "bert-base-uncased"
+  max_length: 128
+  num_labels: 2
+
+distillation:
+  method: "kd_hinton"
+  multi_stage: false
+  temperature: 4.0
+  alpha: 0.7
+
+data:
+  dataset_id: "glue/sst2"
+  train_path: null
+  val_path: null
+  label_names:
+    - negative
+    - positive
+
+train:
+  epochs: 3
+  batch_size: 32
+  lr: 3e-5
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  mixed_precision: true
+  scheduler: cosine
+  warmup_steps: 100
+  early_stop_patience: 2
+  gradient_accumulation_steps: 1
+
+preprocessing:
+  text_field: sentence
+  label_field: label
+  lowercase: true
+  strip: true
+
+device:
+  prefer_cuda: true
+  prefer_mps: false
+
+quantization:
+  enable: false
+  mode: ptq
+
+output_root: "/kaggle/working/zynthe_t4_single"
+seed: 42

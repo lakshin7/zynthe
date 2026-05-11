@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -7,6 +6,7 @@ from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def generate_report(summary, plots, config, output_path, fmt="md"):
     """
@@ -45,17 +45,21 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
         html_lines.append("<title>Experiment Report</title>")
         html_lines.append("</head>")
         html_lines.append("<body>")
-        html_lines.append(f"<h1>Experiment Report ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})</h1>")
+        html_lines.append(
+            f"<h1>Experiment Report ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})</h1>"
+        )
         html_lines.append("<h2>Configuration</h2>")
         html_lines.append('<pre style="background-color:#f6f8fa;border-radius:3px;padding:1em;">')
         html_lines.append(json.dumps(config, indent=2))
         html_lines.append("</pre>")
         html_lines.append("<h2>Training Summary</h2>")
         html_lines.append("<table border='1' cellspacing='0' cellpadding='4'>")
-        html_lines.append("<thead><tr>"
-                          "<th>Epoch</th><th>Train Loss</th><th>Val Loss</th><th>Accuracy</th>"
-                          "<th>F1</th><th>Precision</th><th>Recall</th>"
-                          "</tr></thead>")
+        html_lines.append(
+            "<thead><tr>"
+            "<th>Epoch</th><th>Train Loss</th><th>Val Loss</th><th>Accuracy</th>"
+            "<th>F1</th><th>Precision</th><th>Recall</th>"
+            "</tr></thead>"
+        )
         html_lines.append("<tbody>")
         for epoch, stats in summary.items():
             html_lines.append(
@@ -71,7 +75,9 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
         html_lines.append("<h2>Plots</h2>")
         for plot in plots:
             fname = os.path.basename(plot)
-            html_lines.append(f'<div style="margin-bottom:1em;"><img src="{fname}" alt="{fname}" style="max-width:600px;"><br><small>{fname}</small></div>')
+            html_lines.append(
+                f'<div style="margin-bottom:1em;"><img src="{fname}" alt="{fname}" style="max-width:600px;"><br><small>{fname}</small></div>'
+            )
         html_lines.append("</body>")
         html_lines.append("</html>")
         report_content = "\n".join(html_lines)
@@ -87,8 +93,10 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
         lines.append("| Epoch | Train Loss | Val Loss | Accuracy | F1 | Precision | Recall |")
         lines.append("|-------|------------|----------|----------|----|-----------|--------|")
         for epoch, stats in summary.items():
-            lines.append(f"| {epoch} | {stats['train_loss']:.4f} | {stats['val_loss']:.4f} | "
-                         f"{stats['accuracy']:.4f} | {stats['f1']:.4f} | {stats['precision']:.4f} | {stats['recall']:.4f} |")
+            lines.append(
+                f"| {epoch} | {stats['train_loss']:.4f} | {stats['val_loss']:.4f} | "
+                f"{stats['accuracy']:.4f} | {stats['f1']:.4f} | {stats['precision']:.4f} | {stats['recall']:.4f} |"
+            )
         lines.append("\n## Plots\n")
         for plot in plots:
             fname = os.path.basename(plot)

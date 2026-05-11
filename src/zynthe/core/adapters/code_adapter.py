@@ -36,39 +36,55 @@ class CodeModelAdapter(ModelAdapter):
     modality = "code"
 
     # Forward signature keys accepted by code models.
-    _COMMON_KEYS = frozenset({
-        "input_ids",
-        "attention_mask",
-        "labels",
-        "token_type_ids",
-        "position_ids",
-        "head_mask",
-        "decoder_input_ids",
-        "decoder_attention_mask",
-        "past_key_values",
-        "use_cache",
-        "output_attentions",
-        "output_hidden_states",
-        "return_dict",
-    })
+    _COMMON_KEYS = frozenset(
+        {
+            "input_ids",
+            "attention_mask",
+            "labels",
+            "token_type_ids",
+            "position_ids",
+            "head_mask",
+            "decoder_input_ids",
+            "decoder_attention_mask",
+            "past_key_values",
+            "use_cache",
+            "output_attentions",
+            "output_hidden_states",
+            "return_dict",
+        }
+    )
 
     # Module name patterns for hookable layers in code models.
     _LAYER_PATTERNS = [
-        re.compile(r"^roberta\.encoder\.layer\.(\d+)$"),        # CodeBERT
-        re.compile(r"^encoder\.layer\.(\d+)$"),                  # generic encoder
-        re.compile(r"^model\.layers\.(\d+)$"),                   # CodeLlama / DeepSeek
-        re.compile(r"^transformer\.h\.(\d+)$"),                  # StarCoder (GPT-2 arch)
-        re.compile(r"^model\.decoder\.layers\.(\d+)$"),          # CodeT5
-        re.compile(r"^decoder\.layers\.(\d+)$"),                 # PLBART
-        re.compile(r"^encoder\.layers\.(\d+)$"),                 # CodeT5 encoder
+        re.compile(r"^roberta\.encoder\.layer\.(\d+)$"),  # CodeBERT
+        re.compile(r"^encoder\.layer\.(\d+)$"),  # generic encoder
+        re.compile(r"^model\.layers\.(\d+)$"),  # CodeLlama / DeepSeek
+        re.compile(r"^transformer\.h\.(\d+)$"),  # StarCoder (GPT-2 arch)
+        re.compile(r"^model\.decoder\.layers\.(\d+)$"),  # CodeT5
+        re.compile(r"^decoder\.layers\.(\d+)$"),  # PLBART
+        re.compile(r"^encoder\.layers\.(\d+)$"),  # CodeT5 encoder
     ]
 
     # Known code model name patterns for auto-detection.
     _CODE_MODEL_PATTERNS = [
-        "codellama", "codebert", "codet5", "starcoder", "starcoderbase",
-        "deepseek-coder", "deepseek_coder", "codegemma", "codestral",
-        "codegen", "unixcoder", "graphcodebert", "plbart", "incoder",
-        "santacoder", "wizardcoder", "phind", "magicoder",
+        "codellama",
+        "codebert",
+        "codet5",
+        "starcoder",
+        "starcoderbase",
+        "deepseek-coder",
+        "deepseek_coder",
+        "codegemma",
+        "codestral",
+        "codegen",
+        "unixcoder",
+        "graphcodebert",
+        "plbart",
+        "incoder",
+        "santacoder",
+        "wizardcoder",
+        "phind",
+        "magicoder",
     ]
 
     def __init__(self) -> None:
@@ -125,7 +141,10 @@ class CodeModelAdapter(ModelAdapter):
 
             if t_feat.shape[-1] != s_feat.shape[-1]:
                 proj = self._get_or_create_projection(
-                    key, s_feat.shape[-1], t_feat.shape[-1], s_feat.device,
+                    key,
+                    s_feat.shape[-1],
+                    t_feat.shape[-1],
+                    s_feat.device,
                 )
                 aligned_student[key] = proj(s_feat)
             else:
@@ -165,15 +184,17 @@ class CodeModelAdapter(ModelAdapter):
         if model_id not in self._forward_params_cache:
             try:
                 sig = inspect.signature(model.forward)
-                self._forward_params_cache[model_id] = frozenset(
-                    sig.parameters.keys()
-                )
+                self._forward_params_cache[model_id] = frozenset(sig.parameters.keys())
             except (ValueError, TypeError):
                 self._forward_params_cache[model_id] = self._COMMON_KEYS
         return self._forward_params_cache[model_id]
 
     def _get_or_create_projection(
-        self, key: str, in_dim: int, out_dim: int, device: torch.device,
+        self,
+        key: str,
+        in_dim: int,
+        out_dim: int,
+        device: torch.device,
     ) -> nn.Linear:
         """Lazily create a linear projection for dimension alignment."""
         proj_key = f"proj_{key}_{in_dim}_{out_dim}"

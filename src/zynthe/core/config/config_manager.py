@@ -43,24 +43,29 @@ def _coerce_float(value: Any, default: float) -> float:
         logger.warning("Invalid float config value %r; using default=%s", value, default)
         return float(default)
 
+
 class ConfigError(Exception):
     pass
 
+
 def _ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
+
 
 def _safe_load_yaml(path: str) -> Dict[str, Any]:
     with open(path, "r") as f:
         return yaml.safe_load(f) or {}
 
+
 def _deep_update(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively update base with override (mutates base)."""
+    """Recursively merge override into base without mutating the original."""
+    merged = deepcopy(base)
     for k, v in override.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            base[k] = _deep_update(base[k], v)
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = _deep_update(merged[k], v)
         else:
-            base[k] = v
-    return base
+            merged[k] = v
+    return merged
 
 
 def _default_config_path() -> str:
@@ -70,7 +75,7 @@ def _default_config_path() -> str:
     try:
         candidates.append(resources.files("zynthe").joinpath("configs", _DEFAULTS_FILENAME))
     except Exception:
-        pass
+        logger.debug("Failed to resolve packaged config via importlib.resources")
 
     here = os.path.abspath(os.path.dirname(__file__))
     candidates.extend(
@@ -87,6 +92,7 @@ def _default_config_path() -> str:
 
     return os.fspath(candidates[0]) if candidates else _DEFAULTS_FILENAME
 
+
 def _get_env_info() -> Dict[str, Any]:
     info = {
         "python": str(platform.python_version()),
@@ -96,7 +102,8 @@ def _get_env_info() -> Dict[str, Any]:
         "torch_version": str(torch.__version__),
         "cuda_available": torch.cuda.is_available(),
         "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-        "mps_available": getattr(torch.backends, "mps", None) is not None and getattr(torch.backends.mps, "is_available", lambda: False)()
+        "mps_available": getattr(torch.backends, "mps", None) is not None
+        and getattr(torch.backends.mps, "is_available", lambda: False)(),
     }
     try:
         # best-effort: CUDA device names if available
@@ -106,23 +113,35 @@ def _get_env_info() -> Dict[str, Any]:
                 names.append(torch.cuda.get_device_name(i))
             info["cuda_device_names"] = names
     except Exception:
-        pass
+        logger.debug("Failed to query CUDA device names")
     return info
+
 
 def _get_git_info() -> Dict[str, Optional[str]]:
     """Best-effort minimal git info: commit sha and branch."""
     out: Dict[str, Optional[str]] = {"commit_sha": None, "branch": None}
     try:
-        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        sha = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
+            .decode()
+            .strip()
+        )
         out["commit_sha"] = sha
     except Exception:
-        pass
+        logger.debug("Failed to get git commit SHA")
     try:
-        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        branch = (
+            subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            .decode()
+            .strip()
+        )
         out["branch"] = branch
     except Exception:
-        pass
+        logger.debug("Failed to get git branch")
     return out
+
 
 class ConfigManager:
     """
@@ -133,7 +152,7 @@ class ConfigManager:
         "train": ["epochs", "batch_size", "lr"],
         "model": ["name", "type"],  # student_name and tokenizer_name are optional with defaults
         "distillation": [],  # flexible, so no strict keys
-        "data": ["train_path", "val_path"]
+        "data": ["train_path", "val_path"],
     }
 
     def _validate_minimal(self):
@@ -148,30 +167,34 @@ class ConfigManager:
             section_cfg = self.raw_config.get(section, {})
             missing_keys = [k for k in required_keys if k not in section_cfg]
             if missing_keys:
-                raise ConfigError(
-                    f"Section '{section}' missing required keys: {missing_keys}"
-                )
-                
+                raise ConfigError(f"Section '{section}' missing required keys: {missing_keys}")
+
         # Additional model configuration validation and defaults
         model_cfg = self.raw_config.get("model", {})
-        
+
         # Set student_name default if not specified
         if "student_name" not in model_cfg:
             model_cfg["student_name"] = model_cfg.get("name")
-            logger.info(f"student_name not specified, defaulting to teacher model: {model_cfg['student_name']}")
-            
-        # Set tokenizer_name default if not specified  
+            logger.info(
+                f"student_name not specified, defaulting to teacher model: {model_cfg['student_name']}"
+            )
+
+        # Set tokenizer_name default if not specified
         if "tokenizer_name" not in model_cfg:
             model_cfg["tokenizer_name"] = model_cfg.get("name")
-            logger.info(f"tokenizer_name not specified, defaulting to teacher model: {model_cfg['tokenizer_name']}")
-            
+            logger.info(
+                f"tokenizer_name not specified, defaulting to teacher model: {model_cfg['tokenizer_name']}"
+            )
+
         self.raw_config["model"] = model_cfg
 
-    def __init__(self,
-                 config_path: Optional[str] = None,
-                 defaults_path: Optional[str] = None,
-                 overrides: Optional[Dict[str, Any]] = None,
-                 experiments_root: str = "experiments"):
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        defaults_path: Optional[str] = None,
+        overrides: Optional[Dict[str, Any]] = None,
+        experiments_root: str = "experiments",
+    ):
         self.config_path = config_path
         env_root = os.environ.get("ZYNTHÉ_EXPERIMENTS_ROOT")
         if env_root:
@@ -266,7 +289,9 @@ class ConfigManager:
             except Exception as e:
                 raise ConfigError(f"Failed to load defaults from {self.defaults_path}: {e}")
         else:
-            logger.warning(f"Default config not found at: {self.defaults_path}, using minimal defaults")
+            logger.warning(
+                f"Default config not found at: {self.defaults_path}, using minimal defaults"
+            )
 
         user_cfg = {}
         if self.config_path:
@@ -295,7 +320,10 @@ class ConfigManager:
         prefer_cuda = bool(self.raw_config.get("device", {}).get("prefer_cuda", True))
         prefer_mps = bool(self.raw_config.get("device", {}).get("prefer_mps", False))
 
-        mps_available = getattr(torch.backends, "mps", None) is not None and getattr(torch.backends.mps, "is_available", lambda: False)()
+        mps_available = (
+            getattr(torch.backends, "mps", None) is not None
+            and getattr(torch.backends.mps, "is_available", lambda: False)()
+        )
         cuda_available = torch.cuda.is_available()
 
         if prefer_mps and mps_available:
@@ -343,7 +371,7 @@ class ConfigManager:
             "enable_shap": False,
             "enable_lime": False,
             "shap_samples": 100,
-            "lime_samples": 500
+            "lime_samples": 500,
         }
         merged_explain = _deep_update(default_explain, explain_cfg)
 
@@ -421,7 +449,9 @@ class ConfigManager:
         # copy user config for traceability (best-effort)
         if self.config_path:
             try:
-                shutil.copy(self.config_path, os.path.join(exp_dir, os.path.basename(self.config_path)))
+                shutil.copy(
+                    self.config_path, os.path.join(exp_dir, os.path.basename(self.config_path))
+                )
             except Exception:
                 logger.warning("Failed to copy user config to experiment dir (non-fatal)")
 
@@ -430,7 +460,7 @@ class ConfigManager:
         meta: Dict[str, Any] = {
             "experiment_id": self.experiment_id,
             "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "config_version": "v1.0"
+            "config_version": "v1.0",
         }
         meta["git"] = self.git_info
         payload["_meta"] = meta
@@ -456,7 +486,7 @@ class ConfigManager:
             "paths": self.paths,
             "runtime": self.get_runtime(),
             "env": self.env_info,
-            "git": self.git_info
+            "git": self.git_info,
         }
 
     def override(self, overrides: Dict[str, Any]):
@@ -478,11 +508,11 @@ class ConfigManager:
         if dev == "mps":
             return torch.device("mps")
         return torch.device("cpu")
-    
+
     def get_nested(self, *keys, default: Any = None) -> Any:
         """
         Safely get nested config values using dot notation.
-        
+
         Example:
             cfg.get_nested("model", "name") -> returns cfg["model"]["name"]
             cfg.get_nested("train", "lr", default=1e-5)
@@ -496,25 +526,27 @@ class ConfigManager:
             else:
                 return default
         return current if current is not None else default
-    
+
     def validate_required_paths(self):
         """
         Validate that required data paths exist.
         """
         train_path = self.get_nested("data", "train_path")
         val_path = self.get_nested("data", "val_path")
-        
+
         missing = []
         if train_path and not os.path.exists(train_path):
             missing.append(f"Training data: {train_path}")
         if val_path and not os.path.exists(val_path):
             missing.append(f"Validation data: {val_path}")
-        
+
         if missing:
-            raise ConfigError("Missing required data files:\n" + "\n".join(f"  - {m}" for m in missing))
-        
+            raise ConfigError(
+                "Missing required data files:\n" + "\n".join(f"  - {m}" for m in missing)
+            )
+
         logger.info("All required data paths validated successfully")
-    
+
     def __repr__(self) -> str:
         """String representation for debugging."""
         return (

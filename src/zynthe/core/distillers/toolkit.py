@@ -13,11 +13,12 @@ surface to a single ``fit()`` call.
 from __future__ import annotations
 
 import enum
+import json
 import logging
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any, Dict, Iterable, Mapping, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Goal enum (backward-compatible with bare strings)
 # ---------------------------------------------------------------------------
+
 
 class Goal(str, enum.Enum):
     """Distillation goal specifier.
@@ -92,6 +94,7 @@ class Goal(str, enum.Enum):
 # ---------------------------------------------------------------------------
 # DistillationConfig dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DistillationConfig:
@@ -167,14 +170,14 @@ def _validate_goal(goal: str) -> None:
     if goal.lower() not in _VALID_GOALS and goal.lower() not in DistillationToolkit.GOAL_TO_PRESET:
         valid = sorted(_VALID_GOALS)
         raise ValueError(
-            f"Unknown distillation goal: {goal!r}. "
-            f"Valid goals are: {', '.join(valid)}"
+            f"Unknown distillation goal: {goal!r}. " f"Valid goals are: {', '.join(valid)}"
         )
 
 
 # ---------------------------------------------------------------------------
 # DistillationToolkit
 # ---------------------------------------------------------------------------
+
 
 class DistillationToolkit:
     """Full-featured orchestration layer for knowledge distillation.
@@ -254,7 +257,8 @@ class DistillationToolkit:
 
         logger.debug(
             "DistillationToolkit initialized (device=%s, preset=%s)",
-            resolved, default_preset,
+            resolved,
+            default_preset,
         )
 
     def _ensure_same_device(self, target_device: str) -> None:
@@ -342,8 +346,11 @@ class DistillationToolkit:
         else:
             plan.setdefault("metadata", {})["preset"] = preset_name
 
-        logger.debug("Built plan with preset=%s, %d stages", preset_name,
-                      len(plan.get("distillation", {}).get("stages", [])))
+        logger.debug(
+            "Built plan with preset=%s, %d stages",
+            preset_name,
+            len(plan.get("distillation", {}).get("stages", [])),
+        )
         return plan
 
     # ------------------------------------------------------------------
@@ -388,7 +395,7 @@ class DistillationToolkit:
         report = orchestrator.run()
 
         best_model_path = str(Path(output_dir) / "student_model")
-        report['best_model_path'] = best_model_path
+        report["best_model_path"] = best_model_path
         return report
 
     def train(
@@ -412,8 +419,10 @@ class DistillationToolkit:
             Path to the best saved student model.
         """
         plan = self.build_plan(goal=goal, preset=preset)
-        report = self.run(plan=plan, train_loader=train_loader, val_loader=val_loader, output_dir=output_dir)
-        return report.get('best_model_path', output_dir)
+        report = self.run(
+            plan=plan, train_loader=train_loader, val_loader=val_loader, output_dir=output_dir
+        )
+        return report.get("best_model_path", output_dir)
 
     def evaluate(
         self,
@@ -502,7 +511,7 @@ class DistillationToolkit:
 
         lines = [
             f"\n{'='*56}",
-            f"  Distillation Plan Preview",
+            "  Distillation Plan Preview",
             f"{'='*56}",
             f"  Preset    : {preset_name}",
             f"  Multi-stage: {is_multi}",
@@ -512,7 +521,9 @@ class DistillationToolkit:
             epochs = train_cfg.get("epochs", "?")
             bs = train_cfg.get("batch_size", "?")
             lines.append(f"  Epochs    : {epochs}  |  Batch size: {bs}")
-        desc = plan.get('description', describe_preset(preset_name) if preset_name in list_presets() else '')
+        desc = plan.get(
+            "description", describe_preset(preset_name) if preset_name in list_presets() else ""
+        )
         lines.append(f"  Description: {desc}")
         lines.append("")
         for i, stage in enumerate(stages, 1):
@@ -552,7 +563,7 @@ class DistillationToolkit:
             return self.device
         if torch.cuda.is_available():
             return "cuda"
-        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return "mps"
         return "cpu"
 
@@ -560,11 +571,7 @@ class DistillationToolkit:
         """Recursively merge *overrides* into *base* without mutating either."""
         merged = deepcopy(base)
         for key, value in overrides.items():
-            if (
-                key in merged
-                and isinstance(merged[key], dict)
-                and isinstance(value, Mapping)
-            ):
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, Mapping):
                 merged[key] = self._deep_merge(merged[key], value)
             else:
                 merged[key] = deepcopy(value)
@@ -574,6 +581,7 @@ class DistillationToolkit:
 # ---------------------------------------------------------------------------
 # Distiller — beginner-friendly wrapper
 # ---------------------------------------------------------------------------
+
 
 class Distiller:
     """Beginner-friendly one-shot wrapper around :class:`DistillationToolkit`.
@@ -614,7 +622,10 @@ class Distiller:
         goal_str = goal.value if isinstance(goal, Goal) else str(goal)
         _validate_goal(goal_str)
         self._toolkit = DistillationToolkit(
-            teacher, student, device=device, config=config,
+            teacher,
+            student,
+            device=device,
+            config=config,
         )
         self._goal = goal_str
 
