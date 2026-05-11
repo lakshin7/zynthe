@@ -872,7 +872,7 @@ class MultiStageDistiller:
 
     def _evaluate(self, distiller: BaseDistiller) -> Dict[str, float]:
         """
-        Evaluate current student model.
+        Evaluate current student model (and teacher for reference).
 
         Args:
             distiller: Distiller instance
@@ -885,10 +885,13 @@ class MultiStageDistiller:
             return {"val_loss": 0.0, "val_accuracy": 0.0}
 
         self.student.eval()
+        self.teacher.eval()
 
         total_loss = 0.0
-        correct = 0
+        student_correct = 0
+        teacher_correct = 0
         total = 0
+        eval_errors = 0
         student_latencies_ms: List[float] = []
 
         with torch.no_grad():
@@ -914,29 +917,49 @@ class MultiStageDistiller:
                     )
                     student_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
-                    # Extract logits - handle dict, object with logits attr, or tensor
-                    logits = distiller._extract_logits_tensor(student_out)
+                    # Extract logits
+                    student_logits = distiller._extract_logits_tensor(student_out)
+
+                    # Teacher forward for reference accuracy
+                    teacher_out = distiller._safe_forward(
+                        self.teacher, inputs, {}
+                    )
+                    teacher_logits = distiller._extract_logits_tensor(teacher_out)
 
                     # Compute accuracy
-                    if labels is not None and hasattr(logits, "dim") and logits.dim() >= 2:
+                    if labels is not None and hasattr(student_logits, "dim") and student_logits.dim() >= 2:
                         try:
-                            total_loss += float(F.cross_entropy(logits, labels).item())
+                            total_loss += float(F.cross_entropy(student_logits, labels).item())
                         except Exception:
                             logger.debug("Cross-entropy loss computation failed during eval")
-                        _, predicted = logits.max(1)
+                        _, s_pred = student_logits.max(1)
+                        _, t_pred = teacher_logits.max(1)
                         total += labels.size(0)
-                        correct += predicted.eq(labels).sum().item()
+                        student_correct += s_pred.eq(labels).sum().item()
+                        teacher_correct += t_pred.eq(labels).sum().item()
 
                 except Exception as e:
-                    warnings.warn(f"Error in evaluation: {e}")
+                    eval_errors += 1
+                    if eval_errors <= 3:
+                        warnings.warn(f"Error in evaluation batch: {e}")
                     continue
 
-        accuracy = 100.0 * correct / max(total, 1)
+        student_acc = 100.0 * student_correct / max(total, 1)
+        teacher_acc = 100.0 * teacher_correct / max(total, 1)
         latency_ms = float(sum(student_latencies_ms) / max(len(student_latencies_ms), 1))
+
+        if eval_errors > 0:
+            logger.warning("  [EVAL] %d/%d batches failed during evaluation!", eval_errors, eval_errors + len(student_latencies_ms))
+
+        logger.info(
+            "  [EVAL] Student=%.2f%% | Teacher=%.2f%% | total_samples=%d | eval_errors=%d",
+            student_acc, teacher_acc, total, eval_errors,
+        )
 
         return {
             "val_loss": total_loss / max(len(self.val_loader), 1),
-            "val_accuracy": accuracy,
+            "val_accuracy": student_acc,
+            "teacher_accuracy": teacher_acc,
             "student_latency_ms": latency_ms,
         }
 

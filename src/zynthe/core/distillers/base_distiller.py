@@ -612,11 +612,39 @@ class BaseDistiller(nn.Module):
             raise ValueError("No optimizer provided. Either pass optimizer or set self.optimizer")
 
         opt.zero_grad()
+
+        # Diagnostic: verify loss has gradient graph
+        if not total_loss.requires_grad:
+            import logging as _lg
+            _lg.getLogger(__name__).warning(
+                "total_loss does NOT require grad (grad_fn=%s). "
+                "Backward will be a no-op — student weights won't update!",
+                total_loss.grad_fn,
+            )
+
         total_loss.backward()
 
         # Gradient clipping
         if grad_clip is not None:
             torch.nn.utils.clip_grad_norm_(self.student.parameters(), grad_clip)
+
+        # Diagnostic: log gradient norms periodically
+        if self.global_step % 200 == 0:
+            import logging as _lg
+            _diag_logger = _lg.getLogger(__name__)
+            grad_norms = [
+                p.grad.data.norm(2).item()
+                for p in self.student.parameters()
+                if p.grad is not None
+            ]
+            total_norm = sum(g ** 2 for g in grad_norms) ** 0.5 if grad_norms else 0.0
+            params_with_grad = len(grad_norms)
+            total_params = sum(1 for p in self.student.parameters() if p.requires_grad)
+            _diag_logger.info(
+                "  [GRAD] step=%d | grad_norm=%.6f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
+                self.global_step, total_norm, params_with_grad, total_params,
+                total_loss.item(), total_loss.requires_grad,
+            )
 
         opt.step()
 
