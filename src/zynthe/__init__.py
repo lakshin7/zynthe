@@ -12,8 +12,21 @@ from __future__ import annotations
 
 from importlib import import_module
 from typing import Any
+import logging as _logging
 
 __version__ = "0.2.4"
+
+# ---------------------------------------------------------------------------
+# Default logging — ensure zynthe loggers are visible in notebooks (Kaggle,
+# Colab, Jupyter) even when the user has not configured the root logger.
+# ---------------------------------------------------------------------------
+_pkg_logger = _logging.getLogger("zynthe")
+if not _pkg_logger.handlers:
+    _handler = _logging.StreamHandler()
+    _handler.setFormatter(_logging.Formatter("%(levelname)s | %(name)s | %(message)s"))
+    _pkg_logger.addHandler(_handler)
+    _pkg_logger.setLevel(_logging.INFO)
+    _pkg_logger.propagate = False
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     # Primary API
