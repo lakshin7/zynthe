@@ -206,9 +206,12 @@ class SimilarityTransfer(BaseDistiller):
             logits = output[0]
         else:
             logits = output
-        # Upcast to float32 for stable loss computation
-        if isinstance(logits, torch.Tensor) and logits.is_floating_point() and logits.dtype != torch.float32:
-            logits = logits.float()
+        # Upcast to float32 and clamp inf/nan for stable loss computation
+        if isinstance(logits, torch.Tensor):
+            if logits.dtype != torch.float32:
+                logits = logits.float()
+            if torch.isinf(logits).any() or torch.isnan(logits).any():
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=1e4, neginf=-1e4)
         return logits
 
     def _get_feature(

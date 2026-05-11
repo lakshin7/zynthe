@@ -319,7 +319,8 @@ class BaseDistiller(nn.Module):
         Always returns float32 logits for numerically stable loss
         computation (softmax, KL-div, cross-entropy).  Models loaded in
         float16/bfloat16 produce half-precision logits that can overflow
-        or underflow during softmax.
+        (float16 max ≈ 65504) producing ``inf`` values.  ``softmax(inf)``
+        yields ``NaN``, so we clamp after upcasting.
         """
         if isinstance(outputs, dict):
             logits = outputs["logits"]
@@ -329,9 +330,16 @@ class BaseDistiller(nn.Module):
             logits = outputs[0]
         else:
             logits = outputs
-        # Upcast to float32 for stable loss computation
-        if isinstance(logits, torch.Tensor) and logits.dtype != torch.float32:
-            logits = logits.float()
+        if isinstance(logits, torch.Tensor):
+            # Upcast to float32 for stable loss computation
+            if logits.dtype != torch.float32:
+                logits = logits.float()
+            # Clamp inf/nan from float16 overflow — keeps softmax/KL-div stable
+            if logits.is_floating_point() and (
+                torch.isinf(logits).any() or torch.isnan(logits).any()
+            ):
+                logits = torch.clamp(logits, min=-1e4, max=1e4)
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=1e4, neginf=-1e4)
         return logits
 
     @staticmethod
@@ -450,26 +458,16 @@ class BaseDistiller(nn.Module):
         inputs = self._move_to_device(inputs)
         kwargs = {k: self._move_to_device(v) for k, v in kwargs.items()}
 
-        # Cast floating-point inputs to match each model's parameter dtype.
-        # This prevents "mat1 and mat2 must have the same dtype" errors
-        # when models are loaded in float16/bfloat16.
-        teacher_inputs = self._cast_inputs_to_model_dtype(inputs, self.teacher)
-        teacher_kwargs = self._cast_inputs_to_model_dtype(kwargs, self.teacher)
-        student_inputs = self._cast_inputs_to_model_dtype(inputs, self.student)
-        student_kwargs = self._cast_inputs_to_model_dtype(kwargs, self.student)
-
         # Teacher forward (no gradients)
         with torch.no_grad():
-            if isinstance(teacher_inputs, dict):
-                teacher_outputs = self.teacher(**teacher_inputs, **teacher_kwargs)
-            else:
-                teacher_outputs = self.teacher(teacher_inputs, **teacher_kwargs)
+            teacher_outputs = self._safe_forward(
+                self.teacher, inputs, kwargs
+            )
 
         # Student forward (with gradients)
-        if isinstance(student_inputs, dict):
-            student_outputs = self.student(**student_inputs, **student_kwargs)
-        else:
-            student_outputs = self.student(student_inputs, **student_kwargs)
+        student_outputs = self._safe_forward(
+            self.student, inputs, kwargs
+        )
 
         if return_features:
             teacher_features = self._collect_features(self.teacher_hooks)
@@ -477,6 +475,30 @@ class BaseDistiller(nn.Module):
             return student_outputs, teacher_outputs, teacher_features, student_features
 
         return student_outputs, teacher_outputs
+
+    def _safe_forward(
+        self, model: nn.Module, inputs: Any, kwargs: dict
+    ) -> Any:
+        """Forward pass with automatic dtype retry on mismatch.
+
+        Most models (especially HuggingFace transformers) handle float32
+        inputs even when loaded in float16 — their embedding layers
+        convert internally.  We only cast inputs when the forward pass
+        actually fails with a ``RuntimeError`` dtype mismatch.
+        """
+        try:
+            if isinstance(inputs, dict):
+                return model(**inputs, **kwargs)
+            return model(inputs, **kwargs)
+        except RuntimeError as e:
+            if "dtype" not in str(e).lower():
+                raise
+            # Retry with inputs cast to the model's parameter dtype
+            cast_inputs = self._cast_inputs_to_model_dtype(inputs, model)
+            cast_kwargs = self._cast_inputs_to_model_dtype(kwargs, model)
+            if isinstance(cast_inputs, dict):
+                return model(**cast_inputs, **cast_kwargs)
+            return model(cast_inputs, **cast_kwargs)
 
     # ============================================================================
     # LOSS COMPUTATION (TO BE IMPLEMENTED BY SUBCLASSES)
