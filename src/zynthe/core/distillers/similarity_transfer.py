@@ -395,19 +395,26 @@ class SimilarityTransfer(BaseDistiller):
         return sas.item()
 
     def forward(  # type: ignore[override]
-        self, x: torch.Tensor, labels: Optional[torch.Tensor] = None, return_dict: bool = True
-    ) -> Dict[str, Any]:
+        self,
+        x: Any,
+        labels: Optional[torch.Tensor] = None,
+        return_dict: bool = True,
+        return_features: bool = False,
+        **kwargs,
+    ) -> Any:
         """
         Forward pass with similarity transfer.
 
-        Note: This method has a different signature than BaseDistiller.forward()
-        because it uses registered hooks for feature extraction and returns
-        a comprehensive metrics dictionary instead of tuple outputs.
+        Note: When ``return_features=True`` this method returns the same
+        tuple signature as :meth:`BaseDistiller.forward` to remain compatible
+        with the training loop.
 
         Args:
             x: Input tensor
             labels: Ground truth labels (optional)
             return_dict: Whether to return dictionary (default: True)
+            return_features: When True, return (student_outputs, teacher_outputs,
+                teacher_features, student_features)
 
         Returns:
             Dictionary with:
@@ -417,14 +424,23 @@ class SimilarityTransfer(BaseDistiller):
                 - sas_score: Structural Alignment Score
                 - logits: Student predictions
         """
+        if return_features:
+            # Ensure hook caches are clean before the base forward pass
+            self.teacher_features.clear()
+            self.student_features.clear()
+            student_out, teacher_out, _, _ = super().forward(
+                x, return_features=True, **kwargs
+            )
+            return student_out, teacher_out, self.teacher_features, self.student_features
+
         # Clear feature caches
         self.teacher_features.clear()
         self.student_features.clear()
 
         # Forward passes
         with torch.no_grad():
-            teacher_output = self.teacher(x)
-        student_output = self.student(x)
+            teacher_output = self._safe_forward(self.teacher, x, kwargs)
+        student_output = self._safe_forward(self.student, x, kwargs)
 
         # Extract logits based on output type
         teacher_hidden_states = self._extract_hidden_states(teacher_output)
