@@ -39,7 +39,6 @@ from zynthe.core.utils.device_utils import (
 logger = logging.getLogger(__name__)
 
 
-
 class BaseDistiller(nn.Module):
     """
     Base class for all knowledge distillation methods.
