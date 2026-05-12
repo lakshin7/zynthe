@@ -14,7 +14,7 @@ from importlib import import_module
 from typing import Any
 import logging as _logging
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 # ---------------------------------------------------------------------------
 # Default logging — ensure zynthe loggers are visible in notebooks (Kaggle,
