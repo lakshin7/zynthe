@@ -533,7 +533,7 @@ class MultiStageDistiller:
                 }
             )
 
-        logger.info(f"  → Generated {len(stages)} stages")
+        logger.info(f"  -> Generated {len(stages)} stages")
         for i, stage in enumerate(stages, 1):
             logger.info(f"     {i}. {stage['name']} ({stage['type']})")
         return stages
@@ -1084,7 +1084,7 @@ class MultiStageDistiller:
                 logger.error("Error in batch %d: %s", batch_idx, e)
                 if consecutive_errors >= 5:
                     logger.error(
-                        "ABORTING: %d consecutive batch errors — this is not a transient "
+                        "ABORTING: %d consecutive batch errors -- this is not a transient "
                         "issue. Last error: %s", consecutive_errors, e,
                     )
                     raise RuntimeError(
@@ -1181,12 +1181,12 @@ class MultiStageDistiller:
         logger.info(
             "  [EVAL] Student=%.2f%% | Teacher=%.2f%% | total_samples=%d | eval_errors=%d",
             student_acc, teacher_acc, total, eval_errors,
-        )
-
-        return {
-            "val_loss": total_loss / max(len(self.val_loader), 1),
-            "val_accuracy": student_acc,
-            "teacher_accuracy": teacher_acc,
+                            logger.info(
+                                "Loss weights: alpha=%.2f, beta=%.2f, gamma=%.2f",
+                                loss_weights.get("alpha", 0),
+                                loss_weights.get("beta", 0),
+                                loss_weights.get("gamma", 0),
+                            )
             "student_latency_ms": latency_ms,
         }
 
@@ -1466,7 +1466,7 @@ class MultiStageDistiller:
             logger.info(f"  {stage_info['name']}: {sign}{gain:.2f}% accuracy gain")
         if report.get("final_metrics"):
             final = report["final_metrics"]
-            logger.info("\n\ud83c\udfaf Final Results:")
+            logger.info("\nFinal Results:")
             logger.info(f"  Final Accuracy: {final['final_accuracy']:.2f}%")
             logger.info(f"  Total Gain: {final['total_accuracy_gain']:.2f}%")
 

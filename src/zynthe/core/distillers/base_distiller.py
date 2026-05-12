@@ -641,7 +641,7 @@ class BaseDistiller(nn.Module):
             import logging as _lg
             _lg.getLogger(__name__).warning(
                 "total_loss does NOT require grad (grad_fn=%s). "
-                "Backward will be a no-op — student weights won't update!",
+                "Backward will be a no-op -- student weights won't update!",
                 total_loss.grad_fn,
             )
 
