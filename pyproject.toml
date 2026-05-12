@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zynthe"
-version = "0.2.5"
+version = "0.2.6"
 description = "Universal knowledge distillation toolkit for text, code, vision, and multimodal models"
 readme = "README.md"
 license = "MIT"
@@ -64,6 +64,7 @@ eval = [
 onnx = [
     "onnx>=1.15.0",
     "onnxruntime>=1.16.0",
+    "optimum[onnxruntime]>=1.13.0",
 ]
 all = [
     "zynthe[vision,eval,onnx]",

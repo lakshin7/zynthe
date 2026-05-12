@@ -1,0 +1,48 @@
+site_name: Zynthé
+site_description: Universal knowledge distillation toolkit for text, code, vision, and multimodal models
+repo_url: https://github.com/lakshin7/zynthe
+repo_name: lakshin7/zynthe
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Usage Guide: usage_guide.md
+  - Examples:
+    - Kaggle SST-2 Tutorial: examples/kaggle_sst2.md
+  - Architecture & Adapters: adapters.md
+  - API Reference: api_reference.md

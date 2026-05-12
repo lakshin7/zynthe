@@ -1,0 +1,48 @@
+name: Bug Report
+description: Create a report to help us improve Zynthe
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please fill out the sections below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what went wrong...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this bug? Please include code snippets or scripts if possible.
+      placeholder: |
+        1. Install 'zynthe'
+        2. Run '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Zynthe Version
+      description: What version of Zynthe are you using? (e.g. 0.2.5)
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, PyTorch version, Hardware (e.g. Ubuntu 22.04, Python 3.10, PyTorch 2.1.0, T4 GPU)
+    validations:
+      required: true

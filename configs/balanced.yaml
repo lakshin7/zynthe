@@ -1,0 +1,94 @@
+# Balanced Knowledge Distillation
+# A solid baseline for extracting a good amount of accuracy while compressing.
+
+train:
+  epochs: 3
+  batch_size: 32
+  lr: 2e-4
+  grad_accum_steps: 1
+  mixed_precision: true
+  early_stop_patience: 3
+  optimizer: adamw
+  weight_decay: 0.01
+  max_grad_norm: 5.0
+  dynamic_lr: true
+  scheduler: cosine
+
+model:
+  type: "sequence_classification"
+
+distillation:
+  method: "balanced"
+  multi_stage: true
+  stages:
+    - name: "Stage 1 - Logit Alignment"
+      type: "kd"
+      epochs: 3
+      config:
+        grad_clip:
+          type: "agc"
+          clip_factor: 0.01
+          eps: 1e-3
+          exclude_bias_and_norm: true
+        auto_lr:
+          enabled: true
+          metric: "combined"
+          primary: "val_loss"
+          secondary: "train_loss"
+          primary_weight: 0.7
+          reduce_patience: 1
+          reduce_factor: 0.5
+          increase_patience: 1
+          increase_factor: 1.1
+          plateau_threshold: 1e-4
+          increase_threshold: 5e-4
+          min_lr: 1e-6
+          max_lr: 2e-3
+          cooldown: 1
+
+    - name: "Stage 2 - Similarity Transfer"
+      type: "similarity"
+      epochs: 2
+      depends_on: [1]
+      config:
+        grad_clip:
+          type: "agc"
+          clip_factor: 0.01
+          eps: 1e-3
+          exclude_bias_and_norm: true
+        auto_lr:
+          enabled: true
+          metric: "combined"
+          primary: "val_loss"
+          secondary: "train_loss"
+          primary_weight: 0.7
+          reduce_patience: 1
+          reduce_factor: 0.5
+          increase_patience: 1
+          increase_factor: 1.1
+          plateau_threshold: 1e-4
+          increase_threshold: 5e-4
+          min_lr: 1e-6
+          max_lr: 5e-4
+          cooldown: 1
+        similarity_transfer:
+          similarity_metric: "cosine"
+          weight: 0.2
+          kd_weight: 0.1
+          progressive: false
+          auto_layers: "last"
+          auto_layer_count: 1
+          normalize: true
+          weight_schedule:
+            type: "linear"
+            start: 0.05
+            end: 0.2
+
+quality_gate:
+  stop_on_regression: true
+  max_accuracy_drop: 0.5
+  min_stage_accuracy: 50.0
+
+device:
+  prefer_cuda: true
+  prefer_mps: true

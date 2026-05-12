@@ -177,7 +177,50 @@ plan = toolkit.build_plan(
                         },
                     },
                 }
-                
+                {
+                    "name": "Stage 2 - Similarity Transfer",
+                    "type": "similarity",
+                    "epochs": 2,
+                    "depends_on": [1],
+                    "config": {
+                        "grad_clip": {
+                            "type": "agc",
+                            "clip_factor": 0.01,
+                            "eps": 1e-3,
+                            "exclude_bias_and_norm": True,
+                        },
+                        "auto_lr": {
+                            "enabled": True,
+                            "metric": "combined",
+                            "primary": "val_loss",
+                            "secondary": "train_loss",
+                            "primary_weight": 0.7,
+                            "reduce_patience": 1,
+                            "reduce_factor": 0.5,
+                            "increase_patience": 1,
+                            "increase_factor": 1.1,
+                            "plateau_threshold": 1e-4,
+                            "increase_threshold": 5e-4,
+                            "min_lr": 1e-6,
+                            "max_lr": 5e-4,
+                            "cooldown": 1,
+                        },
+                        "similarity_transfer": {
+                            "similarity_metric": "cosine",
+                            "weight": 0.2,
+                            "kd_weight": 0.1,
+                            "progressive": False,
+                            "auto_layers": "last",
+                            "auto_layer_count": 1,
+                            "normalize": True,
+                            "weight_schedule": {
+                                "type": "linear",
+                                "start": 0.05,
+                                "end": 0.2,
+                            },
+                        },
+                    },
+                }
             ]
         }
     },
