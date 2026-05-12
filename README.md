@@ -11,6 +11,7 @@ A Python library for compressing large language models into smaller, deployable 
 [![CI](https://github.com/lakshin7/zynthe/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshin7/zynthe/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/lakshin7/zynthe/branch/main/graph/badge.svg)](https://codecov.io/gh/lakshin7/zynthe)
 [![Docs](https://github.com/lakshin7/zynthe/actions/workflows/docs.yml/badge.svg)](https://lakshin7.github.io/zynthe/)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/sponsors/lakshin7)
 
 Large transformer models (BERT-110M, GPT-2-124M, ViT-86M) deliver state-of-the-art accuracy but are often too expensive for edge deployment, mobile inference, and cost-sensitive production. **Zynthé** solves this by training a smaller "student" model to replicate the behavior of a larger "teacher" model using a unified, multi-stage distillation pipeline.
 
