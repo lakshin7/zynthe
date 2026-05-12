@@ -1181,12 +1181,12 @@ class MultiStageDistiller:
         logger.info(
             "  [EVAL] Student=%.2f%% | Teacher=%.2f%% | total_samples=%d | eval_errors=%d",
             student_acc, teacher_acc, total, eval_errors,
-                            logger.info(
-                                "Loss weights: alpha=%.2f, beta=%.2f, gamma=%.2f",
-                                loss_weights.get("alpha", 0),
-                                loss_weights.get("beta", 0),
-                                loss_weights.get("gamma", 0),
-                            )
+        )
+
+        return {
+            "val_loss": total_loss / max(len(self.val_loader), 1),
+            "val_accuracy": student_acc,
+            "teacher_accuracy": teacher_acc,
             "student_latency_ms": latency_ms,
         }
 
