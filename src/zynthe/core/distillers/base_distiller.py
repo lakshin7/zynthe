@@ -30,13 +30,14 @@ import torch.nn as nn
 from torch.optim import Optimizer, AdamW, SGD
 from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR, ReduceLROnPlateau
 
-logger = logging.getLogger(__name__)
-
 from zynthe.core.utils.device_utils import (
     auto_detect_device as _shared_auto_detect_device,
     move_to_device as _shared_move_to_device,
     normalize_model_output,
 )
+
+logger = logging.getLogger(__name__)
+
 
 
 class BaseDistiller(nn.Module):
