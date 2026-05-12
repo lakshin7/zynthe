@@ -227,8 +227,19 @@ class AdaptiveLossScheduler:
 
         elif self.schedule_type == "adaptive":
             # Performance-based adjustment
-            if "student_acc" in metrics and "teacher_acc" in metrics:
-                gap = metrics["teacher_acc"] - metrics["student_acc"]
+            student_acc = metrics.get("student_acc")
+            if student_acc is None:
+                student_acc = metrics.get("val_accuracy", metrics.get("student_accuracy"))
+            teacher_acc = metrics.get("teacher_acc")
+            if teacher_acc is None:
+                teacher_acc = metrics.get("teacher_accuracy")
+            if student_acc is not None and teacher_acc is not None:
+                student_acc = float(student_acc)
+                teacher_acc = float(teacher_acc)
+                if student_acc > 1.0 or teacher_acc > 1.0:
+                    gap = (teacher_acc - student_acc) / 100.0
+                else:
+                    gap = teacher_acc - student_acc
                 if gap > 0.1:
                     self.weights["alpha"] *= 1.1  # Increase KD weight
                 else:
@@ -655,9 +666,9 @@ class MultiStageDistiller:
         """Compute an adaptive learning rate based on model size and stage.
 
         Base LR is chosen from the student's trainable parameter count
-        using empirically proven scaling (smaller models tolerate higher
-        LR).  Each subsequent stage decays by ``stage_decay`` since later
-        stages fine-tune an already partially-trained student.
+        using conservative scaling tuned for **transformer** architectures
+        (BERT, GPT, ViT).  Each subsequent stage decays by ``stage_decay``
+        since later stages fine-tune an already partially-trained student.
 
         Returns:
             Computed learning rate (float).
@@ -666,17 +677,19 @@ class MultiStageDistiller:
             p.numel() for p in self.student.parameters() if p.requires_grad
         )
 
-        # Base LR from model size (matches DistilBERT/TinyBERT/MiniLM ranges)
+        # Base LR from model size — tuned for transformers (BERT/GPT/ViT)
+        # These are ~5x lower than CNN-oriented tables because attention
+        # mechanisms are much more sensitive to step size.
         if trainable_params < 5_000_000:       # < 5M  (tiny)
-            base_lr = 2e-3
-        elif trainable_params < 30_000_000:    # < 30M (small, e.g. DistilBERT)
-            base_lr = 1e-3
-        elif trainable_params < 100_000_000:   # < 100M (medium, e.g. BERT-base)
             base_lr = 5e-4
-        elif trainable_params < 500_000_000:   # < 500M (large, e.g. BERT-large)
+        elif trainable_params < 30_000_000:    # < 30M (small, e.g. DistilBERT)
             base_lr = 2e-4
-        else:                                  # 500M+ (XL / LLM)
+        elif trainable_params < 100_000_000:   # < 100M (medium, e.g. BERT-base)
+            base_lr = 1e-4
+        elif trainable_params < 500_000_000:   # < 500M (large, e.g. BERT-large)
             base_lr = 5e-5
+        else:                                  # 500M+ (XL / LLM)
+            base_lr = 2e-5
 
         # Stage decay: later stages refine with smaller steps
         stage_decay = 0.7
@@ -687,6 +700,178 @@ class MultiStageDistiller:
             lr, base_lr, trainable_params / 1e6, stage_decay, stage_idx - 1,
         )
         return lr
+
+    @staticmethod
+    def _get_optimizer_lr(optimizer: torch.optim.Optimizer) -> float:
+        if not optimizer.param_groups:
+            return 0.0
+        return max(float(group.get("lr", 0.0)) for group in optimizer.param_groups)
+
+    @staticmethod
+    def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+        for group in optimizer.param_groups:
+            group["lr"] = lr
+
+    @staticmethod
+    def _is_accuracy_metric(name: str) -> bool:
+        lowered = str(name).lower()
+        return "acc" in lowered or "accuracy" in lowered
+
+    def _init_auto_lr(self, auto_lr_cfg: Dict[str, Any], initial_lr: float) -> Optional[Dict[str, Any]]:
+        if not auto_lr_cfg:
+            return None
+        if not bool(auto_lr_cfg.get("enabled", True)):
+            return None
+
+        metric = str(auto_lr_cfg.get("metric", "val_loss")).lower()
+        if metric in {"combined", "both", "val+train", "train+val", "auto"}:
+            metric = "combined"
+
+        primary = str(auto_lr_cfg.get("primary", "val_loss"))
+        secondary = str(auto_lr_cfg.get("secondary", "train_loss"))
+        primary_weight = float(auto_lr_cfg.get("primary_weight", 0.7))
+        primary_weight = max(0.0, min(1.0, primary_weight))
+        secondary_weight = float(auto_lr_cfg.get("secondary_weight", 1.0 - primary_weight))
+
+        minimize = auto_lr_cfg.get("minimize")
+        if minimize is None:
+            minimize = not self._is_accuracy_metric(primary)
+
+        reduce_patience = int(auto_lr_cfg.get("reduce_patience", auto_lr_cfg.get("plateau_patience", 1)))
+        increase_patience = int(auto_lr_cfg.get("increase_patience", 1))
+
+        return {
+            "metric": metric,
+            "primary": primary,
+            "secondary": secondary,
+            "primary_weight": primary_weight,
+            "secondary_weight": secondary_weight,
+            "minimize": bool(minimize),
+            "reduce_factor": float(auto_lr_cfg.get("reduce_factor", 0.5)),
+            "increase_factor": float(auto_lr_cfg.get("increase_factor", 1.1)),
+            "reduce_patience": max(1, reduce_patience),
+            "increase_patience": max(1, increase_patience),
+            "plateau_threshold": float(auto_lr_cfg.get("plateau_threshold", 1e-4)),
+            "increase_threshold": float(
+                auto_lr_cfg.get("increase_threshold", auto_lr_cfg.get("plateau_threshold", 1e-4))
+            ),
+            "cooldown": int(auto_lr_cfg.get("cooldown", 0)),
+            "cooldown_counter": 0,
+            "best_metric": None,
+            "no_improve": 0,
+            "slow_progress": 0,
+            "min_lr": float(auto_lr_cfg.get("min_lr", 1e-6)),
+            "max_lr": float(auto_lr_cfg.get("max_lr", initial_lr * 2.0)),
+        }
+
+    def _resolve_metric_value(
+        self, name: str, train_loss: Optional[float], val_metrics: Optional[Dict[str, float]]
+    ) -> Optional[float]:
+        key = str(name).lower()
+        if key in {"train_loss", "loss", "train"}:
+            return float(train_loss) if train_loss is not None else None
+        if not val_metrics:
+            return None
+        if key in {"val_acc", "val_accuracy", "accuracy"}:
+            value = val_metrics.get("val_accuracy")
+            if value is None:
+                value = val_metrics.get("accuracy")
+            return float(value) if value is not None else None
+        value = val_metrics.get(name)
+        if value is None:
+            value = val_metrics.get(key)
+        return float(value) if value is not None else None
+
+    def _compute_auto_lr_metric(
+        self,
+        state: Dict[str, Any],
+        train_loss: Optional[float],
+        val_metrics: Optional[Dict[str, float]],
+    ) -> Tuple[Optional[float], str]:
+        metric = state.get("metric")
+        if metric == "combined":
+            primary = state.get("primary", "val_loss")
+            secondary = state.get("secondary", "train_loss")
+            primary_value = self._resolve_metric_value(primary, train_loss, val_metrics)
+            secondary_value = self._resolve_metric_value(secondary, train_loss, val_metrics)
+            if primary_value is None and secondary_value is None:
+                return None, ""
+            if primary_value is None:
+                return secondary_value, secondary
+            if secondary_value is None:
+                return primary_value, primary
+            value = (
+                state.get("primary_weight", 0.7) * primary_value
+                + state.get("secondary_weight", 0.3) * secondary_value
+            )
+            return value, f"{primary}+{secondary}"
+
+        value = self._resolve_metric_value(metric, train_loss, val_metrics)
+        return value, str(metric)
+
+    def _auto_lr_step(
+        self,
+        distiller: BaseDistiller,
+        state: Dict[str, Any],
+        train_loss: Optional[float],
+        val_metrics: Optional[Dict[str, float]],
+    ) -> None:
+        if distiller.optimizer is None:
+            return
+
+        metric_value, metric_name = self._compute_auto_lr_metric(state, train_loss, val_metrics)
+        if metric_value is None:
+            return
+
+        best_metric = state.get("best_metric")
+        if best_metric is None:
+            state["best_metric"] = metric_value
+            return
+
+        if state.get("cooldown_counter", 0) > 0:
+            state["cooldown_counter"] -= 1
+
+        minimize = bool(state.get("minimize", True))
+        improvement = (best_metric - metric_value) if minimize else (metric_value - best_metric)
+        plateau_threshold = float(state.get("plateau_threshold", 1e-4))
+        increase_threshold = float(state.get("increase_threshold", plateau_threshold))
+
+        if improvement > plateau_threshold:
+            state["best_metric"] = metric_value
+            state["no_improve"] = 0
+            state["slow_progress"] = 0
+            return
+
+        state["no_improve"] += 1
+        if abs(improvement) <= increase_threshold:
+            state["slow_progress"] += 1
+
+        if state.get("cooldown_counter", 0) > 0:
+            return
+
+        lr_before = self._get_optimizer_lr(distiller.optimizer)
+        new_lr = None
+        action = None
+
+        if state["no_improve"] >= state.get("reduce_patience", 1):
+            new_lr = max(state.get("min_lr", 1e-6), lr_before * state.get("reduce_factor", 0.5))
+            state["no_improve"] = 0
+            state["slow_progress"] = 0
+            action = "reduce"
+        elif state["slow_progress"] >= state.get("increase_patience", 1):
+            new_lr = min(state.get("max_lr", lr_before), lr_before * state.get("increase_factor", 1.1))
+            state["slow_progress"] = 0
+            action = "increase"
+
+        if new_lr is None or new_lr == lr_before:
+            return
+
+        self._set_optimizer_lr(distiller.optimizer, new_lr)
+        state["cooldown_counter"] = int(state.get("cooldown", 0))
+        logger.info(
+            "  [AUTOLR] %s lr %.2e -> %.2e | metric=%s=%.6f",
+            action, lr_before, new_lr, metric_name, metric_value,
+        )
 
     def _run_stage(self, stage_idx: int, stage_cfg: Dict) -> Dict[str, float]:
         """
@@ -749,6 +934,14 @@ class MultiStageDistiller:
         scheduler_type = distiller_config.get(
             "scheduler_type", distiller_config.get("scheduler", "cosine")
         )
+        auto_lr_cfg = distiller_config.get("auto_lr", {})
+        auto_lr_state = self._init_auto_lr(auto_lr_cfg, learning_rate)
+        if auto_lr_state is not None and str(scheduler_type).lower() != "none":
+            logger.info(
+                "AutoLR enabled: disabling scheduler_type=%s to avoid conflicts",
+                scheduler_type,
+            )
+            scheduler_type = "none"
         distiller.optimizer, distiller.scheduler = distiller._init_optimizers(
             lr=learning_rate,
             weight_decay=weight_decay,
@@ -767,13 +960,16 @@ class MultiStageDistiller:
 
         # Train stage
         epochs = stage_cfg.get("epochs", 3)
-        logger.info(f"Training for {epochs} epochs (lr={learning_rate:.1e}, optimizer={optimizer_type})...")
+        grad_clip = distiller_config.get("grad_clip", 5.0)
+        logger.info(
+            f"Training for {epochs} epochs (lr={learning_rate:.1e}, optimizer={optimizer_type}, grad_clip={grad_clip})..."
+        )
         stage_metrics = {"train_loss": 0.0, "val_loss": 0.0, "val_accuracy": 0.0}
 
         # Training loop
         if self.train_loader is not None:
             for epoch in range(epochs):
-                epoch_loss = self._train_epoch(distiller, epoch + 1, epochs)
+                epoch_loss = self._train_epoch(distiller, epoch + 1, epochs, grad_clip=grad_clip)
                 stage_metrics["train_loss"] = epoch_loss
 
                 # Evaluate
@@ -788,6 +984,24 @@ class MultiStageDistiller:
                         epoch_loss,
                         val_metrics.get("val_accuracy", 0),
                     )
+                    if distiller.scheduler is not None and not getattr(
+                        distiller, "scheduler_step_per_batch", True
+                    ):
+                        metric_key = distiller_config.get(
+                            "scheduler_metric", distiller_config.get("plateau_metric", "val_loss")
+                        )
+                        metric_value = val_metrics.get(metric_key)
+                        if metric_value is None:
+                            metric_value = val_metrics.get("val_loss")
+                        if metric_value is None:
+                            metric_value = val_metrics.get("val_accuracy")
+                        if metric_value is not None:
+                            distiller.step_scheduler(float(metric_value))
+
+                    if auto_lr_state is not None:
+                        self._auto_lr_step(distiller, auto_lr_state, epoch_loss, val_metrics)
+                elif auto_lr_state is not None:
+                    self._auto_lr_step(distiller, auto_lr_state, epoch_loss, None)
         else:
             warnings.warn("No train_loader provided, skipping training")
 
@@ -801,7 +1015,7 @@ class MultiStageDistiller:
 
         return stage_metrics
 
-    def _train_epoch(self, distiller: BaseDistiller, epoch: int, total_epochs: int) -> float:
+    def _train_epoch(self, distiller: BaseDistiller, epoch: int, total_epochs: int, *, grad_clip: float = 5.0) -> float:
         """
         Train single epoch.
 
@@ -831,7 +1045,7 @@ class MultiStageDistiller:
                 loss_dict = distiller.training_step(
                     batch=batch,
                     optimizer=None,  # Use distiller.optimizer
-                    grad_clip=1.0,  # Default gradient clipping
+                    grad_clip=grad_clip,
                 )
 
                 # Accumulate loss

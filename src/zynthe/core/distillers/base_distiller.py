@@ -25,7 +25,7 @@ from __future__ import annotations
 import copy
 import logging
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 import torch.optim as optim
 from torch.optim import Optimizer, AdamW, SGD
-from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR
+from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR, ReduceLROnPlateau
 
 from zynthe.core.utils.device_utils import (
     auto_detect_device as _shared_auto_detect_device,
@@ -126,7 +126,9 @@ class BaseDistiller(nn.Module):
 
         # Optimizer and scheduler (initialized externally or internally)
         self.optimizer: Optional[Optimizer] = None
-        self.scheduler: Optional[_LRScheduler] = None
+        self.scheduler: Optional[Union[_LRScheduler, ReduceLROnPlateau]] = None
+        self.scheduler_step_per_batch: bool = True
+        self.scheduler_requires_metric: bool = False
 
         # Metrics tracking
         self.metrics: Dict[str, List[float]] = {
@@ -388,7 +390,7 @@ class BaseDistiller(nn.Module):
             lr: Learning rate
             weight_decay: Weight decay (L2 regularization)
             optimizer_type: "adamw", "sgd", or "adam"
-            scheduler_type: "cosine", "step", or "none"
+            scheduler_type: "cosine", "step", "plateau", or "none"
             **kwargs: Additional optimizer/scheduler arguments
 
         Returns:
@@ -411,6 +413,12 @@ class BaseDistiller(nn.Module):
         total_steps = kwargs.pop("total_steps", 1000)
         step_size = kwargs.pop("step_size", 100)
         gamma = kwargs.pop("gamma", 0.1)
+        plateau_mode = kwargs.pop("plateau_mode", "min")
+        plateau_factor = kwargs.pop("plateau_factor", 0.5)
+        plateau_patience = kwargs.pop("plateau_patience", 1)
+        plateau_threshold = kwargs.pop("plateau_threshold", 1e-4)
+        plateau_cooldown = kwargs.pop("plateau_cooldown", 0)
+        plateau_min_lr = kwargs.pop("plateau_min_lr", 0.0)
 
         # Create optimizer (remaining kwargs go to optimizer)
         if optimizer_type.lower() == "adamw":
@@ -423,11 +431,26 @@ class BaseDistiller(nn.Module):
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
         # Create scheduler
-        scheduler: Optional[_LRScheduler] = None
-        if scheduler_type.lower() == "cosine":
+        scheduler: Optional[Union[_LRScheduler, ReduceLROnPlateau]] = None
+        scheduler_type_norm = str(scheduler_type or "none").lower()
+        self.scheduler_step_per_batch = True
+        self.scheduler_requires_metric = False
+        if scheduler_type_norm == "cosine":
             scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)  # type: ignore[assignment]
-        elif scheduler_type.lower() == "step":
+        elif scheduler_type_norm == "step":
             scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)  # type: ignore[assignment]
+        elif scheduler_type_norm in {"plateau", "reduceonplateau", "reduce_on_plateau"}:
+            scheduler = ReduceLROnPlateau(
+                optimizer,
+                mode=plateau_mode,
+                factor=plateau_factor,
+                patience=plateau_patience,
+                threshold=plateau_threshold,
+                cooldown=plateau_cooldown,
+                min_lr=plateau_min_lr,
+            )
+            self.scheduler_step_per_batch = False
+            self.scheduler_requires_metric = True
 
         return optimizer, scheduler
 
@@ -561,7 +584,7 @@ class BaseDistiller(nn.Module):
         self,
         batch: Union[Tuple, Dict],
         optimizer: Optional[Optimizer] = None,
-        grad_clip: Optional[float] = None,
+        grad_clip: Optional[Union[float, Dict[str, Any], str]] = None,
         return_outputs: bool = False,
     ) -> Union[Dict[str, float], Tuple[Dict[str, float], Any]]:
         """
@@ -625,8 +648,35 @@ class BaseDistiller(nn.Module):
         total_loss.backward()
 
         # Gradient clipping
+        pre_clip_norm = None
+        agc_stats = None
         if grad_clip is not None:
-            torch.nn.utils.clip_grad_norm_(self.student.parameters(), grad_clip)
+            if isinstance(grad_clip, dict):
+                clip_mode = str(grad_clip.get("type") or grad_clip.get("mode") or "norm").lower()
+                if clip_mode == "agc":
+                    agc_stats = self._apply_agc(
+                        self.student.parameters(),
+                        clip_factor=float(grad_clip.get("clip_factor", grad_clip.get("factor", 0.01))),
+                        eps=float(grad_clip.get("eps", 1e-3)),
+                        norm_type=int(grad_clip.get("norm_type", 2)),
+                        exclude_bias_and_norm=bool(
+                            grad_clip.get("exclude_bias_and_norm", True)
+                        ),
+                    )
+                else:
+                    max_norm = grad_clip.get(
+                        "max_norm", grad_clip.get("value", grad_clip.get("norm", None))
+                    )
+                    if max_norm is not None:
+                        pre_clip_norm = torch.nn.utils.clip_grad_norm_(
+                            self.student.parameters(), float(max_norm)
+                        )
+            elif isinstance(grad_clip, str) and grad_clip.lower() == "agc":
+                agc_stats = self._apply_agc(self.student.parameters())
+            else:
+                pre_clip_norm = torch.nn.utils.clip_grad_norm_(
+                    self.student.parameters(), float(grad_clip)
+                )
 
         # Diagnostic: log gradient norms periodically
         if self.global_step % 200 == 0:
@@ -640,17 +690,30 @@ class BaseDistiller(nn.Module):
             total_norm = sum(g ** 2 for g in grad_norms) ** 0.5 if grad_norms else 0.0
             params_with_grad = len(grad_norms)
             total_params = sum(1 for p in self.student.parameters() if p.requires_grad)
-            _diag_logger.info(
-                "  [GRAD] step=%d | grad_norm=%.6f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
-                self.global_step, total_norm, params_with_grad, total_params,
-                total_loss.item(), total_loss.requires_grad,
-            )
+            if agc_stats is not None:
+                _diag_logger.info(
+                    "  [GRAD] step=%d | grad_norm=%.6f | agc_clipped=%d/%d | agc_max_ratio=%.3f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
+                    self.global_step, total_norm, agc_stats["clipped"], agc_stats["total"],
+                    agc_stats["max_ratio"], params_with_grad, total_params,
+                    total_loss.item(), total_loss.requires_grad,
+                )
+            elif pre_clip_norm is not None:
+                _diag_logger.info(
+                    "  [GRAD] step=%d | grad_norm=%.6f | pre_clip=%.6f | clip=%.3f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
+                    self.global_step, total_norm, float(pre_clip_norm), float(grad_clip),
+                    params_with_grad, total_params, total_loss.item(), total_loss.requires_grad,
+                )
+            else:
+                _diag_logger.info(
+                    "  [GRAD] step=%d | grad_norm=%.6f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
+                    self.global_step, total_norm, params_with_grad, total_params,
+                    total_loss.item(), total_loss.requires_grad,
+                )
 
         opt.step()
 
         # Update scheduler if available
-        if self.scheduler is not None:
-            self.scheduler.step()
+        self.step_scheduler()
 
         # Update global step
         self.global_step += 1
@@ -710,6 +773,59 @@ class BaseDistiller(nn.Module):
         if return_outputs:
             return loss_dict, student_outputs
         return loss_dict
+
+    def _apply_agc(
+        self,
+        params: Iterable[nn.Parameter],
+        *,
+        clip_factor: float = 0.01,
+        eps: float = 1e-3,
+        norm_type: int = 2,
+        exclude_bias_and_norm: bool = True,
+    ) -> Dict[str, float]:
+        """Apply adaptive gradient clipping (AGC) to parameters in-place."""
+        clipped = 0
+        total = 0
+        max_ratio = 0.0
+
+        for param in params:
+            if param.grad is None:
+                continue
+            if exclude_bias_and_norm and param.ndim <= 1:
+                continue
+
+            grad = param.grad
+            param_norm = torch.norm(param.detach(), norm_type)
+            grad_norm = torch.norm(grad.detach(), norm_type)
+
+            if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                continue
+
+            max_norm = (param_norm + eps) * clip_factor
+            if grad_norm > max_norm:
+                scale = max_norm / (grad_norm + 1e-6)
+                grad.mul_(scale)
+                clipped += 1
+                ratio = float(grad_norm / (max_norm + 1e-12))
+                if ratio > max_ratio:
+                    max_ratio = ratio
+            total += 1
+
+        return {"clipped": clipped, "total": total, "max_ratio": max_ratio}
+
+    def step_scheduler(self, metric: Optional[float] = None) -> None:
+        """Step the scheduler, honoring per-batch vs per-epoch modes."""
+        if self.scheduler is None:
+            return
+        if getattr(self, "scheduler_step_per_batch", True):
+            self.scheduler.step()
+            return
+        if metric is None:
+            return
+        try:
+            self.scheduler.step(metric)
+        except TypeError:
+            self.scheduler.step()
 
     # ============================================================================
     # HOOKS (OPTIONAL CUSTOMIZATION POINTS)
