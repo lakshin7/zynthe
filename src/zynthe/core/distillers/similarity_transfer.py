@@ -117,6 +117,7 @@ class SimilarityTransfer(BaseDistiller):
 
         # Metrics tracking
         self.structural_alignment_scores: List[float] = []
+        self.adapters = nn.ModuleDict()
 
         if (not self.layers) and self.auto_layer_strategy:
             self.layers = self._infer_auto_layers(self.auto_layer_strategy, self.auto_layer_count)
@@ -213,6 +214,86 @@ class SimilarityTransfer(BaseDistiller):
             if torch.isinf(logits).any() or torch.isnan(logits).any():
                 logits = torch.nan_to_num(logits, nan=0.0, posinf=1e4, neginf=-1e4)
         return logits
+
+    def _ensure_adapter(
+        self,
+        key: str,
+        student_dim: int,
+        teacher_dim: int,
+        *,
+        adapter_type: str,
+    ) -> nn.Module:
+        if key in self.adapters:
+            return self.adapters[key]
+
+        if adapter_type == "conv2d":
+            adapter: nn.Module = nn.Conv2d(student_dim, teacher_dim, kernel_size=1, bias=False)
+        else:
+            adapter = nn.Linear(student_dim, teacher_dim, bias=False)
+
+        student_dtype = self._get_model_dtype(self.student)
+        adapter = adapter.to(device=self.device, dtype=student_dtype)
+        self.adapters[key] = adapter
+        return adapter
+
+    def _align_features(
+        self, teacher_feats: torch.Tensor, student_feats: torch.Tensor, layer_name: str
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Align teacher/student feature shapes (seq length, spatial, channel)."""
+        if teacher_feats.shape == student_feats.shape:
+            return teacher_feats, student_feats
+
+        # CNN-style features
+        if teacher_feats.dim() == 4 and student_feats.dim() == 4:
+            if teacher_feats.shape[2:] != student_feats.shape[2:]:
+                student_feats = F.interpolate(
+                    student_feats, size=teacher_feats.shape[2:], mode="bilinear", align_corners=False
+                )
+            if teacher_feats.shape[1] != student_feats.shape[1]:
+                key = f"{layer_name}_conv2d_{student_feats.shape[1]}_{teacher_feats.shape[1]}"
+                adapter = self._ensure_adapter(
+                    key,
+                    student_feats.shape[1],
+                    teacher_feats.shape[1],
+                    adapter_type="conv2d",
+                )
+                student_feats = adapter(student_feats)
+            return teacher_feats, student_feats
+
+        # Transformer-style features
+        if teacher_feats.dim() == 3 and student_feats.dim() == 3:
+            if teacher_feats.shape[1] != student_feats.shape[1]:
+                student_feats = F.interpolate(
+                    student_feats.transpose(1, 2),
+                    size=teacher_feats.shape[1],
+                    mode="linear",
+                    align_corners=False,
+                ).transpose(1, 2)
+            if teacher_feats.shape[2] != student_feats.shape[2]:
+                key = f"{layer_name}_linear_{student_feats.shape[2]}_{teacher_feats.shape[2]}"
+                adapter = self._ensure_adapter(
+                    key,
+                    student_feats.shape[2],
+                    teacher_feats.shape[2],
+                    adapter_type="linear",
+                )
+                student_feats = adapter(student_feats)
+            return teacher_feats, student_feats
+
+        # Vector features
+        if teacher_feats.dim() == 2 and student_feats.dim() == 2:
+            if teacher_feats.shape[1] != student_feats.shape[1]:
+                key = f"{layer_name}_linear_{student_feats.shape[1]}_{teacher_feats.shape[1]}"
+                adapter = self._ensure_adapter(
+                    key,
+                    student_feats.shape[1],
+                    teacher_feats.shape[1],
+                    adapter_type="linear",
+                )
+                student_feats = adapter(student_feats)
+            return teacher_feats, student_feats
+
+        return teacher_feats, student_feats
 
     def _get_feature(
         self,
@@ -463,7 +544,7 @@ class SimilarityTransfer(BaseDistiller):
             s_feats = self._get_feature(layer_name, self.student_features, student_hidden_states)
 
             if t_feats is not None and s_feats is not None:
-                # Ensure matching dimensions
+                t_feats, s_feats = self._align_features(t_feats, s_feats, layer_name)
                 if t_feats.shape != s_feats.shape:
                     warnings.warn(f"Feature shape mismatch at layer {layer_name}")
                     continue
@@ -573,7 +654,7 @@ class SimilarityTransfer(BaseDistiller):
             s_feats = self._get_feature(layer_name, self.student_features, student_hidden_states)
 
             if t_feats is not None and s_feats is not None:
-                # Ensure matching dimensions
+                t_feats, s_feats = self._align_features(t_feats, s_feats, layer_name)
                 if t_feats.shape != s_feats.shape:
                     warnings.warn(f"Feature shape mismatch at layer {layer_name}")
                     continue

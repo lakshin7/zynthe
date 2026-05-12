@@ -406,8 +406,22 @@ class BaseDistiller(nn.Module):
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Invalid optimizer weight_decay value: {weight_decay!r}") from exc
 
-        # Get student parameters
-        params = [p for p in self.student.parameters() if p.requires_grad]
+        # Get all trainable parameters (student + distiller adapters/regressors)
+        params = [p for p in self.parameters() if p.requires_grad]
+        total_params = sum(p.numel() for p in params)
+        student_params = sum(
+            p.numel() for p in self.student.parameters() if p.requires_grad
+        )
+        extra_params = max(0, total_params - student_params)
+        if extra_params > 0:
+            logger.info(
+                "Optimizer params: total=%.2fM (student=%.2fM, extra=%.2fM)",
+                total_params / 1e6,
+                student_params / 1e6,
+                extra_params / 1e6,
+            )
+        else:
+            logger.info("Optimizer params: total=%.2fM (student only)", total_params / 1e6)
 
         # Extract scheduler-specific kwargs
         total_steps = kwargs.pop("total_steps", 1000)
