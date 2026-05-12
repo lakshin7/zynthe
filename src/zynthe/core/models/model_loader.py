@@ -13,22 +13,27 @@ import torch
 # user only needs the distillation API, not the model loader.
 import importlib as _importlib
 
+
 def _lazy_transformers_import(name: str):
     """Import a symbol from transformers on first use."""
     _mod = _importlib.import_module("transformers")
     return getattr(_mod, name)
 
+
 class _LazyTransformers:
     """Proxy that defers transformers imports until attribute access."""
     _cache: dict = {}
+
     def __getattr__(self, name: str):
         if name not in self._cache:
             self._cache[name] = _lazy_transformers_import(name)
         return self._cache[name]
 
+
 _tf = _LazyTransformers()
 
 if TYPE_CHECKING:
+    from transformers import PreTrainedModel
     from zynthe.core.config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -750,5 +755,3 @@ def load_models(
 def model_summary(model: PreTrainedModel) -> Dict[str, Any]:
     """Expose the enhanced summary helper for external callers."""
     return _summarize_model(model)
-
-

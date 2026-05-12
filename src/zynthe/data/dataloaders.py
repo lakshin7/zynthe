@@ -12,14 +12,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
-logger = logging.getLogger(__name__)
-
 from zynthe.core.preprocessing.advanced import run_advanced_pipeline
 from zynthe.core.preprocessing.built_ins import register_defaults
 from zynthe.core.preprocessing.registry import PreprocessRegistry, ensure_registered
 from .augmentations import TextAugmenter, build_text_augmenter
 from .preprocess import PreprocessConfig, apply_preprocess_pipeline, build_preprocess_config
 
+logger = logging.getLogger(__name__)
 LOG = logging.getLogger(__name__)
 DEFAULT_CACHE_SIZE = 2048
 

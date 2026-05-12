@@ -22,20 +22,15 @@ Reference: Zynthe Architecture Blueprint v2.0
 
 from __future__ import annotations
 
-import copy
 import logging
-import warnings
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-logger = logging.getLogger(__name__)
-
-import torch.optim as optim
 from torch.optim import Optimizer, AdamW, SGD
 from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR, ReduceLROnPlateau
+
+logger = logging.getLogger(__name__)
 
 from zynthe.core.utils.device_utils import (
     auto_detect_device as _shared_auto_detect_device,
