@@ -56,12 +56,8 @@ PRESET_LIBRARY: OrderedDictType[str, PresetConfig] = OrderedDict(
                             "kd_hinton": {
                                 "temperature": 4.0,
                                 "alpha": 0.85,
-                                "hint_enabled": True,
-                                "auto_hints": {
-                                    "strategy": "last",
-                                    "count": 2,
-                                    "regressor": "1x1conv",
-                                },
+                                "hint_enabled": False,
+                                "confidence_scaling": True,
                             }
                         },
                     },
@@ -171,7 +167,7 @@ PRESET_LIBRARY: OrderedDictType[str, PresetConfig] = OrderedDict(
                                 "auto_hints": {
                                     "strategy": "last",
                                     "count": 2,
-                                    "regressor": "1x1conv",
+                                    "regressor": "linear",
                                 },
                                 "confidence_scaling": True,
                             },
@@ -258,7 +254,7 @@ PRESET_LIBRARY: OrderedDictType[str, PresetConfig] = OrderedDict(
                                 "auto_hints": {
                                     "strategy": "last",
                                     "count": 1,
-                                    "regressor": "1x1conv",
+                                    "regressor": "linear",
                                 },
                             },
                         },

@@ -865,8 +865,21 @@ class MultiStageDistiller:
                     )
 
             except Exception as e:
-                warnings.warn(f"Error in batch {batch_idx}: {e}")
+                consecutive_errors = getattr(self, "_consecutive_errors", 0) + 1
+                self._consecutive_errors = consecutive_errors
+                logger.error("Error in batch %d: %s", batch_idx, e)
+                if consecutive_errors >= 5:
+                    logger.error(
+                        "ABORTING: %d consecutive batch errors — this is not a transient "
+                        "issue. Last error: %s", consecutive_errors, e,
+                    )
+                    raise RuntimeError(
+                        f"Training aborted after {consecutive_errors} consecutive batch errors. "
+                        f"Last error: {e}"
+                    ) from e
                 continue
+            else:
+                self._consecutive_errors = 0  # Reset on success
 
         return total_loss / max(num_batches, 1)
 
