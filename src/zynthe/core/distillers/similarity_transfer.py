@@ -31,6 +31,7 @@ Example:
 from __future__ import annotations
 
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -93,6 +94,7 @@ class SimilarityTransfer(BaseDistiller):
         self.layers = layers_cfg
         self.similarity_metric = base_cfg.get("similarity_metric", "cosine")
         self.weight = base_cfg.get("weight", 1.0)
+        self.weight_schedule = base_cfg.get("weight_schedule")
         self.temperature = base_cfg.get("temperature", 1.0)
         self.progressive = base_cfg.get("progressive", False)
         self.cross_modality = base_cfg.get("cross_modality", False)
@@ -136,6 +138,46 @@ class SimilarityTransfer(BaseDistiller):
         logger.info(f"   Progressive: {self.progressive}")
         logger.info(f"   Cross-modality: {self.cross_modality}")
         logger.info(f"   Graph mode: {self.graph_mode}")
+
+    def _get_scheduled_weight(self) -> float:
+        schedule = self.weight_schedule
+        if not schedule:
+            return float(self.weight)
+
+        if isinstance(schedule, str):
+            schedule = {"type": schedule}
+
+        sched_type = str(schedule.get("type", "linear")).lower()
+        start = float(schedule.get("start", schedule.get("from", self.weight)))
+        end = float(schedule.get("end", self.weight))
+
+        total_epochs = max(1, int(self.total_epochs or 1))
+        epoch = max(1, int(self.current_epoch or 1))
+        warmup_epochs = int(schedule.get("warmup_epochs", 0))
+
+        if warmup_epochs > 0 and epoch <= warmup_epochs:
+            return start * float(epoch) / float(max(warmup_epochs, 1))
+
+        if total_epochs <= 1:
+            progress = 1.0
+        else:
+            progress = min(1.0, max(0.0, float(epoch - 1) / float(total_epochs - 1)))
+
+        if sched_type == "cosine":
+            weight = start + (end - start) * (1.0 - math.cos(math.pi * progress)) / 2.0
+        elif sched_type == "step":
+            step_epoch = int(schedule.get("step_epoch", max(1, total_epochs // 2)))
+            weight = end if epoch >= step_epoch else start
+        else:
+            weight = start + (end - start) * progress
+
+        min_weight = schedule.get("min", schedule.get("min_weight"))
+        max_weight = schedule.get("max", schedule.get("max_weight"))
+        if min_weight is not None:
+            weight = max(weight, float(min_weight))
+        if max_weight is not None:
+            weight = min(weight, float(max_weight))
+        return float(weight)
 
     def _register_hooks(self):
         """Register forward hooks to extract intermediate features."""
@@ -590,9 +632,11 @@ class SimilarityTransfer(BaseDistiller):
             ) * (T * T)
 
         # Combined loss
-        total_loss = self.weight * sim_loss_avg + self.kd_weight * kd_loss
+        sim_weight = self._get_scheduled_weight()
+        total_loss = sim_weight * sim_loss_avg + self.kd_weight * kd_loss
         if labels is not None:
-            total_loss += (1.0 - self.weight - self.kd_weight) * ce_loss
+            ce_weight = max(0.0, 1.0 - sim_weight - self.kd_weight)
+            total_loss += ce_weight * ce_loss
 
         # Return dictionary
         return {
@@ -604,6 +648,7 @@ class SimilarityTransfer(BaseDistiller):
             "ce_loss": ce_loss.item() if isinstance(ce_loss, torch.Tensor) else ce_loss,
             "sas_score": avg_sas,
             "logits": student_logits,
+            "sim_weight": sim_weight,
             **loss_components,
         }
 
@@ -733,9 +778,11 @@ class SimilarityTransfer(BaseDistiller):
                 ) * (T * T)
 
         # Combined loss
-        total_loss = self.weight * sim_loss_avg + self.kd_weight * kd_loss
+        sim_weight = self._get_scheduled_weight()
+        total_loss = sim_weight * sim_loss_avg + self.kd_weight * kd_loss
         if targets is not None:
-            total_loss += (1.0 - self.weight - self.kd_weight) * ce_loss
+            ce_weight = max(0.0, 1.0 - sim_weight - self.kd_weight)
+            total_loss += ce_weight * ce_loss
 
         # Metrics
         metrics = {
@@ -745,6 +792,7 @@ class SimilarityTransfer(BaseDistiller):
             "kd_loss": kd_loss.item() if isinstance(kd_loss, torch.Tensor) else kd_loss,
             "ce_loss": ce_loss.item() if isinstance(ce_loss, torch.Tensor) else ce_loss,
             "sas_score": avg_sas,
+            "sim_weight": sim_weight,
             **loss_components,
         }
 

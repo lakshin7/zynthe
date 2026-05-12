@@ -75,6 +75,7 @@ class StageController:
         self.current_stage = 0
         self.stage_history: List[Dict[str, Any]] = []
         self.checkpoints: Dict[int, Path] = {}
+        self.best_checkpoints: Dict[int, Path] = {}
 
     def get_next_stage(self) -> Optional[Dict]:
         """Get next stage configuration."""
@@ -90,9 +91,14 @@ class StageController:
         model: nn.Module,
         optimizer: Optional[torch.optim.Optimizer],
         metrics: Dict[str, float],
+        *,
+        tag: str = "checkpoint",
     ) -> Path:
         """Save stage checkpoint."""
-        checkpoint_path = self.output_dir / f"stage_{stage_idx}_checkpoint.pt"
+        if tag and tag != "checkpoint":
+            checkpoint_path = self.output_dir / f"stage_{stage_idx}_{tag}.pt"
+        else:
+            checkpoint_path = self.output_dir / f"stage_{stage_idx}_checkpoint.pt"
 
         checkpoint = {
             "stage_idx": stage_idx,
@@ -105,20 +111,30 @@ class StageController:
             checkpoint["optimizer_state_dict"] = optimizer.state_dict()
 
         torch.save(checkpoint, checkpoint_path)
-        self.checkpoints[stage_idx] = checkpoint_path
+        if tag and tag != "checkpoint":
+            self.best_checkpoints[stage_idx] = checkpoint_path
+        else:
+            self.checkpoints[stage_idx] = checkpoint_path
         logger.info(f" Checkpoint saved: {checkpoint_path}")
         return checkpoint_path
 
-    def load_checkpoint(self, stage_idx: int, model: nn.Module) -> Dict:
+    def load_checkpoint(self, stage_idx: int, model: nn.Module, *, tag: str = "checkpoint") -> Dict:
         """Load checkpoint from previous stage."""
-        if stage_idx not in self.checkpoints:
-            raise ValueError(f"No checkpoint found for stage {stage_idx}")
-
-        checkpoint_path = self.checkpoints[stage_idx]
+        if tag and tag != "checkpoint":
+            checkpoint_path = self.best_checkpoints.get(stage_idx)
+            if checkpoint_path is None:
+                raise ValueError(f"No {tag} checkpoint found for stage {stage_idx}")
+        else:
+            if stage_idx not in self.checkpoints:
+                raise ValueError(f"No checkpoint found for stage {stage_idx}")
+            checkpoint_path = self.checkpoints[stage_idx]
         checkpoint = torch.load(checkpoint_path, weights_only=False)
 
         model.load_state_dict(checkpoint["model_state_dict"])
-        logger.info(f" Loaded checkpoint from stage {stage_idx}")
+        if tag and tag != "checkpoint":
+            logger.info(f" Loaded {tag} checkpoint from stage {stage_idx}")
+        else:
+            logger.info(f" Loaded checkpoint from stage {stage_idx}")
         return checkpoint
 
     def check_dependencies(self, stage: Dict) -> bool:
@@ -150,6 +166,7 @@ class StageController:
             "completed_stages": len(self.stage_history),
             "stage_history": self.stage_history,
             "checkpoints": {k: str(v) for k, v in self.checkpoints.items()},
+            "best_checkpoints": {k: str(v) for k, v in self.best_checkpoints.items()},
         }
 
 
@@ -564,15 +581,6 @@ class MultiStageDistiller:
             # Run stage
             stage_metrics = self._run_stage(stage_idx, stage_cfg)
 
-            # Save checkpoint
-            self.controller.save_checkpoint(
-                stage_idx, self.student, None, stage_metrics  # Can add optimizer if needed
-            )
-
-            # Log stage
-            self.controller.log_stage(stage_idx, stage_cfg["name"], stage_metrics)
-            self.stage_metrics.append(stage_metrics)
-
             quality_ok, reason = self._check_quality_gate(stage_idx, stage_cfg, stage_metrics)
             if not quality_ok:
                 warn_msg = (
@@ -583,6 +591,28 @@ class MultiStageDistiller:
                     self.run_state["stopped_early"] = True
                     self.run_state["stop_reason"] = reason
                     self.run_state["stopped_at_stage"] = stage_idx
+                    if stage_idx > 1 and self.stage_metrics:
+                        try:
+                            self.controller.load_checkpoint(stage_idx - 1, self.student)
+                            rollback_metrics = deepcopy(self.stage_metrics[-1])
+                            rollback_metrics["rolled_back_to_stage"] = stage_idx - 1
+                            rollback_metrics["rollback_reason"] = reason
+                            stage_metrics = rollback_metrics
+                        except Exception as exc:
+                            warnings.warn(
+                                f"Rollback to stage {stage_idx - 1} failed: {exc}"
+                            )
+
+            stage_metrics["quality_gate_passed"] = bool(quality_ok)
+
+            # Save checkpoint (final state for this stage)
+            self.controller.save_checkpoint(
+                stage_idx, self.student, None, stage_metrics  # Can add optimizer if needed
+            )
+
+            # Log stage
+            self.controller.log_stage(stage_idx, stage_cfg["name"], stage_metrics)
+            self.stage_metrics.append(stage_metrics)
 
             if callable(self.metrics_callback):
                 try:
@@ -898,7 +928,7 @@ class MultiStageDistiller:
             self.loss_scheduler.update(stage_idx, len(self.stages), {})
         loss_weights = self.loss_scheduler.get_weights()
         logger.info(
-            "Loss weights: \u03b1=%.2f, \u03b2=%.2f, \u03b3=%.2f",
+            "Loss weights: alpha=%.2f, beta=%.2f, gamma=%.2f",
             loss_weights.get("alpha", 0),
             loss_weights.get("beta", 0),
             loss_weights.get("gamma", 0),
@@ -961,6 +991,21 @@ class MultiStageDistiller:
         # Train stage
         epochs = stage_cfg.get("epochs", 3)
         grad_clip = distiller_config.get("grad_clip", 5.0)
+        if hasattr(distiller, "total_epochs"):
+            try:
+                distiller.total_epochs = int(epochs)
+            except Exception:
+                distiller.total_epochs = epochs
+
+        best_metric_name = distiller_config.get(
+            "best_metric", stage_cfg.get("best_metric", "val_accuracy")
+        )
+        best_metric_mode = distiller_config.get("best_metric_mode")
+        if best_metric_mode is None:
+            best_metric_mode = "min" if "loss" in str(best_metric_name).lower() else "max"
+        best_metric_value = None
+        best_snapshot: Dict[str, float] = {}
+        best_checkpoint_path: Optional[Path] = None
         logger.info(
             f"Training for {epochs} epochs (lr={learning_rate:.1e}, optimizer={optimizer_type}, grad_clip={grad_clip})..."
         )
@@ -969,6 +1014,14 @@ class MultiStageDistiller:
         # Training loop
         if self.train_loader is not None:
             for epoch in range(epochs):
+                if hasattr(distiller, "update_epoch"):
+                    try:
+                        distiller.update_epoch(epoch + 1)
+                    except Exception:
+                        pass
+                elif hasattr(distiller, "current_epoch"):
+                    distiller.current_epoch = epoch + 1
+
                 epoch_loss = self._train_epoch(distiller, epoch + 1, epochs, grad_clip=grad_clip)
                 stage_metrics["train_loss"] = epoch_loss
 
@@ -984,6 +1037,44 @@ class MultiStageDistiller:
                         epoch_loss,
                         val_metrics.get("val_accuracy", 0),
                     )
+
+                    metric_value = val_metrics.get(best_metric_name)
+                    if metric_value is None:
+                        metric_value = val_metrics.get("val_accuracy")
+                    if metric_value is None:
+                        metric_value = val_metrics.get("val_loss")
+
+                    if metric_value is not None:
+                        if best_metric_value is None:
+                            improved = True
+                        elif best_metric_mode == "min":
+                            improved = metric_value < best_metric_value
+                        else:
+                            improved = metric_value > best_metric_value
+
+                        if improved:
+                            best_metric_value = float(metric_value)
+                            best_snapshot = {
+                                "best_epoch": int(epoch + 1),
+                                "best_metric": str(best_metric_name),
+                                "best_metric_value": float(metric_value),
+                                "best_val_accuracy": float(
+                                    val_metrics.get("val_accuracy", 0.0) or 0.0
+                                ),
+                                "best_val_loss": float(
+                                    val_metrics.get("val_loss", 0.0) or 0.0
+                                ),
+                            }
+                            try:
+                                best_checkpoint_path = self.controller.save_checkpoint(
+                                    stage_idx,
+                                    self.student,
+                                    distiller.optimizer,
+                                    {**stage_metrics, **best_snapshot},
+                                    tag="best",
+                                )
+                            except Exception:
+                                best_checkpoint_path = None
                     if distiller.scheduler is not None and not getattr(
                         distiller, "scheduler_step_per_batch", True
                     ):
@@ -1004,6 +1095,17 @@ class MultiStageDistiller:
                     self._auto_lr_step(distiller, auto_lr_state, epoch_loss, None)
         else:
             warnings.warn("No train_loader provided, skipping training")
+
+        if best_checkpoint_path is not None and distiller_config.get("restore_best", True):
+            try:
+                self.controller.load_checkpoint(stage_idx, self.student, tag="best")
+                stage_metrics.update(best_snapshot)
+                stage_metrics["restored_best"] = True
+                stage_metrics["best_checkpoint"] = str(best_checkpoint_path)
+            except Exception as exc:
+                warnings.warn(f"Failed to restore best checkpoint for stage {stage_idx}: {exc}")
+        elif best_snapshot:
+            stage_metrics.update(best_snapshot)
 
         # Unfreeze layers
         if stage_cfg.get("freeze_layers"):

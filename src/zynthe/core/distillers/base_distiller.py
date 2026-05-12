@@ -648,6 +648,7 @@ class BaseDistiller(nn.Module):
         if opt is None:
             raise ValueError("No optimizer provided. Either pass optimizer or set self.optimizer")
 
+        self._ensure_optimizer_params(opt)
         opt.zero_grad()
 
         # Diagnostic: verify loss has gradient graph
@@ -787,6 +788,27 @@ class BaseDistiller(nn.Module):
         if return_outputs:
             return loss_dict, student_outputs
         return loss_dict
+
+    def _ensure_optimizer_params(self, optimizer: Optimizer) -> None:
+        """Ensure optimizer tracks newly created trainable parameters."""
+        existing = set()
+        for group in optimizer.param_groups:
+            for param in group.get("params", []):
+                existing.add(id(param))
+
+        new_params = [
+            param
+            for param in self.parameters()
+            if param.requires_grad and id(param) not in existing
+        ]
+        if not new_params:
+            return
+
+        optimizer.add_param_group({"params": new_params})
+        logger.info(
+            "Optimizer param sync: added %d params",
+            len(new_params),
+        )
 
     def _apply_agc(
         self,
