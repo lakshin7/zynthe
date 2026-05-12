@@ -117,7 +117,6 @@ class SimilarityTransfer(BaseDistiller):
 
         # Metrics tracking
         self.structural_alignment_scores: List[float] = []
-        self.adapters = nn.ModuleDict()
 
         if (not self.layers) and self.auto_layer_strategy:
             self.layers = self._infer_auto_layers(self.auto_layer_strategy, self.auto_layer_count)
@@ -127,6 +126,9 @@ class SimilarityTransfer(BaseDistiller):
 
         # Now call super().__init__() which will call _register_hooks()
         super().__init__(teacher, student, config=config, device=device)
+
+        # Adapters must be created after nn.Module initialization
+        self.adapters = nn.ModuleDict()
 
         logger.info("[SIM] Similarity Transfer initialized:")
         logger.info(f"   Metric: {self.similarity_metric}")
