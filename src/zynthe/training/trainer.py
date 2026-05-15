@@ -23,6 +23,7 @@ from zynthe.training.optimizer import OptimizerFactory, GradientManager, Adaptiv
 from zynthe.training.scheduler import SchedulerFactory
 from zynthe.core.utils.data_validator import DataValidator, OverfitUnderfitDetector
 import torch
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
@@ -57,7 +58,21 @@ class Trainer:
         self.student = student
         self.tokenizer = tokenizer
         self.config = config
+        if isinstance(device, str):
+            device = torch.device(device)
         self.device = device
+
+        # Enable torch.compile if specified in config
+        if config.get("training", {}).get("compile", False) or config.get("train", {}).get("compile", False):
+            LOG.info("Compiling models with torch.compile...")
+            self.teacher = torch.compile(self.teacher)
+            self.student = torch.compile(self.student)
+
+        # Enable FSDP if specified
+        if config.get("training", {}).get("fsdp", False) or config.get("train", {}).get("fsdp", False):
+            LOG.info("Wrapping models with FSDP...")
+            self.teacher = FSDP(self.teacher)
+            self.student = FSDP(self.student)
         self.experiment_dir = experiment_dir
         self._use_pipeline = pipeline is not None  # Track if using pipeline mode
 
@@ -128,7 +143,8 @@ class Trainer:
 
         # 4. Live Metrics Streaming via WebSocket - real-time UI updates
         self.websocket_callback = websocket_callback
-        self.update_frequency = self.config["train"].get(
+        train_cfg = self.config.get("train", self.config.get("training", {}))
+        self.update_frequency = train_cfg.get(
             "update_frequency", 10
         )  # Update every N batches
         if self.websocket_callback:

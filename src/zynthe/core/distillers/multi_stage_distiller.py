@@ -23,6 +23,8 @@ from __future__ import annotations
 
 
 from typing import Dict, List, Any, Optional, Tuple, Mapping
+from zynthe.core.adapters import AdapterRegistry
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -357,6 +359,12 @@ class MultiStageDistiller:
         self.output_dir = Path(output_dir)
         self.teacher_params = int(sum(p.numel() for p in self.teacher.parameters()))
         self.student_params = int(sum(p.numel() for p in self.student.parameters()))
+
+        # Detect multi-modal/vision adapters
+        registry = AdapterRegistry()
+        self.teacher_adapter = registry.detect(self.teacher)
+        self.student_adapter = registry.detect(self.student)
+
         self._teacher_baseline: Optional[Dict[str, float]] = None
 
         callbacks_cfg = self.config.get("callbacks", {})
