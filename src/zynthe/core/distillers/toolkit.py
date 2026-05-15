@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 
 from .multi_stage_distiller import MultiStageDistiller
-from .presets import get_preset, list_presets, describe_preset
+from .presets import describe_preset, get_preset, list_presets
 
 logger = logging.getLogger(__name__)
 

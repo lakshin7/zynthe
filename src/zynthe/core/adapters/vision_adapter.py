@@ -21,8 +21,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .base_adapter import ModelAdapter
 from zynthe.core.utils.device_utils import normalize_model_output
+
+from .base_adapter import ModelAdapter
 
 
 class VisionModelAdapter(ModelAdapter):

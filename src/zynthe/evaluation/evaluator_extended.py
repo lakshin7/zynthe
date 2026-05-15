@@ -5,21 +5,22 @@ Supports side-by-side teacher-student evaluation with extended metrics
 
 from __future__ import annotations
 
+import logging
+import time
+from typing import Any, Callable, Dict, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Any, Callable
-import numpy as np
-import time
+
+from zynthe.evaluation.evaluation_report import EvaluationReport
 from zynthe.evaluation.metrics import compute_all_metrics
 from zynthe.evaluation.metrics_extended import (
-    compute_extended_metrics,
+    CompressionAwareScore,
     DistillationEfficacyIndex,
     PerformanceProfiler,
-    CompressionAwareScore,
+    compute_extended_metrics,
 )
-from zynthe.evaluation.evaluation_report import EvaluationReport
-import logging
 
 logger = logging.getLogger(__name__)
 

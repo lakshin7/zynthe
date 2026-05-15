@@ -29,19 +29,19 @@ Usage:
 
 from __future__ import annotations
 
-
+import json
 import math
-from typing import Dict, List, Optional, Any
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset
 import yaml
-import json
-from pathlib import Path
-from datetime import datetime
+from torch.utils.data import Dataset
 
-from .model_inspector import ModelInspector
 from .data_inspector import DataInspector
+from .model_inspector import ModelInspector
 from .resource_probe import ResourceProbe
 
 try:  # Optional dependency on distiller presets

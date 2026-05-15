@@ -20,11 +20,11 @@ Supports:
 
 from __future__ import annotations
 
-
-from typing import Dict, List, Optional, Any
-import torch.nn as nn
 from collections import defaultdict
+from typing import Any, Dict, List, Optional
+
 import numpy as np
+import torch.nn as nn
 
 
 class ModelInspector:

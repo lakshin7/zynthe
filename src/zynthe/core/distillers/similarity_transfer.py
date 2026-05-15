@@ -30,16 +30,16 @@ Example:
 
 from __future__ import annotations
 
-
+import logging
 import math
+import warnings
+from typing import Any, Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Any, Optional, Tuple
-import warnings
 
 from .base_distiller import BaseDistiller
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +291,10 @@ class SimilarityTransfer(BaseDistiller):
         if teacher_feats.dim() == 4 and student_feats.dim() == 4:
             if teacher_feats.shape[2:] != student_feats.shape[2:]:
                 student_feats = F.interpolate(
-                    student_feats, size=teacher_feats.shape[2:], mode="bilinear", align_corners=False
+                    student_feats,
+                    size=teacher_feats.shape[2:],
+                    mode="bilinear",
+                    align_corners=False,
                 )
             if teacher_feats.shape[1] != student_feats.shape[1]:
                 key = f"{layer_name}_conv2d_{student_feats.shape[1]}_{teacher_feats.shape[1]}"
@@ -553,9 +556,7 @@ class SimilarityTransfer(BaseDistiller):
             # Ensure hook caches are clean before the base forward pass
             self.teacher_features.clear()
             self.student_features.clear()
-            student_out, teacher_out, _, _ = super().forward(
-                x, return_features=True, **kwargs
-            )
+            student_out, teacher_out, _, _ = super().forward(x, return_features=True, **kwargs)
             return student_out, teacher_out, self.teacher_features, self.student_features
 
         # Clear feature caches

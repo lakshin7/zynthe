@@ -5,26 +5,26 @@ Compare Teacher and Student models side-by-side with comprehensive metrics and v
 
 from __future__ import annotations
 
-
-import torch
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Tuple
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from torch.utils.data import DataLoader
+
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
+import torch
 from sklearn.metrics import (
     accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
-    confusion_matrix,
-    classification_report,
 )
-import matplotlib.pyplot as plt
-import seaborn as sns
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-import logging
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -571,24 +571,16 @@ class ModelComparator:
         report.append("|--------|---------|---------|------------|\n")
         t_acc = teacher_results["accuracy"]
         s_acc = student_results["accuracy"]
-        report.append(
-            f"| Accuracy | {t_acc:.4f} | {s_acc:.4f} | {t_acc - s_acc:.4f} |\n"
-        )
+        report.append(f"| Accuracy | {t_acc:.4f} | {s_acc:.4f} | {t_acc - s_acc:.4f} |\n")
         t_pre = teacher_results["precision"]
         s_pre = student_results["precision"]
-        report.append(
-            f"| Precision | {t_pre:.4f} | {s_pre:.4f} | {t_pre - s_pre:.4f} |\n"
-        )
+        report.append(f"| Precision | {t_pre:.4f} | {s_pre:.4f} | {t_pre - s_pre:.4f} |\n")
         t_rec = teacher_results["recall"]
         s_rec = student_results["recall"]
-        report.append(
-            f"| Recall | {t_rec:.4f} | {s_rec:.4f} | {t_rec - s_rec:.4f} |\n"
-        )
+        report.append(f"| Recall | {t_rec:.4f} | {s_rec:.4f} | {t_rec - s_rec:.4f} |\n")
         t_f1 = teacher_results["f1"]
         s_f1 = student_results["f1"]
-        report.append(
-            f"| F1-Score | {t_f1:.4f} | {s_f1:.4f} | {t_f1 - s_f1:.4f} |\n\n"
-        )
+        report.append(f"| F1-Score | {t_f1:.4f} | {s_f1:.4f} | {t_f1 - s_f1:.4f} |\n\n")
 
         # Visualizations
         report.append("## [INFO] Visualizations\n\n")

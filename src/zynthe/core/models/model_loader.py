@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# Lazy transformers imports — avoids crashing on environments with
+# torch/transformers version mismatches (e.g. Kaggle kernels) when the
+# user only needs the distillation API, not the model loader.
+import importlib as _importlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -7,11 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Tuple, Union, cast
 
 import torch
-
-# Lazy transformers imports — avoids crashing on environments with
-# torch/transformers version mismatches (e.g. Kaggle kernels) when the
-# user only needs the distillation API, not the model loader.
-import importlib as _importlib
 
 
 def _lazy_transformers_import(name: str):
@@ -22,6 +21,7 @@ def _lazy_transformers_import(name: str):
 
 class _LazyTransformers:
     """Proxy that defers transformers imports until attribute access."""
+
     _cache: dict = {}
 
     def __getattr__(self, name: str):
@@ -34,6 +34,7 @@ _tf = _LazyTransformers()
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel
+
     from zynthe.core.config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)

@@ -5,14 +5,13 @@ Monitors model downloads and emits progress updates
 
 from __future__ import annotations
 
-
+import logging
 import sys
-from typing import Optional, Callable, Dict, Any
-from pathlib import Path
 import threading
 import time
 from functools import wraps
-import logging
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

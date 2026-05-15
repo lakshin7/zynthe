@@ -24,13 +24,13 @@ Reference: Zynthe Feature Distillation Blueprint
 
 from __future__ import annotations
 
+import warnings
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from typing import Dict, List, Optional, Tuple, Any, Union
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import warnings
 
 from .base_distiller import BaseDistiller
 
@@ -607,7 +607,6 @@ class FeatureDistiller(BaseDistiller):
                     # Align dimensions
                     f_t, f_s = self.layer_aligner.align_features(f_t, f_s, s_layer)
 
-
                     # Dynamic Layer Weighting based on variance magnitude difference
                     # This increases importance of layers that have higher divergence
                     with torch.no_grad():
@@ -619,7 +618,6 @@ class FeatureDistiller(BaseDistiller):
                     layer_loss, layer_loss_dict = self.feature_loss_composer(f_t, f_s)
 
                     feat_loss_total = feat_loss_total + dynamic_weight * layer_loss
-
 
                     # Log individual layer losses
                     for key, value in layer_loss_dict.items():

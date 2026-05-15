@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional, Union, Dict, Any, List, Tuple, Callable
+import logging
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 import torch
 import torch.nn.functional as F
 from torch import nn
+
 from zynthe.core.distillers.base_distiller import BaseDistiller
-import warnings
-import logging
 
 logger = logging.getLogger(__name__)
 

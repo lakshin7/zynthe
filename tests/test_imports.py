@@ -2,8 +2,8 @@ def test_core_imports():
     """Smoke test to ensure core modules can be imported without errors."""
     import zynthe
     from zynthe import DistillationToolkit
-    from zynthe.core.models.model_loader import ModelLoader
     from zynthe.core.distillers.base_distiller import BaseDistiller
+    from zynthe.core.models.model_loader import ModelLoader
 
     assert zynthe.__version__ is not None
     assert DistillationToolkit is not None
@@ -14,5 +14,6 @@ def test_core_imports():
 def test_pipeline_imports():
     """Smoke test for pipeline modules."""
     from zynthe.core.pipelines import PipelineBuilder, PipelineRegistry
+
     assert PipelineBuilder is not None
     assert PipelineRegistry is not None

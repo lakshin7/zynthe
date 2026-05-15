@@ -14,14 +14,13 @@ Author: Zynthé Team
 
 from __future__ import annotations
 
-
-from typing import Dict, List, Optional, Tuple, Any
-from pathlib import Path
 import json
 import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from datasets import load_dataset, Dataset, DatasetDict
+    from datasets import Dataset, DatasetDict, load_dataset
 except Exception:  # pragma: no cover - optional dependency
     load_dataset = None  # type: ignore[assignment]
 

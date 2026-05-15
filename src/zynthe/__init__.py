@@ -10,9 +10,9 @@ support. Public symbols keep the same import style::
 
 from __future__ import annotations
 
+import logging as _logging
 from importlib import import_module
 from typing import Any
-import logging as _logging
 
 __version__ = "0.2.5"
 

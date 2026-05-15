@@ -17,16 +17,16 @@ All pipeline implementations must extend this class.
 
 from __future__ import annotations
 
-
+import logging
+import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-from dataclasses import dataclass, field
-import time
 
 from zynthe.core.utils.device_utils import auto_detect_device as _shared_auto_detect_device
-import logging
 
 logger = logging.getLogger(__name__)
 

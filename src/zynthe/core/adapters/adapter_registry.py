@@ -19,10 +19,10 @@ from typing import Dict, Type
 import torch.nn as nn
 
 from .base_adapter import ModelAdapter
-from .text_adapter import TextModelAdapter
 from .code_adapter import CodeModelAdapter
-from .vision_adapter import VisionModelAdapter
 from .multimodal_adapter import MultimodalModelAdapter
+from .text_adapter import TextModelAdapter
+from .vision_adapter import VisionModelAdapter
 from .vlm_adapter import VLMModelAdapter
 
 

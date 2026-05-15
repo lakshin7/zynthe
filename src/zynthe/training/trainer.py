@@ -2,41 +2,42 @@ from __future__ import annotations
 
 import copy
 import csv
-from datetime import datetime
-from zynthe.evaluation.metrics import compute_all_metrics, plot_metrics
-from zynthe.evaluation.visualizer import (
-    plot_training_curves,
-    plot_teacher_student_comparison,
-    plot_epoch_micro_series,
-    plot_evaluation_dashboard,
-    plot_distillation_gap,
-    plot_extended_metrics,
-)
-from zynthe.evaluation.metrics_extended import (
-    compute_extended_metrics,
-    LossComponentTracker,
-)
-from zynthe.evaluation.evaluation_report import EvaluationReport
-from zynthe.evaluation.diagnostics import build_eval_diagnostics
-from zynthe.core.models.model_saver import ModelSaver
-from zynthe.training.optimizer import OptimizerFactory, GradientManager, AdaptiveOptimizer
-from zynthe.training.scheduler import SchedulerFactory
-from zynthe.core.utils.data_validator import DataValidator, OverfitUnderfitDetector
-import torch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.optim import AdamW
-from torch.amp import GradScaler  # Mixed Precision Training
-import os
 import inspect
 import json
-import time
 import logging
+import os
+import time
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any, List
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.amp import GradScaler  # Mixed Precision Training
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.optim import AdamW
+
+from zynthe.core.models.model_saver import ModelSaver
+from zynthe.core.utils.data_validator import DataValidator, OverfitUnderfitDetector
+from zynthe.evaluation.diagnostics import build_eval_diagnostics
+from zynthe.evaluation.evaluation_report import EvaluationReport
+from zynthe.evaluation.metrics import compute_all_metrics, plot_metrics
+from zynthe.evaluation.metrics_extended import (
+    LossComponentTracker,
+    compute_extended_metrics,
+)
+from zynthe.evaluation.visualizer import (
+    plot_distillation_gap,
+    plot_epoch_micro_series,
+    plot_evaluation_dashboard,
+    plot_extended_metrics,
+    plot_teacher_student_comparison,
+    plot_training_curves,
+)
+from zynthe.training.optimizer import AdaptiveOptimizer, GradientManager, OptimizerFactory
+from zynthe.training.scheduler import SchedulerFactory
 
 logger = logging.getLogger(__name__)
 LOG = logging.getLogger(__name__)
@@ -63,13 +64,17 @@ class Trainer:
         self.device = device
 
         # Enable torch.compile if specified in config
-        if config.get("training", {}).get("compile", False) or config.get("train", {}).get("compile", False):
+        if config.get("training", {}).get("compile", False) or config.get("train", {}).get(
+            "compile", False
+        ):
             LOG.info("Compiling models with torch.compile...")
             self.teacher = torch.compile(self.teacher)
             self.student = torch.compile(self.student)
 
         # Enable FSDP if specified
-        if config.get("training", {}).get("fsdp", False) or config.get("train", {}).get("fsdp", False):
+        if config.get("training", {}).get("fsdp", False) or config.get("train", {}).get(
+            "fsdp", False
+        ):
             LOG.info("Wrapping models with FSDP...")
             self.teacher = FSDP(self.teacher)
             self.student = FSDP(self.student)
@@ -144,9 +149,7 @@ class Trainer:
         # 4. Live Metrics Streaming via WebSocket - real-time UI updates
         self.websocket_callback = websocket_callback
         train_cfg = self.config.get("train", self.config.get("training", {}))
-        self.update_frequency = train_cfg.get(
-            "update_frequency", 10
-        )  # Update every N batches
+        self.update_frequency = train_cfg.get("update_frequency", 10)  # Update every N batches
         if self.websocket_callback:
             logger.info(
                 "[OPTIMIZATION] Live metrics streaming enabled (update every %s batches)",
@@ -212,9 +215,9 @@ class Trainer:
                 logger.info(f"[TRAINER] Pipeline built: {self.pipeline.name}")
             else:
                 # Legacy distiller → auto-wrap in SingleDistillerPipeline
-                from zynthe.core.distillers.multi_stage_distiller import (
+                from zynthe.core.distillers.multi_stage_distiller import (  # noqa: F811
                     DistillerRegistry,
-                )  # noqa: F811
+                )
                 from zynthe.core.pipelines.single_distiller_pipeline import SingleDistillerPipeline
 
                 registry = DistillerRegistry()
@@ -2439,9 +2442,7 @@ class Trainer:
                     continue
 
                 batch = {k: v.to(self.device) for k, v in batch.items() if hasattr(v, "to")}
-                teacher_batch = self._filter_batch_for_model(
-                    batch, self._teacher_forward_params
-                )
+                teacher_batch = self._filter_batch_for_model(batch, self._teacher_forward_params)
 
                 outputs = self.teacher(**teacher_batch)
                 loss = _teacher_loss(outputs, batch.get("labels"))
@@ -2824,8 +2825,8 @@ class Trainer:
     def resume_from_checkpoint(self, checkpoint_dir: str):
         """Resume training from a saved checkpoint."""
         from pathlib import Path
-        from zynthe.core.models.model_saver import load_checkpoint
-        from zynthe.core.models.model_saver import CheckpointMetadata
+
+        from zynthe.core.models.model_saver import CheckpointMetadata, load_checkpoint
 
         ckpt_path = Path(checkpoint_dir)
         if not ckpt_path.exists():

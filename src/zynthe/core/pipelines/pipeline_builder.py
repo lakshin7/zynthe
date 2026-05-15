@@ -14,17 +14,18 @@ Supports:
 
 from __future__ import annotations
 
-
+import copy
+import logging
 from typing import Any, Dict, List, Optional, Union
+
 import torch
 import torch.nn as nn
-import copy
+
+from zynthe.core.distillers.multi_stage_distiller import DistillerRegistry
 
 from .base_pipeline import BasePipeline
+from .multi_stage_pipeline import ExecutionMode, MultiStagePipeline
 from .single_distiller_pipeline import SingleDistillerPipeline
-from .multi_stage_pipeline import MultiStagePipeline, ExecutionMode
-from zynthe.core.distillers.multi_stage_distiller import DistillerRegistry
-import logging
 
 logger = logging.getLogger(__name__)
 

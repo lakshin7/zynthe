@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import logging
 import platform
-import psutil
-from typing import Dict, Optional, Any
 import warnings
+from typing import Any, Dict, Optional
 
+import psutil
 import torch
 
 logger = logging.getLogger(__name__)
