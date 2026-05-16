@@ -1510,16 +1510,20 @@ class MultiStageDistiller:
         # Get preflight info
         preflight = self.config.get("preflight", {})
 
+        # Compute actual compression_ratio from model parameters
+        # (consistent with per-stage compression_ratio calculations)
+        actual_compression_ratio = float(self.teacher_params) / max(float(self.student_params), 1.0)
+
         report = {
             "summary": {
                 "total_stages": len(self.stages),
                 "model_type": preflight.get("model_type", "unknown"),
-                "compression_ratio": preflight.get("compression_ratio", 0),
+                "compression_ratio": actual_compression_ratio,
                 "total_accuracy_gain": 0.0,  # Will be updated below
             },
             "preflight": {
                 "model_type": preflight.get("model_type", "unknown"),
-                "compression_ratio": preflight.get("compression_ratio", 0),
+                "compression_ratio": actual_compression_ratio,
                 "stages_completed": [],
             },
             "stages": [],
