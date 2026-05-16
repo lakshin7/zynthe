@@ -1,0 +1,119 @@
+final_metrics:
+  final_accuracy: 0.0
+  final_loss: 0.0
+  total_accuracy_gain: 0.0
+metadata:
+  preset: vision_transformer
+preflight:
+  compression_ratio: 0
+  model_type: unknown
+  stages_completed:
+  - accuracy_gain: 0.0
+    name: Stage 1 - KD Warmup
+  - accuracy_gain: 0.0
+    name: Stage 2 - Attention Transfer
+  - accuracy_gain: 0.0
+    name: Stage 3 - Feature Polishing
+run_state:
+  stop_reason: null
+  stopped_at_stage: null
+  stopped_early: false
+stage_comparison:
+- accuracy_delta_pct: null
+  cas: -0.4
+  cas_delta: null
+  compression_ratio: 1.0
+  dei: 0.0
+  dei_delta: null
+  name: Stage 1 - KD Warmup
+  stage: 1
+  student_latency_ms: 1.0
+  teacher_accuracy_pct: 0.0
+  teacher_latency_ms: 1.0
+  type: kd
+  val_accuracy_pct: 0.0
+- accuracy_delta_pct: 0.0
+  cas: -0.4
+  cas_delta: 0.0
+  compression_ratio: 1.0
+  dei: 0.0
+  dei_delta: 0.0
+  name: Stage 2 - Attention Transfer
+  stage: 2
+  student_latency_ms: 1.0
+  teacher_accuracy_pct: 0.0
+  teacher_latency_ms: 1.0
+  type: attention
+  val_accuracy_pct: 0.0
+- accuracy_delta_pct: 0.0
+  cas: -0.4
+  cas_delta: 0.0
+  compression_ratio: 1.0
+  dei: 0.0
+  dei_delta: 0.0
+  name: Stage 3 - Feature Polishing
+  stage: 3
+  student_latency_ms: 1.0
+  teacher_accuracy_pct: 0.0
+  teacher_latency_ms: 1.0
+  type: feature
+  val_accuracy_pct: 0.0
+stage_controller_report:
+  best_checkpoints: {}
+  checkpoints:
+    1: real_vision/stage_1_checkpoint.pt
+    2: real_vision/stage_2_checkpoint.pt
+    3: real_vision/stage_3_checkpoint.pt
+  completed_stages: 3
+  stage_history:
+  - metrics: &id001
+      quality_gate_passed: true
+      train_loss: 0.18232420552521944
+      val_accuracy: 0.0
+      val_loss: 0.0
+    name: Stage 1 - KD Warmup
+    stage: 1
+    timestamp: '2026-05-16T05:55:57.789907'
+  - metrics: &id002
+      quality_gate_passed: true
+      train_loss: 0.0
+      val_accuracy: 0.0
+      val_loss: 0.0
+    name: Stage 2 - Attention Transfer
+    stage: 2
+    timestamp: '2026-05-16T05:56:00.519763'
+  - metrics: &id003
+      quality_gate_passed: true
+      train_loss: 0.6256785281002522
+      val_accuracy: 0.0
+      val_loss: 0.0
+    name: Stage 3 - Feature Polishing
+    stage: 3
+    timestamp: '2026-05-16T05:56:03.639648'
+  total_stages: 3
+stages:
+- epochs: 2
+  metrics: *id001
+  name: Stage 1 - KD Warmup
+  stage: 1
+  type: kd
+- epochs: 3
+  metrics: *id002
+  name: Stage 2 - Attention Transfer
+  stage: 2
+  type: attention
+- epochs: 3
+  metrics: *id003
+  name: Stage 3 - Feature Polishing
+  stage: 3
+  type: feature
+summary:
+  best_cas: -0.4
+  best_dei: 0.0
+  best_stage_by_cas: Stage 1 - KD Warmup
+  best_stage_by_dei: Stage 1 - KD Warmup
+  compression_ratio: 0
+  model_type: unknown
+  preset: vision_transformer
+  total_accuracy_gain: 0.0
+  total_stages: 3

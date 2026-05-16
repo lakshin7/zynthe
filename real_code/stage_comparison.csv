@@ -1,0 +1,4 @@
+stage,name,type,val_accuracy_pct,accuracy_delta_pct,student_latency_ms,teacher_accuracy_pct,teacher_latency_ms,compression_ratio,dei,dei_delta,cas,cas_delta
+1,Stage 1 - Logit Alignment,kd,0.0,,1.0,0.0,1.0,1.0,0.0,,-0.4,
+2,Stage 2 - Feature Refinement,feature,0.0,0.0,1.0,0.0,1.0,1.0,0.0,0.0,-0.4,0.0
+3,Stage 3 - Structural Similarity,similarity,0.0,0.0,1.0,0.0,1.0,1.0,0.0,0.0,-0.4,0.0

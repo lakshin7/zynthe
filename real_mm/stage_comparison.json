@@ -1,0 +1,47 @@
+[
+  {
+    "stage": 1,
+    "name": "Stage 1 - Embedding Alignment",
+    "type": "feature",
+    "val_accuracy_pct": 0.0,
+    "student_latency_ms": 1.0,
+    "teacher_accuracy_pct": 0.0,
+    "teacher_latency_ms": 1.0,
+    "dei": 0.0,
+    "cas": -0.4,
+    "compression_ratio": 1.0,
+    "accuracy_delta_pct": null,
+    "dei_delta": null,
+    "cas_delta": null
+  },
+  {
+    "stage": 2,
+    "name": "Stage 2 - Relational Similarity",
+    "type": "similarity",
+    "val_accuracy_pct": 0.0,
+    "student_latency_ms": 1.0,
+    "teacher_accuracy_pct": 0.0,
+    "teacher_latency_ms": 1.0,
+    "dei": 0.0,
+    "cas": -0.4,
+    "compression_ratio": 1.0,
+    "accuracy_delta_pct": 0.0,
+    "dei_delta": 0.0,
+    "cas_delta": 0.0
+  },
+  {
+    "stage": 3,
+    "name": "Stage 3 - Attention Alignment",
+    "type": "attention",
+    "val_accuracy_pct": 0.0,
+    "student_latency_ms": 1.0,
+    "teacher_accuracy_pct": 0.0,
+    "teacher_latency_ms": 1.0,
+    "dei": 0.0,
+    "cas": -0.4,
+    "compression_ratio": 1.0,
+    "accuracy_delta_pct": 0.0,
+    "dei_delta": 0.0,
+    "cas_delta": 0.0
+  }
+]

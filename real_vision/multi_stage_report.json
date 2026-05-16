@@ -1,0 +1,174 @@
+{
+  "summary": {
+    "total_stages": 3,
+    "model_type": "unknown",
+    "compression_ratio": 0,
+    "total_accuracy_gain": 0.0,
+    "preset": "vision_transformer",
+    "best_dei": 0.0,
+    "best_cas": -0.4,
+    "best_stage_by_dei": "Stage 1 - KD Warmup",
+    "best_stage_by_cas": "Stage 1 - KD Warmup"
+  },
+  "preflight": {
+    "model_type": "unknown",
+    "compression_ratio": 0,
+    "stages_completed": [
+      {
+        "name": "Stage 1 - KD Warmup",
+        "accuracy_gain": 0.0
+      },
+      {
+        "name": "Stage 2 - Attention Transfer",
+        "accuracy_gain": 0.0
+      },
+      {
+        "name": "Stage 3 - Feature Polishing",
+        "accuracy_gain": 0.0
+      }
+    ]
+  },
+  "stages": [
+    {
+      "stage": 1,
+      "name": "Stage 1 - KD Warmup",
+      "type": "kd",
+      "epochs": 2,
+      "metrics": {
+        "train_loss": 0.18232420552521944,
+        "val_loss": 0.0,
+        "val_accuracy": 0.0,
+        "quality_gate_passed": true
+      }
+    },
+    {
+      "stage": 2,
+      "name": "Stage 2 - Attention Transfer",
+      "type": "attention",
+      "epochs": 3,
+      "metrics": {
+        "train_loss": 0.0,
+        "val_loss": 0.0,
+        "val_accuracy": 0.0,
+        "quality_gate_passed": true
+      }
+    },
+    {
+      "stage": 3,
+      "name": "Stage 3 - Feature Polishing",
+      "type": "feature",
+      "epochs": 3,
+      "metrics": {
+        "train_loss": 0.6256785281002522,
+        "val_loss": 0.0,
+        "val_accuracy": 0.0,
+        "quality_gate_passed": true
+      }
+    }
+  ],
+  "final_metrics": {
+    "final_accuracy": 0.0,
+    "total_accuracy_gain": 0.0,
+    "final_loss": 0.0
+  },
+  "stage_controller_report": {
+    "total_stages": 3,
+    "completed_stages": 3,
+    "stage_history": [
+      {
+        "stage": 1,
+        "name": "Stage 1 - KD Warmup",
+        "metrics": {
+          "train_loss": 0.18232420552521944,
+          "val_loss": 0.0,
+          "val_accuracy": 0.0,
+          "quality_gate_passed": true
+        },
+        "timestamp": "2026-05-16T05:55:57.789907"
+      },
+      {
+        "stage": 2,
+        "name": "Stage 2 - Attention Transfer",
+        "metrics": {
+          "train_loss": 0.0,
+          "val_loss": 0.0,
+          "val_accuracy": 0.0,
+          "quality_gate_passed": true
+        },
+        "timestamp": "2026-05-16T05:56:00.519763"
+      },
+      {
+        "stage": 3,
+        "name": "Stage 3 - Feature Polishing",
+        "metrics": {
+          "train_loss": 0.6256785281002522,
+          "val_loss": 0.0,
+          "val_accuracy": 0.0,
+          "quality_gate_passed": true
+        },
+        "timestamp": "2026-05-16T05:56:03.639648"
+      }
+    ],
+    "checkpoints": {
+      "1": "real_vision/stage_1_checkpoint.pt",
+      "2": "real_vision/stage_2_checkpoint.pt",
+      "3": "real_vision/stage_3_checkpoint.pt"
+    },
+    "best_checkpoints": {}
+  },
+  "metadata": {
+    "preset": "vision_transformer"
+  },
+  "run_state": {
+    "stopped_early": false,
+    "stop_reason": null,
+    "stopped_at_stage": null
+  },
+  "stage_comparison": [
+    {
+      "stage": 1,
+      "name": "Stage 1 - KD Warmup",
+      "type": "kd",
+      "val_accuracy_pct": 0.0,
+      "student_latency_ms": 1.0,
+      "teacher_accuracy_pct": 0.0,
+      "teacher_latency_ms": 1.0,
+      "dei": 0.0,
+      "cas": -0.4,
+      "compression_ratio": 1.0,
+      "accuracy_delta_pct": null,
+      "dei_delta": null,
+      "cas_delta": null
+    },
+    {
+      "stage": 2,
+      "name": "Stage 2 - Attention Transfer",
+      "type": "attention",
+      "val_accuracy_pct": 0.0,
+      "student_latency_ms": 1.0,
+      "teacher_accuracy_pct": 0.0,
+      "teacher_latency_ms": 1.0,
+      "dei": 0.0,
+      "cas": -0.4,
+      "compression_ratio": 1.0,
+      "accuracy_delta_pct": 0.0,
+      "dei_delta": 0.0,
+      "cas_delta": 0.0
+    },
+    {
+      "stage": 3,
+      "name": "Stage 3 - Feature Polishing",
+      "type": "feature",
+      "val_accuracy_pct": 0.0,
+      "student_latency_ms": 1.0,
+      "teacher_accuracy_pct": 0.0,
+      "teacher_latency_ms": 1.0,
+      "dei": 0.0,
+      "cas": -0.4,
+      "compression_ratio": 1.0,
+      "accuracy_delta_pct": 0.0,
+      "dei_delta": 0.0,
+      "cas_delta": 0.0
+    }
+  ]
+}

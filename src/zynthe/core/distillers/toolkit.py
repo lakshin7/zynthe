@@ -333,7 +333,10 @@ class DistillationToolkit:
         # Merge DistillationConfig overrides
         effective_overrides: Dict[str, Any] = {}
         if self.config:
-            effective_overrides = self.config.to_overrides()
+            if hasattr(self.config, "to_overrides"):
+                effective_overrides = self.config.to_overrides()
+            elif isinstance(self.config, dict):
+                effective_overrides = self.config
         if overrides:
             effective_overrides = self._deep_merge(effective_overrides, overrides)
 
