@@ -5,11 +5,10 @@ Provides real-time progress updates via WebSocket
 
 from __future__ import annotations
 
-
 import time
-from typing import Dict, Any, Optional, Callable
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from enum import Enum
+from typing import Any, Callable, Dict, Optional
 
 
 class ProgressStage(Enum):

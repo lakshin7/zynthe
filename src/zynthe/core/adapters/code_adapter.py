@@ -26,8 +26,9 @@ from typing import Any, Dict, List, Tuple
 import torch
 import torch.nn as nn
 
-from .base_adapter import ModelAdapter
 from zynthe.core.utils.device_utils import normalize_model_output
+
+from .base_adapter import ModelAdapter
 
 
 class CodeModelAdapter(ModelAdapter):

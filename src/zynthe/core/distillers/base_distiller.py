@@ -27,12 +27,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.optim import Optimizer, AdamW, SGD
-from torch.optim.lr_scheduler import _LRScheduler, CosineAnnealingLR, StepLR, ReduceLROnPlateau
+from torch.optim import SGD, AdamW, Optimizer
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, StepLR, _LRScheduler
 
+from zynthe.core.utils.device_utils import auto_detect_device as _shared_auto_detect_device
+from zynthe.core.utils.device_utils import move_to_device as _shared_move_to_device
 from zynthe.core.utils.device_utils import (
-    auto_detect_device as _shared_auto_detect_device,
-    move_to_device as _shared_move_to_device,
     normalize_model_output,
 )
 
@@ -404,9 +404,7 @@ class BaseDistiller(nn.Module):
         # Get all trainable parameters (student + distiller adapters/regressors)
         params = [p for p in self.parameters() if p.requires_grad]
         total_params = sum(p.numel() for p in params)
-        student_params = sum(
-            p.numel() for p in self.student.parameters() if p.requires_grad
-        )
+        student_params = sum(p.numel() for p in self.student.parameters() if p.requires_grad)
         extra_params = max(0, total_params - student_params)
         if extra_params > 0:
             logger.info(
@@ -492,14 +490,10 @@ class BaseDistiller(nn.Module):
 
         # Teacher forward (no gradients)
         with torch.no_grad():
-            teacher_outputs = self._safe_forward(
-                self.teacher, inputs, kwargs
-            )
+            teacher_outputs = self._safe_forward(self.teacher, inputs, kwargs)
 
         # Student forward (with gradients)
-        student_outputs = self._safe_forward(
-            self.student, inputs, kwargs
-        )
+        student_outputs = self._safe_forward(self.student, inputs, kwargs)
 
         if return_features:
             teacher_features = self._collect_features(self.teacher_hooks)
@@ -508,9 +502,7 @@ class BaseDistiller(nn.Module):
 
         return student_outputs, teacher_outputs
 
-    def _safe_forward(
-        self, model: nn.Module, inputs: Any, kwargs: dict
-    ) -> Any:
+    def _safe_forward(self, model: nn.Module, inputs: Any, kwargs: dict) -> Any:
         """Forward pass with automatic dtype retry on mismatch.
 
         Most models (especially HuggingFace transformers) handle float32
@@ -649,6 +641,7 @@ class BaseDistiller(nn.Module):
         # Diagnostic: verify loss has gradient graph
         if not total_loss.requires_grad:
             import logging as _lg
+
             _lg.getLogger(__name__).warning(
                 "total_loss does NOT require grad (grad_fn=%s). "
                 "Backward will be a no-op -- student weights won't update!",
@@ -666,12 +659,12 @@ class BaseDistiller(nn.Module):
                 if clip_mode == "agc":
                     agc_stats = self._apply_agc(
                         self.student.parameters(),
-                        clip_factor=float(grad_clip.get("clip_factor", grad_clip.get("factor", 0.01))),
+                        clip_factor=float(
+                            grad_clip.get("clip_factor", grad_clip.get("factor", 0.01))
+                        ),
                         eps=float(grad_clip.get("eps", 1e-3)),
                         norm_type=int(grad_clip.get("norm_type", 2)),
-                        exclude_bias_and_norm=bool(
-                            grad_clip.get("exclude_bias_and_norm", True)
-                        ),
+                        exclude_bias_and_norm=bool(grad_clip.get("exclude_bias_and_norm", True)),
                     )
                 else:
                     max_norm = grad_clip.get(
@@ -691,33 +684,48 @@ class BaseDistiller(nn.Module):
         # Diagnostic: log gradient norms periodically
         if self.global_step % 200 == 0:
             import logging as _lg
+
             _diag_logger = _lg.getLogger(__name__)
             grad_norms = [
-                p.grad.data.norm(2).item()
-                for p in self.student.parameters()
-                if p.grad is not None
+                p.grad.data.norm(2).item() for p in self.student.parameters() if p.grad is not None
             ]
-            total_norm = sum(g ** 2 for g in grad_norms) ** 0.5 if grad_norms else 0.0
+            total_norm = sum(g**2 for g in grad_norms) ** 0.5 if grad_norms else 0.0
             params_with_grad = len(grad_norms)
             total_params = sum(1 for p in self.student.parameters() if p.requires_grad)
             if agc_stats is not None:
                 _diag_logger.info(
                     "  [GRAD] step=%d | grad_norm=%.6f | agc_clipped=%d/%d | agc_max_ratio=%.3f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
-                    self.global_step, total_norm, agc_stats["clipped"], agc_stats["total"],
-                    agc_stats["max_ratio"], params_with_grad, total_params,
-                    total_loss.item(), total_loss.requires_grad,
+                    self.global_step,
+                    total_norm,
+                    agc_stats["clipped"],
+                    agc_stats["total"],
+                    agc_stats["max_ratio"],
+                    params_with_grad,
+                    total_params,
+                    total_loss.item(),
+                    total_loss.requires_grad,
                 )
             elif pre_clip_norm is not None:
                 _diag_logger.info(
                     "  [GRAD] step=%d | grad_norm=%.6f | pre_clip=%.6f | clip=%.3f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
-                    self.global_step, total_norm, float(pre_clip_norm), float(grad_clip),
-                    params_with_grad, total_params, total_loss.item(), total_loss.requires_grad,
+                    self.global_step,
+                    total_norm,
+                    float(pre_clip_norm),
+                    float(grad_clip),
+                    params_with_grad,
+                    total_params,
+                    total_loss.item(),
+                    total_loss.requires_grad,
                 )
             else:
                 _diag_logger.info(
                     "  [GRAD] step=%d | grad_norm=%.6f | params_with_grad=%d/%d | loss=%.6f (requires_grad=%s)",
-                    self.global_step, total_norm, params_with_grad, total_params,
-                    total_loss.item(), total_loss.requires_grad,
+                    self.global_step,
+                    total_norm,
+                    params_with_grad,
+                    total_params,
+                    total_loss.item(),
+                    total_loss.requires_grad,
                 )
 
         opt.step()

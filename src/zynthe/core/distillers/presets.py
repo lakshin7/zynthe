@@ -9,9 +9,10 @@ maximum compression) and are consumed by :mod:`core.distillers.toolkit`
 
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any, Dict, List, OrderedDict as OrderedDictType
 from collections import OrderedDict
+from copy import deepcopy
+from typing import Any, Dict, List
+from typing import OrderedDict as OrderedDictType
 
 PresetConfig = Dict[str, Any]
 

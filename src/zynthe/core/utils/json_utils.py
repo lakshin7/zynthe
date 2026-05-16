@@ -4,9 +4,9 @@ JSON serialization utilities for handling numpy arrays and other non-serializabl
 
 from __future__ import annotations
 
+from typing import Any
 
 import numpy as np
-from typing import Any
 
 
 def convert_to_serializable(obj: Any) -> Any:

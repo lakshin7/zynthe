@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-
 from .exporter import PackageExporter, PackageVerifier
 from .manifest import (
-    ArtifactRecord,
     MANIFEST_FILENAME,
     MANIFEST_VERSION,
+    ArtifactRecord,
     Manifest,
     compute_sha256,
 )

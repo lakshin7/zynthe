@@ -58,12 +58,12 @@ Advanced Usage:
 
 from __future__ import annotations
 
-
-from .model_inspector import ModelInspector
-from .data_inspector import DataInspector
-from .resource_probe import ResourceProbe
-from .analyser import PreflightAnalyzer, run_preflight_check
 import logging
+
+from .analyser import PreflightAnalyzer, run_preflight_check
+from .data_inspector import DataInspector
+from .model_inspector import ModelInspector
+from .resource_probe import ResourceProbe
 
 logger = logging.getLogger(__name__)
 

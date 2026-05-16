@@ -31,14 +31,14 @@ Reference:
 
 from __future__ import annotations
 
-
-from typing import Dict, List, Optional, Tuple, Any
 import logging
+import math
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import math
 
 from .base_distiller import BaseDistiller
 
@@ -783,9 +783,7 @@ class KDHintonDistiller(BaseDistiller):
 
                     if loss_type in self.hint_loss_fns:
                         # Upcast to float32 for numerically stable loss computation
-                        hint_loss = self.hint_loss_fns[loss_type](
-                            hint_t.float(), hint_s.float()
-                        )
+                        hint_loss = self.hint_loss_fns[loss_type](hint_t.float(), hint_s.float())
                         weighted_hint_loss = hint_weight * current_hint_weight * hint_loss
                         hint_loss_total += weighted_hint_loss
                         loss_dict[f"hint_{i}_{loss_type}"] = hint_loss.item()

@@ -16,14 +16,14 @@ License: MIT
 
 from __future__ import annotations
 
+import logging
+import math
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, List, Optional
 
 import torch
 import torch.optim as optim
 from torch.optim import Optimizer
-from typing import Dict, List, Optional, Any, DefaultDict
-import logging
-import math
-from collections import defaultdict
 
 LOG = logging.getLogger(__name__)
 

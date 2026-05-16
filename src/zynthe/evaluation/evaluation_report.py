@@ -5,11 +5,10 @@ Defines the standard EvaluationReport dataclass for modality-agnostic evaluation
 
 from __future__ import annotations
 
-
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-import json
 from typing import Any, Dict, List, Optional
 
 

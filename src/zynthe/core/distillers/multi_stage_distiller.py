@@ -21,27 +21,29 @@ Example:
 
 from __future__ import annotations
 
+import csv
+import json
+import time
+import warnings
+from copy import deepcopy
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from typing import Dict, List, Any, Optional, Tuple, Mapping
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from pathlib import Path
-import csv
 import yaml
-import json
-from datetime import datetime
-import warnings
-from copy import deepcopy
-import time
+from torch.utils.data import DataLoader
+
+from zynthe.core.adapters import AdapterRegistry
+from zynthe.evaluation.metrics_extended import CompressionAwareScore, DistillationEfficacyIndex
 
 from .base_distiller import BaseDistiller
-from .kd_hinton import KDHintonDistiller
 from .feature_distiller import FeatureDistiller
-from .similarity_transfer import SimilarityTransfer
+from .kd_hinton import KDHintonDistiller
 from .presets import get_preset, list_presets
-from zynthe.evaluation.metrics_extended import DistillationEfficacyIndex, CompressionAwareScore
+from .similarity_transfer import SimilarityTransfer
 
 # Optional imports
 try:
@@ -357,6 +359,12 @@ class MultiStageDistiller:
         self.output_dir = Path(output_dir)
         self.teacher_params = int(sum(p.numel() for p in self.teacher.parameters()))
         self.student_params = int(sum(p.numel() for p in self.student.parameters()))
+
+        # Detect multi-modal/vision adapters
+        registry = AdapterRegistry()
+        self.teacher_adapter = registry.detect(self.teacher)
+        self.student_adapter = registry.detect(self.student)
+
         self._teacher_baseline: Optional[Dict[str, float]] = None
 
         callbacks_cfg = self.config.get("callbacks", {})
@@ -599,9 +607,7 @@ class MultiStageDistiller:
                             rollback_metrics["rollback_reason"] = reason
                             stage_metrics = rollback_metrics
                         except Exception as exc:
-                            warnings.warn(
-                                f"Rollback to stage {stage_idx - 1} failed: {exc}"
-                            )
+                            warnings.warn(f"Rollback to stage {stage_idx - 1} failed: {exc}")
 
             stage_metrics["quality_gate_passed"] = bool(quality_ok)
 
@@ -703,22 +709,20 @@ class MultiStageDistiller:
         Returns:
             Computed learning rate (float).
         """
-        trainable_params = sum(
-            p.numel() for p in self.student.parameters() if p.requires_grad
-        )
+        trainable_params = sum(p.numel() for p in self.student.parameters() if p.requires_grad)
 
         # Base LR from model size — tuned for transformers (BERT/GPT/ViT)
         # These are ~5x lower than CNN-oriented tables because attention
         # mechanisms are much more sensitive to step size.
-        if trainable_params < 5_000_000:       # < 5M  (tiny)
+        if trainable_params < 5_000_000:  # < 5M  (tiny)
             base_lr = 5e-4
-        elif trainable_params < 30_000_000:    # < 30M (small, e.g. DistilBERT)
+        elif trainable_params < 30_000_000:  # < 30M (small, e.g. DistilBERT)
             base_lr = 2e-4
-        elif trainable_params < 100_000_000:   # < 100M (medium, e.g. BERT-base)
+        elif trainable_params < 100_000_000:  # < 100M (medium, e.g. BERT-base)
             base_lr = 1e-4
-        elif trainable_params < 500_000_000:   # < 500M (large, e.g. BERT-large)
+        elif trainable_params < 500_000_000:  # < 500M (large, e.g. BERT-large)
             base_lr = 5e-5
-        else:                                  # 500M+ (XL / LLM)
+        else:  # 500M+ (XL / LLM)
             base_lr = 2e-5
 
         # Stage decay: later stages refine with smaller steps
@@ -727,7 +731,11 @@ class MultiStageDistiller:
 
         logger.info(
             "  Adaptive LR: %.1e (base=%.1e, params=%.1fM, stage_decay=%.1f^%d)",
-            lr, base_lr, trainable_params / 1e6, stage_decay, stage_idx - 1,
+            lr,
+            base_lr,
+            trainable_params / 1e6,
+            stage_decay,
+            stage_idx - 1,
         )
         return lr
 
@@ -747,7 +755,9 @@ class MultiStageDistiller:
         lowered = str(name).lower()
         return "acc" in lowered or "accuracy" in lowered
 
-    def _init_auto_lr(self, auto_lr_cfg: Dict[str, Any], initial_lr: float) -> Optional[Dict[str, Any]]:
+    def _init_auto_lr(
+        self, auto_lr_cfg: Dict[str, Any], initial_lr: float
+    ) -> Optional[Dict[str, Any]]:
         if not auto_lr_cfg:
             return None
         if not bool(auto_lr_cfg.get("enabled", True)):
@@ -767,7 +777,9 @@ class MultiStageDistiller:
         if minimize is None:
             minimize = not self._is_accuracy_metric(primary)
 
-        reduce_patience = int(auto_lr_cfg.get("reduce_patience", auto_lr_cfg.get("plateau_patience", 1)))
+        reduce_patience = int(
+            auto_lr_cfg.get("reduce_patience", auto_lr_cfg.get("plateau_patience", 1))
+        )
         increase_patience = int(auto_lr_cfg.get("increase_patience", 1))
 
         return {
@@ -889,7 +901,9 @@ class MultiStageDistiller:
             state["slow_progress"] = 0
             action = "reduce"
         elif state["slow_progress"] >= state.get("increase_patience", 1):
-            new_lr = min(state.get("max_lr", lr_before), lr_before * state.get("increase_factor", 1.1))
+            new_lr = min(
+                state.get("max_lr", lr_before), lr_before * state.get("increase_factor", 1.1)
+            )
             state["slow_progress"] = 0
             action = "increase"
 
@@ -900,7 +914,11 @@ class MultiStageDistiller:
         state["cooldown_counter"] = int(state.get("cooldown", 0))
         logger.info(
             "  [AUTOLR] %s lr %.2e -> %.2e | metric=%s=%.6f",
-            action, lr_before, new_lr, metric_name, metric_value,
+            action,
+            lr_before,
+            new_lr,
+            metric_name,
+            metric_value,
         )
 
     def _run_stage(self, stage_idx: int, stage_cfg: Dict) -> Dict[str, float]:
@@ -1061,9 +1079,7 @@ class MultiStageDistiller:
                                 "best_val_accuracy": float(
                                     val_metrics.get("val_accuracy", 0.0) or 0.0
                                 ),
-                                "best_val_loss": float(
-                                    val_metrics.get("val_loss", 0.0) or 0.0
-                                ),
+                                "best_val_loss": float(val_metrics.get("val_loss", 0.0) or 0.0),
                             }
                             try:
                                 best_checkpoint_path = self.controller.save_checkpoint(
@@ -1117,7 +1133,9 @@ class MultiStageDistiller:
 
         return stage_metrics
 
-    def _train_epoch(self, distiller: BaseDistiller, epoch: int, total_epochs: int, *, grad_clip: float = 5.0) -> float:
+    def _train_epoch(
+        self, distiller: BaseDistiller, epoch: int, total_epochs: int, *, grad_clip: float = 5.0
+    ) -> float:
         """
         Train single epoch.
 
@@ -1187,7 +1205,9 @@ class MultiStageDistiller:
                 if consecutive_errors >= 5:
                     logger.error(
                         "ABORTING: %d consecutive batch errors -- this is not a transient "
-                        "issue. Last error: %s", consecutive_errors, e,
+                        "issue. Last error: %s",
+                        consecutive_errors,
+                        e,
                     )
                     raise RuntimeError(
                         f"Training aborted after {consecutive_errors} consecutive batch errors. "
@@ -1241,22 +1261,22 @@ class MultiStageDistiller:
                 try:
                     t0 = time.perf_counter()
                     # Use _safe_forward to handle dtype mismatches (float16 models)
-                    student_out = distiller._safe_forward(
-                        self.student, inputs, {}
-                    )
+                    student_out = distiller._safe_forward(self.student, inputs, {})
                     student_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
                     # Extract logits
                     student_logits = distiller._extract_logits_tensor(student_out)
 
                     # Teacher forward for reference accuracy
-                    teacher_out = distiller._safe_forward(
-                        self.teacher, inputs, {}
-                    )
+                    teacher_out = distiller._safe_forward(self.teacher, inputs, {})
                     teacher_logits = distiller._extract_logits_tensor(teacher_out)
 
                     # Compute accuracy
-                    if labels is not None and hasattr(student_logits, "dim") and student_logits.dim() >= 2:
+                    if (
+                        labels is not None
+                        and hasattr(student_logits, "dim")
+                        and student_logits.dim() >= 2
+                    ):
                         try:
                             total_loss += float(F.cross_entropy(student_logits, labels).item())
                         except Exception:
@@ -1278,11 +1298,18 @@ class MultiStageDistiller:
         latency_ms = float(sum(student_latencies_ms) / max(len(student_latencies_ms), 1))
 
         if eval_errors > 0:
-            logger.warning("  [EVAL] %d/%d batches failed during evaluation!", eval_errors, eval_errors + len(student_latencies_ms))
+            logger.warning(
+                "  [EVAL] %d/%d batches failed during evaluation!",
+                eval_errors,
+                eval_errors + len(student_latencies_ms),
+            )
 
         logger.info(
             "  [EVAL] Student=%.2f%% | Teacher=%.2f%% | total_samples=%d | eval_errors=%d",
-            student_acc, teacher_acc, total, eval_errors,
+            student_acc,
+            teacher_acc,
+            total,
+            eval_errors,
         )
 
         return {
@@ -1483,16 +1510,20 @@ class MultiStageDistiller:
         # Get preflight info
         preflight = self.config.get("preflight", {})
 
+        # Compute actual compression_ratio from model parameters
+        # (consistent with per-stage compression_ratio calculations)
+        actual_compression_ratio = float(self.teacher_params) / max(float(self.student_params), 1.0)
+
         report = {
             "summary": {
                 "total_stages": len(self.stages),
                 "model_type": preflight.get("model_type", "unknown"),
-                "compression_ratio": preflight.get("compression_ratio", 0),
+                "compression_ratio": actual_compression_ratio,
                 "total_accuracy_gain": 0.0,  # Will be updated below
             },
             "preflight": {
                 "model_type": preflight.get("model_type", "unknown"),
-                "compression_ratio": preflight.get("compression_ratio", 0),
+                "compression_ratio": actual_compression_ratio,
                 "stages_completed": [],
             },
             "stages": [],

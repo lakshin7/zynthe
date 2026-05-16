@@ -30,14 +30,13 @@ Usage::
 
 from __future__ import annotations
 
-
-from .base_adapter import ModelAdapter
-from .text_adapter import TextModelAdapter
-from .code_adapter import CodeModelAdapter
-from .vision_adapter import VisionModelAdapter
-from .multimodal_adapter import MultimodalModelAdapter
-from .vlm_adapter import VLMModelAdapter
 from .adapter_registry import AdapterRegistry
+from .base_adapter import ModelAdapter
+from .code_adapter import CodeModelAdapter
+from .multimodal_adapter import MultimodalModelAdapter
+from .text_adapter import TextModelAdapter
+from .vision_adapter import VisionModelAdapter
+from .vlm_adapter import VLMModelAdapter
 
 __all__ = [
     "ModelAdapter",

@@ -5,7 +5,9 @@ settings (max_length, padding/truncation) and returns probabilities and labels.
 """
 
 from __future__ import annotations
-from typing import List, Dict, Any, Optional
+
+from typing import Any, Dict, List, Optional
+
 import torch
 import torch.nn.functional as F
 

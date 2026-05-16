@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .manifest import ArtifactRecord, Manifest, MANIFEST_FILENAME
+from .manifest import MANIFEST_FILENAME, ArtifactRecord, Manifest
 
 
 def _safe_destination(base_dir: Path, member_name: str) -> Path:

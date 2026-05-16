@@ -6,8 +6,9 @@ trainer or dataloader logic.
 """
 
 from __future__ import annotations
-from typing import Dict, Callable, Any, Optional, List
+
 import logging
+from typing import Any, Callable, Dict, List, Optional
 
 LOG = logging.getLogger(__name__)
 

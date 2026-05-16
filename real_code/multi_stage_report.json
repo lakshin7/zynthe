@@ -1,0 +1,174 @@
+{
+  "summary": {
+    "total_stages": 3,
+    "model_type": "unknown",
+    "compression_ratio": 0,
+    "total_accuracy_gain": 0.0,
+    "preset": "balanced",
+    "best_dei": 0.0,
+    "best_cas": -0.4,
+    "best_stage_by_dei": "Stage 1 - Logit Alignment",
+    "best_stage_by_cas": "Stage 1 - Logit Alignment"
+  },
+  "preflight": {
+    "model_type": "unknown",
+    "compression_ratio": 0,
+    "stages_completed": [
+      {
+        "name": "Stage 1 - Logit Alignment",
+        "accuracy_gain": 0.0
+      },
+      {
+        "name": "Stage 2 - Feature Refinement",
+        "accuracy_gain": 0.0
+      },
+      {
+        "name": "Stage 3 - Structural Similarity",
+        "accuracy_gain": 0.0
+      }
+    ]
+  },
+  "stages": [
+    {
+      "stage": 1,
+      "name": "Stage 1 - Logit Alignment",
+      "type": "kd",
+      "epochs": 3,
+      "metrics": {
+        "train_loss": 0.23104496859014034,
+        "val_loss": 0.0,
+        "val_accuracy": 0.0,
+        "quality_gate_passed": true
+      }
+    },
+    {
+      "stage": 2,
+      "name": "Stage 2 - Feature Refinement",
+      "type": "feature",
+      "epochs": 4,
+      "metrics": {
+        "train_loss": 0.6933138072490692,
+        "val_loss": 0.0,
+        "val_accuracy": 0.0,
+        "quality_gate_passed": true
+      }
+    },
+    {
+      "stage": 3,
+      "name": "Stage 3 - Structural Similarity",
+      "type": "similarity",
+      "epochs": 3,
+      "metrics": {
+        "train_loss": 0.0,
+        "val_loss": 0.0,
+        "val_accuracy": 0.0,
+        "quality_gate_passed": true
+      }
+    }
+  ],
+  "final_metrics": {
+    "final_accuracy": 0.0,
+    "total_accuracy_gain": 0.0,
+    "final_loss": 0.0
+  },
+  "stage_controller_report": {
+    "total_stages": 3,
+    "completed_stages": 3,
+    "stage_history": [
+      {
+        "stage": 1,
+        "name": "Stage 1 - Logit Alignment",
+        "metrics": {
+          "train_loss": 0.23104496859014034,
+          "val_loss": 0.0,
+          "val_accuracy": 0.0,
+          "quality_gate_passed": true
+        },
+        "timestamp": "2026-05-16T05:55:51.919170"
+      },
+      {
+        "stage": 2,
+        "name": "Stage 2 - Feature Refinement",
+        "metrics": {
+          "train_loss": 0.6933138072490692,
+          "val_loss": 0.0,
+          "val_accuracy": 0.0,
+          "quality_gate_passed": true
+        },
+        "timestamp": "2026-05-16T05:55:53.734929"
+      },
+      {
+        "stage": 3,
+        "name": "Stage 3 - Structural Similarity",
+        "metrics": {
+          "train_loss": 0.0,
+          "val_loss": 0.0,
+          "val_accuracy": 0.0,
+          "quality_gate_passed": true
+        },
+        "timestamp": "2026-05-16T05:55:54.838178"
+      }
+    ],
+    "checkpoints": {
+      "1": "real_code/stage_1_checkpoint.pt",
+      "2": "real_code/stage_2_checkpoint.pt",
+      "3": "real_code/stage_3_checkpoint.pt"
+    },
+    "best_checkpoints": {}
+  },
+  "metadata": {
+    "preset": "balanced"
+  },
+  "run_state": {
+    "stopped_early": false,
+    "stop_reason": null,
+    "stopped_at_stage": null
+  },
+  "stage_comparison": [
+    {
+      "stage": 1,
+      "name": "Stage 1 - Logit Alignment",
+      "type": "kd",
+      "val_accuracy_pct": 0.0,
+      "student_latency_ms": 1.0,
+      "teacher_accuracy_pct": 0.0,
+      "teacher_latency_ms": 1.0,
+      "dei": 0.0,
+      "cas": -0.4,
+      "compression_ratio": 1.0,
+      "accuracy_delta_pct": null,
+      "dei_delta": null,
+      "cas_delta": null
+    },
+    {
+      "stage": 2,
+      "name": "Stage 2 - Feature Refinement",
+      "type": "feature",
+      "val_accuracy_pct": 0.0,
+      "student_latency_ms": 1.0,
+      "teacher_accuracy_pct": 0.0,
+      "teacher_latency_ms": 1.0,
+      "dei": 0.0,
+      "cas": -0.4,
+      "compression_ratio": 1.0,
+      "accuracy_delta_pct": 0.0,
+      "dei_delta": 0.0,
+      "cas_delta": 0.0
+    },
+    {
+      "stage": 3,
+      "name": "Stage 3 - Structural Similarity",
+      "type": "similarity",
+      "val_accuracy_pct": 0.0,
+      "student_latency_ms": 1.0,
+      "teacher_accuracy_pct": 0.0,
+      "teacher_latency_ms": 1.0,
+      "dei": 0.0,
+      "cas": -0.4,
+      "compression_ratio": 1.0,
+      "accuracy_delta_pct": 0.0,
+      "dei_delta": 0.0,
+      "cas_delta": 0.0
+    }
+  ]
+}

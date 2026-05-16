@@ -13,12 +13,11 @@ Author: Zynthé Team
 
 from __future__ import annotations
 
-
 import json
-from pathlib import Path
-from collections import Counter
-from typing import Dict, List, Optional, Any
 import logging
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 LOG = logging.getLogger(__name__)
 

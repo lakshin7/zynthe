@@ -5,13 +5,12 @@ Tracks model download progress and reports via ProgressTracker
 
 from __future__ import annotations
 
-
 import logging
 import os
-from typing import Optional, Any
 from pathlib import Path
+from typing import Any, Optional
 
-from zynthe.core.utils.progress_tracker import ProgressTracker, ProgressStage
+from zynthe.core.utils.progress_tracker import ProgressStage, ProgressTracker
 
 logger = logging.getLogger(__name__)
 

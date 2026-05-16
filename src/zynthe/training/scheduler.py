@@ -17,23 +17,23 @@ License: MIT
 
 from __future__ import annotations
 
+import logging
+import math
+from typing import Any, Dict, List, Optional
 
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
-    StepLR,
-    MultiStepLR,
-    ExponentialLR,
-    ReduceLROnPlateau,
-    LinearLR,
-    PolynomialLR,
     CyclicLR,
-    OneCycleLR,
+    ExponentialLR,
     LambdaLR,
+    LinearLR,
+    MultiStepLR,
+    OneCycleLR,
+    PolynomialLR,
+    ReduceLROnPlateau,
+    StepLR,
 )
-from typing import Dict, List, Optional, Any
-import logging
-import math
 
 LOG = logging.getLogger(__name__)
 

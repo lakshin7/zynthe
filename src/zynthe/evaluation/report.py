@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def generate_report(summary, plots, config, output_path, fmt="md"):
             html_lines.append(
                 '<div style="margin-bottom:1em;">'
                 f'<img src="{fname}" alt="{fname}" style="max-width:600px;">'
-                f'<br><small>{fname}</small></div>'
+                f"<br><small>{fname}</small></div>"
             )
         html_lines.append("</body>")
         html_lines.append("</html>")

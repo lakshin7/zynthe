@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional, Union, Dict, Any, List, Tuple, Callable
+import logging
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 import torch
 import torch.nn.functional as F
 from torch import nn
+
 from zynthe.core.distillers.base_distiller import BaseDistiller
-import warnings
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -941,16 +943,8 @@ class AttentionTransferDistiller(BaseDistiller):
             Tuple of (total_loss, loss_dict) for compatibility with BaseDistiller
         """
         # Convert outputs to dict format for internal processing
-        teacher_feats = (
-            self._output_to_dict(teacher_outputs)
-            if not isinstance(teacher_outputs, dict)
-            else teacher_outputs
-        )
-        student_feats = (
-            self._output_to_dict(student_outputs)
-            if not isinstance(student_outputs, dict)
-            else student_outputs
-        )
+        teacher_feats = dict(self._output_to_dict(teacher_outputs) if not isinstance(teacher_outputs, dict) else teacher_outputs)
+        student_feats = dict(self._output_to_dict(student_outputs) if not isinstance(student_outputs, dict) else student_outputs)
 
         # Merge with provided features if available
         if teacher_features:
@@ -963,20 +957,20 @@ class AttentionTransferDistiller(BaseDistiller):
 
         # Classical Methods (backward compatible)
         if self.mode in ["spatial", "hybrid"]:
-            if "last_hidden_state" in teacher_feats and "last_hidden_state" in student_feats:
+            if teacher_feats.get("last_hidden_state") is not None and student_feats.get("last_hidden_state") is not None:
                 t_map = self.compute_spatial_attention(teacher_feats["last_hidden_state"])
                 s_map = self.compute_spatial_attention(student_feats["last_hidden_state"])
                 s_map = self.matcher.resize(s_map, t_map)
                 losses.append(self.loss_composer.compute(s_map, t_map))
 
         if self.mode in ["affinity", "hybrid"]:
-            if "last_hidden_state" in teacher_feats and "last_hidden_state" in student_feats:
+            if teacher_feats.get("last_hidden_state") is not None and student_feats.get("last_hidden_state") is not None:
                 t_aff = self.compute_affinity_attention(teacher_feats["last_hidden_state"])
                 s_aff = self.compute_affinity_attention(student_feats["last_hidden_state"])
                 losses.append(self.loss_composer.compute(s_aff, t_aff))
 
         if self.mode in ["probabilistic", "hybrid"]:
-            if "last_hidden_state" in teacher_feats and "last_hidden_state" in student_feats:
+            if teacher_feats.get("last_hidden_state") is not None and student_feats.get("last_hidden_state") is not None:
                 t_prob = self.compute_prob_attention(teacher_feats["last_hidden_state"])
                 s_prob = self.compute_prob_attention(student_feats["last_hidden_state"])
                 s_prob = self.matcher.resize(s_prob, t_prob)
@@ -1073,7 +1067,7 @@ class AttentionTransferDistiller(BaseDistiller):
         if not losses:
             # Fallback: basic spatial attention
             warnings.warn("No attention features available, using basic spatial attention")
-            if "last_hidden_state" in teacher_feats and "last_hidden_state" in student_feats:
+            if teacher_feats.get("last_hidden_state") is not None and student_feats.get("last_hidden_state") is not None:
                 t_map = self.compute_spatial_attention(teacher_feats["last_hidden_state"])
                 s_map = self.compute_spatial_attention(student_feats["last_hidden_state"])
                 s_map = self.matcher.resize(s_map, t_map)
@@ -1081,7 +1075,7 @@ class AttentionTransferDistiller(BaseDistiller):
                 self.prepare_for_forward_pass()
                 return loss, {"attention_transfer": loss.item(), **loss_details}
             else:
-                loss = torch.tensor(0.0, device=next(self.student.parameters()).device)
+                loss = torch.tensor(0.0, device=next(self.student.parameters()).device, requires_grad=True)
                 self.prepare_for_forward_pass()
                 return loss, {"attention_transfer": 0.0, **loss_details}
 

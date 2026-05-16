@@ -1,12 +1,14 @@
 from __future__ import annotations
+
+import logging
 import math
 import os
 from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 from zynthe.evaluation.evaluation_report import EvaluationReport
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -20,6 +20,9 @@ Large transformer models (BERT-110M, GPT-2-124M, ViT-86M) deliver state-of-the-a
 ## 🌟 Key Features
 
 - **Modality Agnostic**: Works out-of-the-box with Text, Code, Vision, VLM, and Multimodal models via an auto-detecting `AdapterRegistry`.
+- **Advanced Optimization**: Native support for PyTorch 2.0+ `torch.compile`, multi-GPU Fully Sharded Data Parallel (FSDP), and 8-bit optimizers (via bitsandbytes).
+- **Curriculum & Ensemble Distillation**: Supports sequential distillation stages from intermediate students and merging knowledge from multiple teachers.
+- **Accuracy Boosted**: Automatically adjusts loss weights based on convergence rates and dynamic layer norm divergence for stable, high-fidelity distillation.
 - **Multi-Stage Distillation**: Supports sequential distillation stages:
   - **Logit Distillation** (KD Hinton)
   - **Feature Alignment** (Hidden representations)

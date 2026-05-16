@@ -29,8 +29,9 @@ Safe fallbacks: if keys 'prompt'/'completion' absent, falls back to existing 'te
 """
 
 from __future__ import annotations
-from typing import List, Dict, Any
+
 import logging
+from typing import Any, Dict, List
 
 LOG = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ import torch
 
 from zynthe.core.config.config_manager import ConfigManager
 from zynthe.core.models.model_loader import load_models
-from zynthe.core.pkg.manifest import ArtifactRecord, MANIFEST_FILENAME, Manifest, compute_sha256
+from zynthe.core.pkg.manifest import MANIFEST_FILENAME, ArtifactRecord, Manifest, compute_sha256
 from zynthe.data.dataloaders import create_dataloaders
 
 LOG = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class UnifiedTrainingRuntime:
         cfg_manager.resolved_config = normalized
 
         # Phase 1: config preflight
-        from zynthe.core.preflight.analyser import validate_config_only, run_preflight_check
+        from zynthe.core.preflight.analyser import run_preflight_check, validate_config_only
 
         cfg_validation = validate_config_only(normalized)
         if not cfg_validation.get("is_valid", False):
@@ -652,12 +652,13 @@ class UnifiedTrainingRuntime:
         device: torch.device,
         fallback_tokenizer: Any,
     ) -> Tuple[Any, Any]:
-        from zynthe.core.models.model_saver import load_model
         from transformers import (
             AutoModelForCausalLM,
             AutoModelForSequenceClassification,
             AutoTokenizer,
         )
+
+        from zynthe.core.models.model_saver import load_model
 
         model_class = (
             AutoModelForCausalLM

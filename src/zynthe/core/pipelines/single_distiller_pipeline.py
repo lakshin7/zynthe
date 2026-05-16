@@ -10,14 +10,15 @@ This allows existing distillers to work seamlessly in the new pipeline system.
 
 from __future__ import annotations
 
-
-from typing import Any, Dict, Optional
 import inspect
+from typing import Any, Dict, Optional
+
 import torch
 
-from .base_pipeline import BasePipeline, PipelineMetrics
 from zynthe.core.distillers.base_distiller import BaseDistiller
 from zynthe.core.utils.device_utils import move_to_device
+
+from .base_pipeline import BasePipeline, PipelineMetrics
 
 
 class SingleDistillerPipeline(BasePipeline):
