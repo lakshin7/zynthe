@@ -271,7 +271,7 @@ def test_similarity_transfer_compute_loss_with_hidden_states() -> None:
     with torch.no_grad():
         t_out = teacher(x, labels=y)
         s_out = student(x, labels=y)
-    loss = d.compute_loss(s_out, t_out, y)
+    loss, _ = d.compute_loss(s_out, t_out, y)
     assert torch.isfinite(loss)
 
 
