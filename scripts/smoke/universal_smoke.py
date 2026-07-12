@@ -225,11 +225,24 @@ def run_pair(
     t_load_start = time.time()
     try:
         teacher, student, model_loader = load_pair_models(pair)
-        # Make sure teacher and student have the same output dim —
-        # KL-divergence smoke needs matched logits. Where the smoke
-        # gate shares one architecture for both, we re-seed the
-        # student's init so weights differ.
-        if teacher.config.architectures == student.config.architectures:
+        # When teacher and student are the same architecture (e.g.
+        # smoke gate's torchvision pair or the same-model-pair ViT
+        # test), re-init the student's weights so a KL-divergence
+        # smoke isn't just copying the teacher. Only do this for HF
+        # models that have a `.config` attribute — torchvision models
+        # are initialised fresh anyway.
+        same_arch = False
+        if model_loader == "transformers":
+            same_arch = (
+                getattr(teacher, "config", None) is not None
+                and getattr(student, "config", None) is not None
+                and teacher.config.architectures == student.config.architectures
+            )
+        else:
+            # torchvision ResNet family; both sides are the same
+            # arch by construction.
+            same_arch = type(teacher).__name__ == type(student).__name__
+        if same_arch:
             torch.manual_seed(args_seed())
             for p in student.parameters():
                 if p.dim() >= 2:
