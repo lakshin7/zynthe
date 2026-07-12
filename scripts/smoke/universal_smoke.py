@@ -142,18 +142,22 @@ class _SyntheticBatch(Dataset):
 
 def _classification_sample(seq_len, n_classes):
     """Sequence classification — per-sample input_ids is (seq_len,),
-    DataLoader stacks into (B, seq_len)."""
+    DataLoader stacks into (B, seq_len).
+
+    Label is always 0 — we don't care about correctness in smoke mode,
+    and random labels risk out-of-range on tiny classifiers.
+    """
     return {
         "input_ids": torch.randint(0, 1000, (seq_len,), dtype=torch.long),
         "attention_mask": torch.ones(seq_len, dtype=torch.long),
-        "labels": torch.tensor(random.randint(0, n_classes - 1)),
+        "labels": torch.tensor(0),
     }
 
 
 def _vision_sample(channels, h, w, n_classes):
     return {
         "pixel_values": torch.randn(channels, h, w),
-        "labels": torch.tensor(random.randint(0, n_classes - 1)),
+        "labels": torch.tensor(0),
     }
 
 
@@ -173,12 +177,11 @@ def _clip_sample(seq_len, channels, h, w):
 
 def _factory_for_pair(pair_name: str, pair: dict):
     if pair["task"] == "sequence_classification":
-        # input_shape is (B=ignored, T).
         seq_len = pair["input_shape"][1]
-        return lambda i: _classification_sample(seq_len, 4)
+        return lambda i: _classification_sample(seq_len, 2)
     if pair["task"] == "image_classification":
         c, h, w = pair["input_shape"]
-        return lambda i: _vision_sample(c, h, w, 4)
+        return lambda i: _vision_sample(c, h, w, 2)
     if pair["task"] == "causal_lm":
         seq_len = pair["input_shape"][1]
         return lambda i: _causal_lm_sample(seq_len)
