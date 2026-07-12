@@ -93,10 +93,14 @@ def test_distiller_registry_can_resolve_known_ids() -> None:
     assert reg.get("similarity") is SimilarityTransfer
 
 
-def test_distiller_registry_unknown_raises_valueerror() -> None:
+def test_distiller_registry_unknown_returns_none() -> None:
+    """Current contract of DistillerRegistry.get() — returns None for an
+    unknown name (callers like PipelineBuilder check for None). Decoupling
+    this from the missing-value path keeps the error message at the
+    PipelineBuilder layer where the user-facing string lives.
+    """
     reg = DistillerRegistry()
-    with pytest.raises(ValueError, match="Unknown distiller"):
-        reg.get("not_a_distiller_v0_2_6")
+    assert reg.get("not_a_distiller_v0_2_6") is None
 
 
 # ----------------------------------------------------------------------------
