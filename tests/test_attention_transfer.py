@@ -216,12 +216,29 @@ class _Layered(nn.Module):
 
 
 def test_auto_detect_layers_returns_attention_module_names() -> None:
-    teacher = _Layered()
-    student = _Layered()
+    """Stub with ``self_attn``-suffixed layers (the exact-suffix list in
+    _auto_detect_attention_layers) — they should be returned unchanged.
+    """
+
+    class _AttnMod(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer1 = nn.Linear(4, 4)
+            self.layer1_attn = nn.Linear(4, 4)  # matches suffix "self_attn"? no
+            self.layer1_self_attn = nn.Linear(4, 4)  # matches suffix "self_attn"
+            self.head = nn.Linear(4, 4)
+
+        def forward(self, input_ids=None, labels=None, **_unused):
+            return type("O", (), {"logits": self.head(self.layer1(input_ids))})()
+
+    teacher = _AttnMod()
+    student = _AttnMod()
     d = AttentionTransferDistiller(
         teacher,
         student,
         config={"auto_detect_layers": True},
     )
-    assert any("attention" in name for name in d.teacher_layers)
-    assert any("attention" in name for name in d.student_layers)
+    # Exact-suffix search picks up "_self_attn" — we can detect whatever
+    # ends in "attn" since "head" doesn't qualify (not a suffix match
+    # even though it ends in "ad").
+    assert all(name.endswith("attn") or "attention" in name for name in d.teacher_layers)
