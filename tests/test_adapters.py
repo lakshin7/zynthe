@@ -130,11 +130,18 @@ def test_registry_detects_vlm_with_lm_head() -> None:
     assert adapter.modality == "vlm"
 
 
-def test_registry_falls_back_to_text() -> None:
+def test_registry_falls_back_to_generic() -> None:
+    """Phase 1 used to fall back to ``text`` for unrecognised modules;
+    Phase 2 promotes :class:`GenericHFAdapter` to be the universal
+    fallback when no typed adapter matches (the registry tries
+    Generic last so it only claims modules with at least one well-known
+    HF kwarg).  For an opaque ``forward(x)`` module neither matched
+    and the registry now resolves to ``generic`` by ``AdapterRegistry``
+    design.
+    """
     reg = AdapterRegistry()
     adapter = reg.detect(_Unknown())
-    # Nothing matches → fallback to TextModelAdapter.
-    assert adapter.modality == "text"
+    assert adapter.modality == "generic"
 
 
 # ----------------------------------------------------------------------------
