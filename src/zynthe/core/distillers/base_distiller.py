@@ -94,6 +94,8 @@ class BaseDistiller(nn.Module):
         self.teacher = teacher
         self.student = student
         self.config = config or {}
+        if isinstance(device, str):
+            device = torch.device(device)
         self.device = device or self._auto_detect_device()
 
         # Move models to device

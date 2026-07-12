@@ -90,7 +90,9 @@ class BasePipeline(ABC, nn.Module):
             teacher: Pre-trained teacher model
             student: Student model to train
             config: Pipeline configuration
-            device: Target device (auto-detect if None)
+            device: Target device (auto-detect if None; ``"cpu"`` /
+                ``"cuda"`` strings are accepted and coerced to a
+                :class:`torch.device`).
             name: Pipeline name for logging
         """
         super().__init__()
@@ -98,6 +100,8 @@ class BasePipeline(ABC, nn.Module):
         self.teacher = teacher
         self.student = student
         self.config = config or {}
+        if isinstance(device, str):
+            device = torch.device(device)
         self.device = device or self._auto_detect_device()
         self.name = name or self.__class__.__name__
 
