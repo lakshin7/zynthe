@@ -349,6 +349,16 @@ def main():
         "results": results,
     }
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    # Echo failures to stdout so the Modal runner sees them.
+    for r in results:
+        if not r.get("success"):
+            print(f"[smoke][FAIL] {r['pair']}: {r.get('error', 'no error recorded')}", file=sys.stderr)
+        else:
+            extra = (
+                f"teacher_adapter={r.get('teacher_adapter')}, "
+                f"student_adapter={r.get('student_adapter')}"
+            )
+            print(f"[smoke][OK]   {r['pair']}: {extra}", file=sys.stderr)
     successes = sum(1 for r in results if r.get("success"))
     total = len(results)
     print(f"\n[smoke] {successes}/{total} pairs succeeded. results -> {out_path}")
