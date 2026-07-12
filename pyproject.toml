@@ -96,8 +96,12 @@ pythonpath = ["src"]
 addopts = "-ra"
 # Phase 1: silence third-party deprecations that we cannot fix (matplotlib
 # -> pyparsing), keep our own UserWarnings visible. Use `-W error::UserWarning`
-# from the CLI to re-promote them to errors when triaging.
+# from the CLI to re-promote first-party warnings to errors when triaging.
 filterwarnings = [
+    "ignore:.*'oneOf' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
+    "ignore:.*'parseString' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
+    "ignore:.*'resetCache' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
+    "ignore:.*'enablePackrat' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
     "ignore::DeprecationWarning:matplotlib.*",
     "ignore::DeprecationWarning:pyparsing.*",
 ]
