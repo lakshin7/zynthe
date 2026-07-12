@@ -9,7 +9,7 @@ Provides :class:`AdapterRegistry` which:
 3. Supports explicit overrides via ``registry.get("text")``.
 
 Detection priority:
-    VLM → Multimodal → Vision → Code → Text (default fallback).
+    VLM → Multimodal → Vision → Code → Text → GenericHF (last-resort fallback).
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import torch.nn as nn
 
 from .base_adapter import ModelAdapter
 from .code_adapter import CodeModelAdapter
+from .generic_hf_adapter import GenericHFAdapter
 from .multimodal_adapter import MultimodalModelAdapter
 from .text_adapter import TextModelAdapter
 from .vision_adapter import VisionModelAdapter
@@ -43,12 +44,15 @@ class AdapterRegistry:
     def __init__(self) -> None:
         # Ordered from most specific to least specific.
         # detect() will return the first adapter that claims support.
+        # GenericHFAdapter is always last so it acts as the universal
+        # fallback for any HF model the typed adapters couldn't claim.
         self._detection_order: list = [
             VLMModelAdapter,
             MultimodalModelAdapter,
             VisionModelAdapter,
             CodeModelAdapter,
             TextModelAdapter,
+            GenericHFAdapter,
         ]
 
         # Name → singleton instance mapping.
@@ -62,19 +66,24 @@ class AdapterRegistry:
         self._by_name["vision"] = VisionModelAdapter()
         self._by_name["multimodal"] = MultimodalModelAdapter()
         self._by_name["vlm"] = VLMModelAdapter()
+        self._by_name["generic"] = GenericHFAdapter()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-
     def detect(self, model: nn.Module) -> ModelAdapter:
         """Inspect *model* and return the best-matching adapter.
 
-        Walks the detection order (VLM → Multimodal → Vision → Code → Text)
-        and returns the first adapter whose ``supports_model()``
-        returns ``True``.
+        Walks the detection order (VLM → Multimodal → Vision → Code → Text
+        → GenericHF) and returns the first adapter whose
+        ``supports_model()`` returns ``True``.
 
-        Falls back to :class:`TextModelAdapter` when nothing matches.
+        The :class:`GenericHFAdapter` matches any HF model whose forward
+        signature includes at least one well-known input kwarg
+        (``input_ids`` / ``pixel_values`` / ``input_features`` /
+        ``input_values``), so any architecture not claimed by the more
+        specific adapters lands here.  No more silent fallback to the
+        text adapter.
 
         Args:
             model: A PyTorch model to inspect.
@@ -91,15 +100,17 @@ class AdapterRegistry:
             if adapter.supports_model(model):
                 return adapter
 
-        # Fallback
-        return self._by_name["text"]
+        # Final fallback — only if forward() is missing entirely or
+        # has no known input keys.
+        return self._by_name.get("generic", self._by_name["text"])
+
 
     def get(self, modality: str) -> ModelAdapter:
         """Return an adapter by explicit modality name.
 
         Args:
             modality: One of ``"text"``, ``"code"``, ``"vision"``,
-                ``"multimodal"``, ``"vlm"``.
+                ``"multimodal"``, ``"vlm"``, ``"generic"``.
 
         Returns:
             Adapter instance.
