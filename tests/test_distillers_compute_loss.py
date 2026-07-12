@@ -158,7 +158,7 @@ def test_kd_hinton_compute_loss_label_smoothing() -> None:
     )
 
     x = torch.randint(0, 32, (2, 4))
-    y = torch.randint(0, 4, (2,))
+    y = torch.randint(0, 4, (2, 4))
     with torch.no_grad():
         t_out = teacher(x, labels=y)
         s_out = student(x, labels=y)
@@ -208,7 +208,7 @@ def test_feature_distiller_compute_loss_with_alignment() -> None:
     )
 
     x = torch.randint(0, 32, (2, 4))
-    y = torch.randint(0, 4, (2,))
+    y = torch.randint(0, 4, (2, 4))
     with torch.no_grad():
         t_out = teacher(x)
         s_out = student(x)
@@ -267,7 +267,7 @@ def test_similarity_transfer_compute_loss_with_hidden_states() -> None:
     )
 
     x = torch.randint(0, 32, (2, 4))
-    y = torch.randint(0, 4, (2,))
+    y = torch.randint(0, 4, (2, 4))
     with torch.no_grad():
         t_out = teacher(x, labels=y)
         s_out = student(x, labels=y)
@@ -301,7 +301,7 @@ def test_attention_transfer_compute_loss_spatial_mode() -> None:
         )
 
     x = torch.randint(0, 32, (2, 4))
-    y = torch.randint(0, 4, (2,))
+    y = torch.randint(0, 4, (2, 4))
     with torch.no_grad():
         t_out = teacher(x, labels=y)
         s_out = student(x, labels=y)
@@ -335,7 +335,7 @@ def test_attention_transfer_compute_loss_rollout() -> None:
         )
 
     x = torch.randint(0, 32, (2, 4))
-    y = torch.randint(0, 4, (2,))
+    y = torch.randint(0, 4, (2, 4))
     with torch.no_grad():
         t_out = teacher(x, labels=y)
         s_out = student(x, labels=y)
@@ -351,12 +351,15 @@ def test_attention_transfer_compute_loss_rollout() -> None:
 
 def test_multi_stage_distiller_get_weights_does_not_crash() -> None:
     """Smoke: build a MultiStageDistiller via a preset and confirm it
-    constructs without error.
+    constructs without error. ``list_presets()`` exposes the available
+    preset names; we pick the first one.
     """
     from zynthe.core.distillers.multi_stage_distiller import MultiStageDistiller
-    from zynthe.core.distillers.presets import get_preset
+    from zynthe.core.distillers.presets import get_preset, list_presets
 
-    preset = get_preset("quick")
+    available = list_presets()
+    assert len(available) > 0, "at least one preset should be registered"
+    preset = get_preset(available[0])
     assert preset is not None
 
     teacher = _TinyHFMod(num_classes=4, hidden=8, layers=1)
