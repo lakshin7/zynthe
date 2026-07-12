@@ -15,12 +15,26 @@ from __future__ import annotations
 import importlib
 from typing import Tuple
 
+import warnings
+
 import pytest
 
 import zynthe
 
 
 PUBLIC_NAMES: Tuple[str, ...] = tuple(name for name in zynthe.__all__ if name != "__version__")
+
+
+@pytest.fixture(autouse=True)
+def _silence_third_party_deprecations():
+    """The matplotlib -> pyparsing chain emits DeprecationWarnings when
+    first imported. We can't filter them reliably from pyproject (the
+    dotted module path is awkward under pytest config parsing), so we
+    silence them inside the test using warnings.catch_warnings.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        yield
 
 
 @pytest.mark.parametrize("name", PUBLIC_NAMES)
