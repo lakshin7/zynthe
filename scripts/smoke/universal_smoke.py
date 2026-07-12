@@ -109,6 +109,10 @@ def load_pair_models(pair: dict):
         from transformers import AutoModelForImageClassification
 
         cls = AutoModelForImageClassification
+    elif task == "causal_lm":
+        from transformers import AutoModelForCausalLM
+
+        cls = AutoModelForCausalLM
     elif task == "vision_language_contrastive":
         from transformers import AutoModel
 
@@ -297,13 +301,46 @@ def run_pair(
         return model(**batch)
 
     def _extract_logits(out):
-        if hasattr(out, "logits"):
+        """Pull a 2-D logits tensor from arbitrary model outputs.
+
+        Order of preference:
+        1. .logits attribute (Sequence Classification, Image Classif.).
+        2. .logits_per_image / .logits_per_text (CLIP).
+        3. dict "logits" key.
+        4. Plain torch.Tensor (torchvision ResNet).
+        5. Any 2-D tensor attribute named like *logit* (GPT-2 LM head
+           head when loaded as AutoModel returns hidden states, not
+           logits).
+        """
+        if hasattr(out, "logits") and isinstance(out.logits, torch.Tensor):
             return out.logits
-        if isinstance(out, dict) and "logits" in out:
+        for attr in ("logits_per_image", "logits_per_text"):
+            if hasattr(out, attr):
+                v = getattr(out, attr)
+                if isinstance(v, torch.Tensor):
+                    return v
+        if isinstance(out, dict) and "logits" in out and isinstance(out["logits"], torch.Tensor):
             return out["logits"]
-        # Torchvision-style output: the tensor is the logits.
         if isinstance(out, torch.Tensor):
             return out
+        # Last-ditch: search output object for any tensor attribute.
+        for name in dir(out):
+            if name.startswith("_") or name in {"loss"}:
+                continue
+            v = getattr(out, name, None)
+            if (
+                isinstance(v, torch.Tensor)
+                and v.dim() == 2
+                and "logit" in name.lower()
+            ):
+                return v
+            if (
+                isinstance(v, torch.Tensor)
+                and v.dim() == 3
+                and "logit" in name.lower()
+            ):
+                # Causal LM: take the vocab-projection slice.
+                return v
         raise TypeError(f"can't extract logits from {type(out).__name__}")
 
     if quick:
