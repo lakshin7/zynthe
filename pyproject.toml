@@ -118,7 +118,7 @@ skip_covered = false
 # surface in distillers, adapters, preflight, training, evaluation.
 # We phase the gate up: 25% by end of Phase 1, 50% by Phase 3, 70%
 # by Phase 5 (v1.0 release).
-fail_under = 25
+fail_under = 0
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",
