@@ -63,27 +63,33 @@ image = (
 app = modal.App("zynthe-tests")
 
 
+def _do_clone(branch: str) -> None:
+    """Refresh /repo to the latest of *branch*. Idempotent."""
+    subprocess.run(
+        [
+            "bash",
+            "-lc",
+            (
+                "rm -rf /repo && "
+                f"git clone --depth 1 --branch {branch} {REPO_URL} /repo && "
+                "cd /repo && git log -1 --oneline"
+            ),
+        ],
+        check=True,
+        text=True,
+    )
+
+
 @app.function(
     gpu="L4",
     timeout=60 * 45,
     cpu=4.0,
     memory=8192,
-    image=image.run_commands(
-        "git clone --depth 1 --branch main " + REPO_URL + " /repo",
-    ),
+    image=image,
 )
 def _run_pytest(branch: str, select: str, extra_args: str, gpu: str) -> int:
-    """Install the repo and run pytest. Return the pytest exit code."""
-    if branch != DEFAULT_BRANCH:
-        # Re-clone at a non-default branch.
-        subprocess.run(
-            [
-                "bash",
-                "-lc",
-                f"rm -rf /repo && git clone --depth 1 --branch {branch} {REPO_URL} /repo",
-            ],
-            check=True,
-        )
+    """Clone the latest of *branch*, install zynthe, run pytest. Return exit code."""
+    _do_clone(branch)
 
     print(f"[modal] running pytest on GPU={gpu}")
     cmd = [
