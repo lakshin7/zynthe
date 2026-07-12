@@ -43,40 +43,67 @@ from torch.utils.data import DataLoader, Dataset
 PAIRS = {
     "bert": {
         "teacher": "hf-internal-testing/tiny-bert",
-        "student": "hf-internal-testing/tiny-distilbert",
+        "student": "prajjwal1/bert-tiny",
         "task": "sequence_classification",
         "input_shape": (4, 32),
-        "vocab_delta": 0,
     },
     "vit": {
-        "teacher": "hf-internal-testing/tiny-vit",
-        "student": "hf-internal-testing/tiny-deit",
+        "teacher": "google/vit-base-patch16-224-in21k",
+        "student": "facebook/deit-tiny-patch16-224",
         "task": "image_classification",
         "input_shape": (3, 32, 32),
-        "vocab_delta": 0,
+        "image_long_side": 224,  # ViTs trained at 224 — we keep this for future tests.
     },
     "gpt2": {
-        "teacher": "hf-internal-testing/tiny-gpt2",
+        "teacher": "sshleifer/tiny-gpt2",
         "student": "sshleifer/tiny-gpt2",
         "task": "causal_lm",
         "input_shape": (4, 32),
-        "vocab_delta": 0,
     },
     "clip": {
-        "teacher": "hf-internal-testing/tiny-clip",
-        "student": "hf-internal-testing/tiny-clip",
+        # We use the production CLIP for the universal-model proof.
+        # It is heavier (~600 MB download). Skip if --skip-clip is set.
+        "teacher": "openai/clip-vit-base-patch32",
+        "student": "openai/clip-vit-base-patch32",
         "task": "vision_language_contrastive",
         "input_shape": (3, 32, 32),
-        "vocab_delta": 0,
+        "image_long_side": 224,
     },
     "resnet": {
+        # Both teacher and student are the same small torchvision model
+        # so we can prove the vision adapter path on a pure-CNN pair
+        # (no HF download).
         "teacher": "resnet18",
         "student": "resnet18",
         "task": "image_classification",
         "input_shape": (3, 32, 32),
-        "vocab_delta": 0,
     },
 }
+
+
+def is_torchvision_pair(pair: dict) -> bool:
+    """Tiny dataset+torchvision path uses ``torchvision.models`` rather
+    than ``transformers.AutoModel``.
+    """
+    return "/" not in pair["teacher"] and "/" not in pair["student"]
+
+
+def load_pair_models(pair: dict):
+    """Load teacher + student via either transformers or torchvision.
+
+    Returns (teacher, student, model_loader_label).
+    """
+    if is_torchvision_pair(pair):
+        from torchvision import models
+
+        teacher = getattr(models, pair["teacher"])()
+        student = getattr(models, pair["student"])()
+        return teacher, student, "torchvision"
+    from transformers import AutoModel
+
+    teacher = AutoModel.from_pretrained(pair["teacher"])
+    student = AutoModel.from_pretrained(pair["student"])
+    return teacher, student, "transformers"
 
 
 # ----------------------------------------------------------------------------
@@ -162,14 +189,11 @@ def run_pair(
 
     Returns a dict of metrics (success, loss progression, step times).
     """
-    from transformers import AutoModel, AutoTokenizer
-
     print(f"\n[smoke] {pair_name}: {pair['teacher']} -> {pair['student']}")
 
     t_load_start = time.time()
     try:
-        teacher = AutoModel.from_pretrained(pair["teacher"])
-        student = AutoModel.from_pretrained(pair["student"])
+        teacher, student, model_loader = load_pair_models(pair)
     except Exception as exc:  # noqa: BLE001 — smoke gate reports the error.
         return {
             "pair": pair_name,
@@ -190,7 +214,7 @@ def run_pair(
     teacher_adapter = registry.detect(teacher)
     print(
         f"  adapters — teacher={teacher_adapter.modality!r}, "
-        f"student={student_adapter.modality!r}"
+        f"student={student_adapter.modality!r}, loader={model_loader!r}"
     )
 
     # Dataset / loader.
@@ -206,20 +230,44 @@ def run_pair(
     losses: list[float] = []
     step_times: list[float] = []
 
+    def _call(model, batch):
+        """Dispatch on the loader kind. Torchvision takes tensor only;
+        transformers takes **batch.
+        """
+        if model_loader == "torchvision":
+            x = batch.get("pixel_values")
+            if x is None:
+                raise TypeError("torchvision pair missing 'pixel_values'")
+            return model(x)
+        return model(**batch)
+
+    def _extract_logits(out):
+        if hasattr(out, "logits"):
+            return out.logits
+        if isinstance(out, dict) and "logits" in out:
+            return out["logits"]
+        # Torchvision-style output: the tensor is the logits.
+        if isinstance(out, torch.Tensor):
+            return out
+        raise TypeError(f"can't extract logits from {type(out).__name__}")
+
     if quick:
         # Just verify forward + backward.
         last_err: str | None = None
         quick_success = False
         for batch in loader:
-            batch = {k: v.to(device) for k, v in batch.items()}
+            batch_dev = {
+                k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+                for k, v in batch.items()
+            }
             with torch.no_grad():
-                t_out = teacher(**batch)
+                t_out = _call(teacher, batch_dev)
             try:
-                s_out = student(**batch)
+                s_out = _call(student, batch_dev)
                 quick_success = True
                 print(
                     f"  [quick] forward OK — logits shape "
-                    f"{tuple(s_out.logits.shape) if hasattr(s_out, 'logits') else 'n/a'}"
+                    f"{tuple(_extract_logits(s_out).shape)}"
                 )
                 break
             except Exception as exc:  # noqa: BLE001 — keep smoke going for next batch.
@@ -231,31 +279,43 @@ def run_pair(
             "load_s": load_s,
             "teacher_adapter": teacher_adapter.modality,
             "student_adapter": student_adapter.modality,
+            "loader": model_loader,
             "mode": "quick",
             "error": last_err,
             "loss_progression": losses,
         }
-
     t_train = time.time()
     for step, batch in enumerate(loader):
         if step >= n_steps:
             break
-        batch = {k: v.to(device) for k, v in batch.items()}
+        batch_dev = {
+            k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+            for k, v in batch.items()
+        }
         t0 = time.time()
         with torch.no_grad():
-            t_out = teacher(**batch)
+            t_out = _call(teacher, batch_dev)
         optim.zero_grad()
-        s_out = student(**batch)
-        # Generic Hinton-style loss: KL between teacher/student logits.
-        if not hasattr(t_out, "logits") or not hasattr(s_out, "logits"):
+        try:
+            s_out = _call(student, batch_dev)
+        except Exception as exc:  # noqa: BLE001
             return {
                 "pair": pair_name,
                 "success": False,
-                "error": "model output missing .logits",
+                "error": f"forward_failed_step_{step}: {type(exc).__name__}: {exc}",
+            }
+        try:
+            t_logits = _extract_logits(t_out).float()
+            s_logits = _extract_logits(s_out).float()
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "pair": pair_name,
+                "success": False,
+                "error": f"logits_extract_failed: {type(exc).__name__}: {exc}",
             }
         loss = torch.nn.functional.kl_div(
-            torch.nn.functional.log_softmax(s_out.logits.float(), dim=-1),
-            torch.nn.functional.softmax(t_out.logits.float(), dim=-1),
+            torch.nn.functional.log_softmax(s_logits, dim=-1),
+            torch.nn.functional.softmax(t_logits, dim=-1),
             reduction="batchmean",
         )
         if not torch.isfinite(loss):
@@ -278,6 +338,7 @@ def run_pair(
         "step_avg_s": sum(step_times) / max(len(step_times), 1),
         "teacher_adapter": teacher_adapter.modality,
         "student_adapter": student_adapter.modality,
+        "loader": model_loader,
         "loss_first": losses[0] if losses else None,
         "loss_last": losses[-1] if losses else None,
         "loss_progression": [round(x, 4) for x in losses[:: max(len(losses) // 6, 1)][:6]],
