@@ -32,9 +32,16 @@ def _ref_l2(f_t: torch.Tensor, f_s: torch.Tensor) -> torch.Tensor:
 
 
 def _ref_cosine(f_t: torch.Tensor, f_s: torch.Tensor) -> torch.Tensor:
-    t = f_t.flatten(2).mean(dim=2)
-    s = f_s.flatten(2).mean(dim=2)
-    cos = torch.nn.functional.cosine_similarity(t, s, dim=1)
+    """Match :meth:`FeatureMetrics.cosine_similarity_loss`.
+
+    The implementation flattens spatial dims then takes ``cosine_similarity``
+    along the channel axis at every spatial position, yielding
+    ``[B, H*W]``. A mean over spatial positions then batch is what it
+    averages to compute the loss.
+    """
+    t = f_t.flatten(2)  # [B, C, H*W]
+    s = f_s.flatten(2)
+    cos = torch.nn.functional.cosine_similarity(t, s, dim=1).mean(dim=1)
     return (1.0 - cos).mean()
 
 
