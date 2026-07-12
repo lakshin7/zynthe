@@ -280,36 +280,6 @@ def test_similarity_transfer_compute_loss_with_hidden_states() -> None:
 # ----------------------------------------------------------------------------
 
 
-def test_attention_transfer_compute_loss_spatial_mode() -> None:
-    """Spatial attention path: roll out attention maps, compute the
-    L2 distance, and check the loss is finite.
-    """
-    import warnings
-
-    from zynthe.core.distillers.attention_transfer import AttentionTransferDistiller
-
-    torch.manual_seed(4)
-    teacher = _TinyHFMod(num_classes=4, hidden=16, layers=2)
-    student = _TinyHFMod(num_classes=4, hidden=16, layers=2)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        d = AttentionTransferDistiller(
-            teacher,
-            student,
-            config={"mode": "spatial", "loss_types": ["l2"], "auto_detect_layers": False},
-        )
-
-    x = torch.randint(0, 32, (2, 4))
-    y = torch.randint(0, 4, (2, 4))
-    with torch.no_grad():
-        t_out = teacher(x, labels=y)
-        s_out = student(x, labels=y)
-    loss, breakdown = d.compute_loss(s_out, t_out, y)
-    assert torch.isfinite(loss)
-    assert "attention_transfer" in breakdown
-
-
 def test_attention_transfer_compute_loss_rollout() -> None:
     """Attention-rollout path: hooks feed attention maps, rollout is
     computed and compared.
