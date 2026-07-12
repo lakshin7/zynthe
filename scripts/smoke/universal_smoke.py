@@ -101,8 +101,15 @@ def load_pair_models(pair: dict):
         return teacher, student, "torchvision"
     from transformers import AutoModel
 
-    teacher = AutoModel.from_pretrained(pair["teacher"])
-    student = AutoModel.from_pretrained(pair["student"])
+    task = pair.get("task", "")
+    if task in ("sequence_classification", "image_classification"):
+        from transformers import AutoModelForSequenceClassification
+
+        cls = AutoModelForSequenceClassification
+    else:
+        cls = AutoModel
+    teacher = cls.from_pretrained(pair["teacher"])
+    student = cls.from_pretrained(pair["student"])
     return teacher, student, "transformers"
 
 
