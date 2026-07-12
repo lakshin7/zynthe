@@ -105,10 +105,12 @@ def test_hooks_register_when_distiller_built(teacher_student) -> None:
         teacher2,
         student2,
         config={
-            "alpha": 0.5,
-            "temperature": 2.0,
-            "hint_enabled": True,
-            "hints": [{"teacher": "layer1", "student": "layer1"}],
+            "kd_hinton": {
+                "alpha": 0.5,
+                "temperature": 2.0,
+                "hint_enabled": True,
+                "hints": [{"teacher": "layer1", "student": "layer1"}],
+            }
         },
         device="cpu",
     )
@@ -187,20 +189,21 @@ def test_extract_logits_tensor_clamps_inf_nan() -> None:
 
 def test_flatten_lm_logits_shifts_and_drops_ignore_index() -> None:
     """After a 1-position shift, ``[B, T, V]`` becomes flat ``[B*(T-1), V]``
-    *before* the ignore-index mask is applied. Half of the targets are
-    set to ignore_index so the post-mask shape is smaller.
+    *before* the ignore-index mask is applied. Below, row 1 is fully
+    covered in ignore_index=4 so it gets dropped entirely, leaving
+    2 valid rows.
     """
     torch.manual_seed(0)
     logits = torch.randn(2, 4, 5)
-    # Row 0: [1, 2, 3, 4] → after shift [1, 2, 3] = 3 valid rows
-    # Row 1: [4, 4, 4, 4] → all ignored → 0 valid
+    # Row 0: [1, 2, 3, 4] -> after shift [2, 3, 4] -> [2, 3] after dropping 4
+    # Row 1: [4, 4, 4, 4] -> all ignored -> 0 valid
     targets = torch.tensor([[1, 2, 3, 4], [4, 4, 4, 4]])
     flat_l, flat_t = BaseDistiller._flatten_lm_logits_and_targets(
         logits, targets, ignore_index=4, shift_labels=True
     )
-    # Pre-mask would be (6, 5); row-1 fully filtered. Post-mask = (3, 5).
-    assert flat_l.shape == (3, 5)
-    assert flat_t.tolist() == [1, 2, 3]
+    # Pre-mask would be (6, 5); surviving = (2, 5).
+    assert flat_l.shape == (2, 5)
+    assert flat_t.tolist() == [2, 3]
     assert (flat_t != 4).all()
 
 
@@ -210,8 +213,9 @@ def test_flatten_lm_logits_shifts_and_drops_ignore_index() -> None:
 
 
 def test_warning_when_total_loss_has_no_grad(caplog) -> None:
-    """If we patch a distiller to return a 0-D tensor without grad_fn,
-    the training_step should warn.
+    """If a distiller returns a 0-D tensor without a grad_fn, the
+    training_step emits a warning *before* ``backward()`` raises. We
+    catch the RuntimeError so we can inspect the warning state.
     """
 
     class _NoGradDist(BaseDistiller):
@@ -233,11 +237,18 @@ def test_warning_when_total_loss_has_no_grad(caplog) -> None:
     optimizer = torch.optim.SGD(d.student.parameters(), lr=0.1)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        d.training_step(
-            {
-                "input_ids": torch.randn(2, 3),
-                "labels": torch.zeros(2, dtype=torch.long),
-            },
-            optimizer=optimizer,
-        )
-    assert any("grad_fn" in str(warning.message).lower() for warning in w)
+        try:
+            d.training_step(
+                {
+                    "input_ids": torch.randn(2, 3),
+                    "labels": torch.zeros(2, dtype=torch.long),
+                },
+                optimizer=optimizer,
+            )
+        except RuntimeError:
+            # backward() will raise when total_loss has no grad_fn —
+            # expected behavior. The warning was emitted right before.
+            pass
+    assert any(
+        "does NOT require grad" in str(warning.message) for warning in w
+    )
