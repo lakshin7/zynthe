@@ -214,9 +214,11 @@ def test_flatten_lm_logits_shifts_and_drops_ignore_index() -> None:
 
 def test_warning_when_total_loss_has_no_grad(caplog) -> None:
     """If a distiller returns a 0-D tensor without a grad_fn, the
-    training_step emits a warning *before* ``backward()`` raises. We
-    catch the RuntimeError so we can inspect the warning state.
+    training_step logs a warning *before* ``backward()`` raises. The
+    log message goes through ``logging.warning`` (not the ``warnings``
+    module), so we capture it via ``caplog``.
     """
+    import logging
 
     class _NoGradDist(BaseDistiller):
         modality_type = "text"
@@ -235,8 +237,9 @@ def test_warning_when_total_loss_has_no_grad(caplog) -> None:
     d = _NoGradDist(teacher, student)
     d.teacher.eval()
     optimizer = torch.optim.SGD(d.student.parameters(), lr=0.1)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
+
+    logger = logging.getLogger("zynthe.core.distillers.base_distiller")
+    with caplog.at_level(logging.WARNING, logger=logger.name):
         try:
             d.training_step(
                 {
@@ -246,9 +249,11 @@ def test_warning_when_total_loss_has_no_grad(caplog) -> None:
                 optimizer=optimizer,
             )
         except RuntimeError:
-            # backward() will raise when total_loss has no grad_fn —
-            # expected behavior. The warning was emitted right before.
+            # ``backward()`` raises when total_loss has no grad_fn —
+            # that is the expected/observable failure mode. The warning
+            # we want to assert was emitted right before it.
             pass
+
     assert any(
-        "does NOT require grad" in str(warning.message) for warning in w
+        "does NOT require grad" in record.message for record in caplog.records
     )
