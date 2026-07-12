@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 
 import modal
 
@@ -127,8 +128,6 @@ def main(
 
 
 if __name__ == "__main__":
-    import sys
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpu", default="L4", choices=GPU_CHOICES)
     parser.add_argument("--branch", default=BRANCH)

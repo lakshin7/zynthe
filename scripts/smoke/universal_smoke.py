@@ -177,6 +177,9 @@ def run_pair(
             "error": f"load_failed: {type(exc).__name__}: {exc}",
             "duration_s": time.time() - t_load_start,
         }
+    print(
+        f"  loaded teacher={type(teacher).__name__} student={type(student).__name__}"
+    )
     load_s = time.time() - t_load_start
 
     # Adapter routing check.
@@ -205,20 +208,31 @@ def run_pair(
 
     if quick:
         # Just verify forward + backward.
+        last_err: str | None = None
+        quick_success = False
         for batch in loader:
             batch = {k: v.to(device) for k, v in batch.items()}
             with torch.no_grad():
                 t_out = teacher(**batch)
-            s_out = student(**batch)
-            print(f"  [quick] forward OK — logits shape {tuple(s_out.logits.shape) if hasattr(s_out, 'logits') else 'n/a'}")
-            break
+            try:
+                s_out = student(**batch)
+                quick_success = True
+                print(
+                    f"  [quick] forward OK — logits shape "
+                    f"{tuple(s_out.logits.shape) if hasattr(s_out, 'logits') else 'n/a'}"
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 — keep smoke going for next batch.
+                last_err = f"forward_failed: {type(exc).__name__}: {exc}"
+                continue
         return {
             "pair": pair_name,
-            "success": True,
+            "success": quick_success,
             "load_s": load_s,
             "teacher_adapter": teacher_adapter.modality,
             "student_adapter": student_adapter.modality,
             "mode": "quick",
+            "error": last_err,
             "loss_progression": losses,
         }
 
