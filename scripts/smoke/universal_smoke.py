@@ -98,10 +98,18 @@ def load_pair_models(pair: dict):
     from transformers import AutoModel
 
     task = pair.get("task", "")
-    if task in ("sequence_classification", "image_classification"):
+    if task == "sequence_classification":
         from transformers import AutoModelForSequenceClassification
 
         cls = AutoModelForSequenceClassification
+    elif task == "image_classification":
+        from transformers import AutoModelForImageClassification
+
+        cls = AutoModelForImageClassification
+    elif task == "vision_language_contrastive":
+        from transformers import AutoModel
+
+        cls = AutoModel
     else:
         cls = AutoModel
     teacher = cls.from_pretrained(pair["teacher"])
