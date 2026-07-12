@@ -42,25 +42,25 @@ def test_resource_probe_caches_results() -> None:
 
 
 def test_estimate_memory_usage_fp32_matches_model_plus_optimizer_plus_grad() -> None:
-    """For a 100M-param fp32 model:
+    """For a 100M-param fp32 model the source uses ``bytes/(1024**3)``
+    to convert to GB:
 
-    * weights = 100M * 4 = 400 MB
-    * optimizer = 2x weights = 800 MB
-    * grads = 1x weights = 400 MB
-    * activations: rough seed * param_bytes (CNN case)
+    * weights = 100M * 4 bytes = 400e6 bytes → ~0.3725 GB (binary GB)
+    * optimizer = 2x weights
+    * grads = 1x weights
+    * activations ≈ batch_size * 1000 * 4 bytes ≈ 32 KB
     * total = sum * 1.2
 
-    The exact activations formula is brittle across contexts; the
-    total * 1.2 invariant is what we care about for budgeting.
+    Verifies model / optimizer / gradient split and the *1.2 buffer.
     """
     probe = ResourceProbe()
     est = probe.estimate_memory_usage(model_params=100_000_000, batch_size=8)
-    assert est["model"] == pytest.approx(400 / 1024, abs=1e-6)
-    assert est["optimizer"] == pytest.approx(800 / 1024, abs=1e-6)
-    assert est["gradients"] == pytest.approx(400 / 1024, abs=1e-6)
-    # raw = 400+800+400 + activations, then * 1.2
+    expected_model = 100_000_000 * 4 / (1024**3)
+    assert est["model"] == pytest.approx(expected_model, rel=1e-9)
+    assert est["optimizer"] == pytest.approx(2 * expected_model, rel=1e-9)
+    assert est["gradients"] == pytest.approx(expected_model, rel=1e-9)
     raw = est["model"] + est["optimizer"] + est["gradients"] + est["activations"]
-    assert est["total"] == pytest.approx(raw * 1.2, abs=1e-9)
+    assert est["total"] == pytest.approx(raw * 1.2, rel=1e-9)
 
 
 def test_estimate_memory_usage_halves_at_fp16() -> None:
