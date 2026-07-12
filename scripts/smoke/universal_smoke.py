@@ -238,9 +238,9 @@ def run_pair(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     teacher.to(device).eval()
-    student.to(device).train()
+    student.to(device).eval()  # Smoke — we just verify forward + grad, not training.
 
-    optim = torch.optim.SGD(student.parameters(), lr=1e-4)
+    optim = torch.optim.SGD([p for p in student.parameters() if p.requires_grad], lr=1e-4)
     losses: list[float] = []
     step_times: list[float] = []
 
@@ -341,6 +341,9 @@ def run_pair(
         loss.backward()
         optim.step()
         losses.append(float(loss.item()))
+        # Always re-eval so batchnorm / dropout don't accumulate state.
+        teacher.eval()
+        student.eval()
         step_times.append(time.time() - t0)
     train_s = time.time() - t_train
 
