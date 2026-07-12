@@ -140,44 +140,51 @@ class _SyntheticBatch(Dataset):
 # ----------------------------------------------------------------------------
 
 
-def _classification_sample(input_shape, n_classes, max_seq_len):
+def _classification_sample(seq_len, n_classes):
+    """Sequence classification — per-sample input_ids is (seq_len,),
+    DataLoader stacks into (B, seq_len)."""
     return {
-        "input_ids": torch.randint(0, 1000, input_shape, dtype=torch.long),
-        "attention_mask": torch.ones(input_shape, dtype=torch.long),
+        "input_ids": torch.randint(0, 1000, (seq_len,), dtype=torch.long),
+        "attention_mask": torch.ones(seq_len, dtype=torch.long),
         "labels": torch.tensor(random.randint(0, n_classes - 1)),
     }
 
 
-def _vision_sample(input_shape, n_classes):
+def _vision_sample(channels, h, w, n_classes):
     return {
-        "pixel_values": torch.randn(*input_shape),
+        "pixel_values": torch.randn(channels, h, w),
         "labels": torch.tensor(random.randint(0, n_classes - 1)),
     }
 
 
-def _causal_lm_sample(input_shape):
+def _causal_lm_sample(seq_len):
     return {
-        "input_ids": torch.randint(0, 1000, input_shape, dtype=torch.long),
-        "attention_mask": torch.ones(input_shape, dtype=torch.long),
+        "input_ids": torch.randint(0, 1000, (seq_len,), dtype=torch.long),
+        "attention_mask": torch.ones(seq_len, dtype=torch.long),
     }
 
 
-def _clip_sample(input_shape):
+def _clip_sample(seq_len, channels, h, w):
     return {
-        "input_ids": torch.randint(0, 1000, (1, 8), dtype=torch.long),
-        "pixel_values": torch.randn(*input_shape),
+        "input_ids": torch.randint(0, 1000, (seq_len,), dtype=torch.long),
+        "pixel_values": torch.randn(channels, h, w),
     }
 
 
 def _factory_for_pair(pair_name: str, pair: dict):
     if pair["task"] == "sequence_classification":
-        return lambda i: _classification_sample(pair["input_shape"], 4, pair["input_shape"][1])
+        # input_shape is (B=ignored, T).
+        seq_len = pair["input_shape"][1]
+        return lambda i: _classification_sample(seq_len, 4)
     if pair["task"] == "image_classification":
-        return lambda i: _vision_sample(pair["input_shape"], 4)
+        c, h, w = pair["input_shape"]
+        return lambda i: _vision_sample(c, h, w, 4)
     if pair["task"] == "causal_lm":
-        return lambda i: _causal_lm_sample(pair["input_shape"])
+        seq_len = pair["input_shape"][1]
+        return lambda i: _causal_lm_sample(seq_len)
     if pair["task"] == "vision_language_contrastive":
-        return lambda i: _clip_sample(pair["input_shape"])
+        c, h, w = pair["input_shape"]
+        return lambda i: _clip_sample(8, c, h, w)
     raise ValueError(pair["task"])
 
 
