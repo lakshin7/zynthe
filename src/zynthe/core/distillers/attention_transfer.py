@@ -534,6 +534,16 @@ class AttentionTransferDistiller(BaseDistiller):
                 "Set teacher_layers/student_layers or keep auto_detect_layers=true for hook alignment."
             )
 
+        # Validate that every requested layer actually exists on its model.
+        # Default stays backward-compatible (warn), but a strict mode raises.
+        self.strict_layer_match = bool(
+            parsed_config.get(
+                "strict_layer_match",
+                config.get("strict_layer_match", False) if config else False,
+            )
+        )
+        self._validate_attention_layers(strict=self.strict_layer_match)
+
         if self.teacher_layers:
             self.teacher_extractor = AttentionExtractor(teacher, self.teacher_layers)
         else:
@@ -597,6 +607,46 @@ class AttentionTransferDistiller(BaseDistiller):
                 validated.pop("loss_weights", None)
 
         return validated
+
+    def _validate_attention_layers(self, *, strict: bool) -> None:
+        """Verify every requested ``teacher_layer`` / ``student_layer`` exists.
+
+        Mirrors the :class:`FeatureDistiller` behavior: warnings by default,
+        :class:`~zynthe.core.utils.ConfigError` when ``strict=True``.
+        """
+        teacher_modules = dict(self.teacher.named_modules())
+        student_modules = dict(self.student.named_modules())
+
+        missing: list[str] = []
+        for name in self.teacher_layers:
+            if name not in teacher_modules:
+                missing.append(f"teacher:{name}")
+        for name in self.student_layers:
+            if name not in student_modules:
+                missing.append(f"student:{name}")
+
+        if not missing:
+            return
+
+        if strict:
+            from zynthe.core.utils import ConfigError, format_missing_layers
+
+            raise ConfigError(
+                "AttentionTransferDistiller could not find requested layers",
+                context={
+                    "missing": missing,
+                    "missing_summary": format_missing_layers(missing),
+                    "hint": (
+                        "Use model.named_modules() to find valid attention "
+                        "layer names, or set strict_layer_match=False."
+                    ),
+                },
+            )
+        warnings.warn(
+            f"[AttentionTransferDistiller] skipping unmatched layers: {missing}. "
+            "Set strict_layer_match=True to raise instead.",
+            stacklevel=2,
+        )
 
     def _auto_detect_attention_layers(self, model: nn.Module, max_layers: int = 4) -> List[str]:
         """Auto-detect likely attention layers for hook-based matching."""

@@ -401,8 +401,10 @@ class ConfigManager:
 
         # seed handling
         seed = int(self.raw_config.get("seed", 42))
-        self.set_seed(seed)
+        deterministic = self._resolve_deterministic(self.raw_config)
+        self.set_seed(seed, deterministic=deterministic)
         self.resolved_config["runtime"]["seed"] = seed
+        self.resolved_config["runtime"]["deterministic"] = bool(deterministic)
 
         # environment metadata
         self.env_info = _get_env_info()
@@ -410,13 +412,57 @@ class ConfigManager:
         self.git_info = _get_git_info()
         self.resolved_config["_git"] = self.git_info
 
-    def set_seed(self, seed: int):
+    @staticmethod
+    def _resolve_deterministic(raw_config: Dict[str, Any]) -> bool:
+        """Decide whether the run should pin cuDNN to deterministic mode.
+
+        Precedence (highest wins):
+
+        1. ``ZYNTHE_DETERMINISTIC`` env var (``"0"`` → False, anything else → True).
+        2. ``runtime.deterministic`` (bool, default ``True``).
+        3. ``deterministic`` (legacy top-level key, default ``True``).
+        """
+        env_val = os.environ.get("ZYNTHE_DETERMINISTIC")
+        if env_val is not None:
+            return env_val.strip().lower() not in {"0", "false", "no", ""}
+
+        runtime_block = raw_config.get("runtime") if isinstance(raw_config, dict) else None
+        if isinstance(runtime_block, dict) and "deterministic" in runtime_block:
+            return bool(runtime_block["deterministic"])
+
+        if isinstance(raw_config, dict) and "deterministic" in raw_config:
+            return bool(raw_config["deterministic"])
+
+        return True
+
+    def set_seed(self, seed: int, deterministic: Optional[bool] = None):
+        """Seed every relevant RNG and (optionally) lock cuDNN to deterministic mode.
+
+        Args:
+            seed: Seed value forwarded to ``random``, ``numpy``, ``torch``
+                (and ``torch.cuda`` when available).
+            deterministic: When ``True``, also sets
+                ``torch.backends.cudnn.deterministic = True`` and
+                ``torch.backends.cudnn.benchmark = False``. When ``False``,
+                leaves cuDNN alone (lets ``BasePipeline`` choose autotune).
+                When ``None`` (the default), honors the legacy behavior:
+                cuDNN toggles are left to the pipeline.
+                The :class:`UnifiedTrainingRuntime` reads
+                ``runtime.deterministic`` from the resolved config (default
+                ``True``) and passes it explicitly.
+        """
         seed = int(seed)
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
+
+        if deterministic is None:
+            return
+
+        torch.backends.cudnn.deterministic = bool(deterministic)
+        torch.backends.cudnn.benchmark = not bool(deterministic)
 
     # -------------------------
     # Experiment directories

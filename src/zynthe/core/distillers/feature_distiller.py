@@ -493,6 +493,15 @@ class FeatureDistiller(BaseDistiller):
         feat_config = config.get("feature_distillation", {})
         self.feat_enabled = feat_config.get("enabled", True)
         self.feat_layers = feat_config.get("layers", [])
+        # When True, missing layer names raise ConfigError instead of being
+        # silently skipped. Defaults to False to preserve historical behavior,
+        # but a strict mode is the recommended setting for new configs.
+        self.strict_layer_match = bool(
+            feat_config.get(
+                "strict_layer_match",
+                config.get("strict_layer_match", False),
+            )
+        )
 
         # Now call parent __init__ which will call _register_hooks()
         super().__init__(teacher, student, config, device, **kwargs)
@@ -521,29 +530,69 @@ class FeatureDistiller(BaseDistiller):
         )
 
     def _register_hooks(self) -> None:
-        """Register hooks for specified feature layers."""
+        """Register hooks for specified feature layers.
+
+        When ``strict_layer_match=True`` (set via
+        ``feature_distillation.strict_layer_match`` or top-level
+        ``strict_layer_match``), missing ``teacher`` or ``student`` layer names
+        raise :class:`~zynthe.core.utils.ConfigError` instead of being
+        silently skipped. The error message lists every missing layer so the
+        user can fix the config in one round-trip.
+        """
         if not self.feat_enabled or not self.feat_layers:
             return
 
         teacher_modules = dict(self.teacher.named_modules())
         student_modules = dict(self.student.named_modules())
 
+        missing: list[str] = []
+
         for layer_config in self.feat_layers:
             t_layer_name = layer_config["teacher"]
             s_layer_name = layer_config["student"]
 
-            if t_layer_name in teacher_modules and s_layer_name in student_modules:
-                # Register teacher hook
+            t_ok = t_layer_name in teacher_modules
+            s_ok = s_layer_name in student_modules
+
+            if not t_ok:
+                missing.append(f"teacher:{t_layer_name}")
+            if not s_ok:
+                missing.append(f"student:{s_layer_name}")
+
+            if t_ok:
                 t_handle = teacher_modules[t_layer_name].register_forward_hook(
                     self._get_teacher_hook(t_layer_name)
                 )
                 self._hook_handles.append(t_handle)
 
-                # Register student hook
+            if s_ok:
                 s_handle = student_modules[s_layer_name].register_forward_hook(
                     self._get_student_hook(s_layer_name)
                 )
                 self._hook_handles.append(s_handle)
+
+        if missing and self.strict_layer_match:
+            from zynthe.core.utils import ConfigError, format_missing_layers
+
+            raise ConfigError(
+                "FeatureDistiller could not find requested layers",
+                context={
+                    "missing": missing,
+                    "hint": (
+                        "Use named_modules() on the teacher/student to pick "
+                        "valid layer names, or set strict_layer_match=False."
+                    ),
+                    "missing_summary": format_missing_layers(missing),
+                },
+            )
+        elif missing:
+            import warnings
+
+            warnings.warn(
+                f"[FeatureDistiller] skipping unmatched layers: {missing}. "
+                f"Set strict_layer_match=True to raise instead.",
+                stacklevel=2,
+            )
 
     def compute_loss(
         self,

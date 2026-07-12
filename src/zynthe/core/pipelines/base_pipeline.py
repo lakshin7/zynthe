@@ -137,20 +137,36 @@ class BasePipeline(ABC, nn.Module):
         return device
 
     def _enable_memory_optimization(self):
-        """Enable memory optimizations for T4 GPU (16GB VRAM)."""
+        """Enable memory optimizations for T4 GPU (16GB VRAM).
+
+        If the run has been pinned to deterministic mode (via
+        :meth:`zynthe.core.config.config_manager.ConfigManager.set_seed` or
+        ``ZYNTHE_DETERMINISTIC=1``) we skip the cuDNN benchmark toggle so
+        that cuDNN stays in deterministic mode and bit-exact reproducibility
+        is preserved across launches.
+        """
         if self.device.type == "cuda":
             # Enable TF32 for faster computation on Ampere GPUs (T4 doesn't support but safe)
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
-            # Enable cuDNN autotuner for optimal convolution algorithms
-            torch.backends.cudnn.benchmark = True
+            # Enable cuDNN autotuner for optimal convolution algorithms —
+            # but only when the run is not pinned to deterministic mode.
+            deterministic = bool(
+                torch.backends.cudnn.deterministic
+                and not torch.backends.cudnn.benchmark
+            )
+            if not deterministic:
+                torch.backends.cudnn.benchmark = True
 
             # Set memory allocator settings for better memory management
             # Helps prevent fragmentation on T4
             torch.cuda.empty_cache()
 
-            logger.info(f"[Pipeline] Memory optimization enabled for {self.device}")
+            logger.info(
+                f"[Pipeline] Memory optimization enabled for {self.device} "
+                f"(cudnn.benchmark={torch.backends.cudnn.benchmark})"
+            )
 
     @abstractmethod
     def setup(self) -> None:

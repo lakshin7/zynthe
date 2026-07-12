@@ -130,7 +130,6 @@ class MultiStagePipeline(BasePipeline):
 
         # Loss aggregation
         self.normalize_weights = (config or {}).get("normalize_weights", True)
-        self._total_weight = 0.0
 
         # Memory optimization for T4
         self.checkpoint_gradients = (config or {}).get("checkpoint_gradients", False)
@@ -191,7 +190,6 @@ class MultiStagePipeline(BasePipeline):
         )
 
         self.stages.append(stage)
-        self._total_weight += weight
 
         return self  # For chaining
 
