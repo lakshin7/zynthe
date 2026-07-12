@@ -18,10 +18,13 @@ from typing import Dict, Type
 
 import torch.nn as nn
 
+from .audio_adapter import AudioAdapter
 from .base_adapter import ModelAdapter
 from .code_adapter import CodeModelAdapter
+from .diffusion_adapter import DiffusionAdapter
 from .generic_hf_adapter import GenericHFAdapter
 from .multimodal_adapter import MultimodalModelAdapter
+from .seq2seq_adapter import Seq2SeqAdapter
 from .text_adapter import TextModelAdapter
 from .vision_adapter import VisionModelAdapter
 from .vlm_adapter import VLMModelAdapter
@@ -48,7 +51,10 @@ class AdapterRegistry:
         # fallback for any HF model the typed adapters couldn't claim.
         self._detection_order: list = [
             VLMModelAdapter,
+            DiffusionAdapter,
+            AudioAdapter,
             MultimodalModelAdapter,
+            Seq2SeqAdapter,
             VisionModelAdapter,
             CodeModelAdapter,
             TextModelAdapter,
@@ -65,7 +71,10 @@ class AdapterRegistry:
         self._by_name["code"] = CodeModelAdapter()
         self._by_name["vision"] = VisionModelAdapter()
         self._by_name["multimodal"] = MultimodalModelAdapter()
+        self._by_name["seq2seq"] = Seq2SeqAdapter()
         self._by_name["vlm"] = VLMModelAdapter()
+        self._by_name["diffusion"] = DiffusionAdapter()
+        self._by_name["audio"] = AudioAdapter()
         self._by_name["generic"] = GenericHFAdapter()
 
     # ------------------------------------------------------------------

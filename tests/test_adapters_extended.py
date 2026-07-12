@@ -176,3 +176,160 @@ def test_generic_adapter_finds_hookable_layers_by_name() -> None:
     assert len(layers) > 0
     for name in layers:
         assert name
+
+
+
+# ----------------------------------------------------------------------------
+# Seq2SeqAdapter (encoder + decoder, no LM head)
+# ----------------------------------------------------------------------------
+
+
+class _EncoderDecoder(nn.Module):
+    """Stub matching the T5 / BART / Marian module naming convention."""
+
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.ModuleList([nn.Linear(4, 4) for _ in range(2)])
+        self.decoder = nn.ModuleList([nn.Linear(4, 4) for _ in range(2)])
+
+    def forward(self, input_ids=None, decoder_input_ids=None, labels=None):
+        return torch.tensor([[0.0]])
+
+
+class _DecoderOnly(nn.Module):
+    """GPT-2 style: decoder.* but no encoder.*  Should NOT match seq2seq."""
+
+    def __init__(self):
+        super().__init__()
+        self.decoder = nn.ModuleList([nn.Linear(4, 4) for _ in range(2)])
+
+    def forward(self, input_ids=None):
+        return torch.tensor([[0.0]])
+
+
+def test_seq2seq_adapter_matches_encoder_decoder() -> None:
+    from zynthe.core.adapters.seq2seq_adapter import Seq2SeqAdapter
+
+    a = Seq2SeqAdapter()
+    assert a.supports_model(_EncoderDecoder())
+
+
+def test_seq2seq_adapter_rejects_decoder_only() -> None:
+    from zynthe.core.adapters.seq2seq_adapter import Seq2SeqAdapter
+
+    a = Seq2SeqAdapter()
+    assert not a.supports_model(_DecoderOnly())
+
+
+def test_registry_routes_t5_to_seq2seq() -> None:
+    reg = AdapterRegistry()
+    adapter = reg.detect(_EncoderDecoder())
+    assert adapter.modality == "seq2seq"
+
+
+# ----------------------------------------------------------------------------
+# AudioAdapter
+# ----------------------------------------------------------------------------
+
+
+class _Whisperish(nn.Module):
+    def forward(self, input_features, decoder_input_ids=None):
+        return torch.tensor([[0.0]])
+
+
+class _Wav2Vecish(nn.Module):
+    def forward(self, input_values, attention_mask=None):
+        return torch.tensor([[0.0]])
+
+
+class _MelNotWav(nn.Module):
+    """Has input_features but no audio encoder structure."""
+
+    def forward(self, input_features, labels=None):
+        return torch.tensor([[0.0]])
+
+
+def test_audio_adapter_matches_whisper_input_features() -> None:
+    from zynthe.core.adapters.audio_adapter import AudioAdapter
+
+    a = AudioAdapter()
+    assert a.supports_model(_Whisperish())
+
+
+def test_audio_adapter_matches_wav2vec_input_values() -> None:
+    from zynthe.core.adapters.audio_adapter import AudioAdapter
+
+    a = AudioAdapter()
+    assert a.supports_model(_Wav2Vecish())
+
+
+def test_registry_routes_whisper_to_audio() -> None:
+    reg = AdapterRegistry()
+    adapter = reg.detect(_Whisperish())
+    # Order: VLM, Diffusion, Audio, Multimodal, Seq2Seq, Vision, Code, Text, Generic.
+    # Audio comes after Diffusion but before others. The Whisperish stub
+    # has input_features — Audio claims first.
+    assert adapter.modality == "audio"
+
+
+# ----------------------------------------------------------------------------
+# DiffusionAdapter
+# ----------------------------------------------------------------------------
+
+
+class _UNetish(nn.Module):
+    """SD-style UNet with down_blocks / mid_block / up_blocks."""
+
+    def __init__(self):
+        super().__init__()
+        self.down_blocks = nn.ModuleList([nn.Linear(4, 4) for _ in range(4)])
+        self.up_blocks = nn.ModuleList([nn.Linear(4, 4) for _ in range(4)])
+        self.mid_block = nn.Linear(4, 4)
+
+    def forward(self, sample, timestep, encoder_hidden_states=None):
+        return torch.tensor([[0.0]])
+
+
+class _NoDownNoUp(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.something_else = nn.Linear(4, 4)
+
+    def forward(self, x):
+        return x
+
+
+def test_diffusion_adapter_matches_unet_block_structure() -> None:
+    from zynthe.core.adapters.diffusion_adapter import DiffusionAdapter
+
+    a = DiffusionAdapter()
+    assert a.supports_model(_UNetish())
+
+
+def test_diffusion_adapter_rejects_unrelated_module() -> None:
+    from zynthe.core.adapters.diffusion_adapter import DiffusionAdapter
+
+    a = DiffusionAdapter()
+    assert not a.supports_model(_NoDownNoUp())
+
+
+def test_registry_routes_unet_to_diffusion() -> None:
+    reg = AdapterRegistry()
+    adapter = reg.detect(_UNetish())
+    assert adapter.modality == "diffusion"
+
+
+# ----------------------------------------------------------------------------
+# generic + adapters ordering stays consistent
+# ----------------------------------------------------------------------------
+
+
+def test_registry_detection_order_includes_all_typed_adapters() -> None:
+    reg = AdapterRegistry()
+    modalities = [cls.modality for cls in reg._detection_order]
+    assert "seq2seq" in modalities
+    assert "audio" in modalities
+    assert "diffusion" in modalities
+    assert "generic" in modalities
+    # Generic must come last.
+    assert modalities[-1] == "generic"

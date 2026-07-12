@@ -33,10 +33,22 @@ from __future__ import annotations
 from .adapter_registry import AdapterRegistry
 from .base_adapter import ModelAdapter
 from .code_adapter import CodeModelAdapter
+from .generic_hf_adapter import GenericHFAdapter
 from .multimodal_adapter import MultimodalModelAdapter
+from .seq2seq_adapter import Seq2SeqAdapter
 from .text_adapter import TextModelAdapter
 from .vision_adapter import VisionModelAdapter
 from .vlm_adapter import VLMModelAdapter
+
+try:
+    from .audio_adapter import AudioAdapter
+except ImportError:  # pragma: no cover
+    AudioAdapter = None  # type: ignore[assignment,misc]
+
+try:
+    from .diffusion_adapter import DiffusionAdapter
+except ImportError:  # diffusers optional extra not installed
+    DiffusionAdapter = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "ModelAdapter",
@@ -45,5 +57,9 @@ __all__ = [
     "VisionModelAdapter",
     "MultimodalModelAdapter",
     "VLMModelAdapter",
+    "Seq2SeqAdapter",
+    "AudioAdapter",
+    "DiffusionAdapter",
+    "GenericHFAdapter",
     "AdapterRegistry",
 ]
