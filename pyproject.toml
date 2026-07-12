@@ -98,10 +98,8 @@ addopts = "-ra"
 # -> pyparsing), keep our own UserWarnings visible. Use `-W error::UserWarning`
 # from the CLI to re-promote first-party warnings to errors when triaging.
 filterwarnings = [
-    "ignore:.*'oneOf' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
-    "ignore:.*'parseString' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
-    "ignore:.*'resetCache' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
-    "ignore:.*'enablePackrat' deprecated.*:pyparsing.warnings.PyparsingDeprecationWarning",
+    "ignore::pyparsing.warnings.PyparsingDeprecationWarning",
+    "ignore:.*deprecated.*:DeprecationWarning:pyparsing.*",
     "ignore::DeprecationWarning:matplotlib.*",
     "ignore::DeprecationWarning:pyparsing.*",
 ]
