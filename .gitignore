@@ -68,3 +68,11 @@ data/*.backup
 *.json.backup_*
 
 .venv
+
+# Modal runner scripts — developer-only, not committed.
+# See scripts/modal/README.md for one-line removal (`git rm -r scripts/modal`).
+# Kept out of git from now on; remaining tracked file under scripts/modal/
+# lives in commit history and can be removed via `git rm -r scripts/modal`.
+scripts/modal/__pycache__/
+scripts/modal/*.pyc
+

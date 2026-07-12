@@ -94,6 +94,33 @@ packages = ["src/zynthe"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra"
+# Phase 1: silence third-party deprecations that we cannot fix (matplotlib
+# -> pyparsing), keep our own UserWarnings visible. Use `-W error::UserWarning`
+# from the CLI to re-promote them to errors when triaging.
+filterwarnings = [
+    "ignore::DeprecationWarning:matplotlib.*",
+    "ignore::DeprecationWarning:pyparsing.*",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/zynthe"]
+omit = [
+    "src/zynthe/data/*",
+    "src/zynthe/evaluation/*",
+    "src/zynthe/py.typed",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Phase 1 exit gate: total coverage must clear this floor.
+fail_under = 70
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
 
 [tool.black]
 line-length = 100
