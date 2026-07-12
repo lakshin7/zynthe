@@ -10,6 +10,13 @@ the math-pin tests deliberately skipped.
 
 from __future__ import annotations
 
+# Force CPU-only test environment. Without this, Modal L4 hosts default
+# to CUDA and any ``nn.Module`` created with no ``device=`` ends up with
+# cuda parameters while the tensors we pass stay on cpu -> crash.
+import os
+
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+
 import math
 
 import pytest
