@@ -45,14 +45,13 @@ PAIRS = {
         "teacher": "hf-internal-testing/tiny-bert",
         "student": "prajjwal1/bert-tiny",
         "task": "sequence_classification",
-        "input_shape": (4, 32),
+        "input_shape": (4, 32),  # batch, seq — sample shape is (seq,)
     },
     "vit": {
         "teacher": "google/vit-base-patch16-224-in21k",
         "student": "facebook/deit-tiny-patch16-224",
         "task": "image_classification",
-        "input_shape": (3, 32, 32),
-        "image_long_side": 224,  # ViTs trained at 224 — we keep this for future tests.
+        "input_shape": (3, 224, 224),  # ViT-trained input size — sample shape is (3, 224, 224)
     },
     "gpt2": {
         "teacher": "sshleifer/tiny-gpt2",
@@ -61,22 +60,19 @@ PAIRS = {
         "input_shape": (4, 32),
     },
     "clip": {
-        # We use the production CLIP for the universal-model proof.
-        # It is heavier (~600 MB download). Skip if --skip-clip is set.
+        # CLIP uses 224x224 too. Smoke tests that the multimodal
+        # adapter path works with image+text inputs.
         "teacher": "openai/clip-vit-base-patch32",
         "student": "openai/clip-vit-base-patch32",
         "task": "vision_language_contrastive",
-        "input_shape": (3, 32, 32),
-        "image_long_side": 224,
+        "input_shape": (3, 224, 224),
     },
     "resnet": {
-        # Both teacher and student are the same small torchvision model
-        # so we can prove the vision adapter path on a pure-CNN pair
-        # (no HF download).
+        # CNN pair (no HF download) — torchvision resnet18.
         "teacher": "resnet18",
         "student": "resnet18",
         "task": "image_classification",
-        "input_shape": (3, 32, 32),
+        "input_shape": (3, 224, 224),
     },
 }
 
