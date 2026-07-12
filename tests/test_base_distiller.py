@@ -212,11 +212,11 @@ def test_flatten_lm_logits_shifts_and_drops_ignore_index() -> None:
 # ----------------------------------------------------------------------------
 
 
-def test_warning_when_total_loss_has_no_grad(caplog) -> None:
+def test_warning_when_total_loss_has_no_grad() -> None:
     """If a distiller returns a 0-D tensor without a grad_fn, the
-    training_step logs a warning *before* ``backward()`` raises. The
-    log message goes through ``logging.warning`` (not the ``warnings``
-    module), so we capture it via ``caplog``.
+    training_step emits a log warning *before* ``backward()`` raises.
+    We attach a temporary handler to the distiller's logger and
+    inspect captured records.
     """
     import logging
 
@@ -239,7 +239,17 @@ def test_warning_when_total_loss_has_no_grad(caplog) -> None:
     optimizer = torch.optim.SGD(d.student.parameters(), lr=0.1)
 
     logger = logging.getLogger("zynthe.core.distillers.base_distiller")
-    with caplog.at_level(logging.WARNING, logger=logger.name):
+    captured: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
+
+    handler = _Capture(level=logging.WARNING)
+    logger.addHandler(handler)
+    old_level = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
         try:
             d.training_step(
                 {
@@ -250,10 +260,10 @@ def test_warning_when_total_loss_has_no_grad(caplog) -> None:
             )
         except RuntimeError:
             # ``backward()`` raises when total_loss has no grad_fn —
-            # that is the expected/observable failure mode. The warning
-            # we want to assert was emitted right before it.
+            # the warning we want to assert was emitted right before.
             pass
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
 
-    assert any(
-        "does NOT require grad" in record.message for record in caplog.records
-    )
+    assert any("does NOT require grad" in record.getMessage() for record in captured)
