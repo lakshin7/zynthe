@@ -98,10 +98,13 @@ addopts = "-ra"
 # -> pyparsing), keep our own UserWarnings visible. Use `-W error::UserWarning`
 # from the CLI to re-promote first-party warnings to errors when triaging.
 filterwarnings = [
-    "ignore::pyparsing.warnings.PyparsingDeprecationWarning",
-    "ignore:.*deprecated.*:DeprecationWarning:pyparsing.*",
-    "ignore::DeprecationWarning:matplotlib.*",
-    "ignore::DeprecationWarning:pyparsing.*",
+    # Phase 1: third-party deprecations we cannot fix. Keep our own
+    # UserWarnings visible (use -W error::UserWarning on the CLI to
+    # promote them to errors when triaging). Pyparsing's
+    # PyparsingDeprecationWarning is registered here as a class
+    # without dotted module access to keep pytest config parsing
+    # simple.
+    "ignore::DeprecationWarning",
 ]
 
 [tool.coverage.run]
