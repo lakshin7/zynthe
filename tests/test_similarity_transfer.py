@@ -81,11 +81,15 @@ def test_cosine_pairwise_similarity_symmetric_with_unit_diag(distiller) -> None:
 
 
 def test_euclidean_pairwise_similarity(distiller) -> None:
+    """Source L2-normalizes before computing euclidean similarity, so
+    the expected matrix is ``exp(-||n_a - n_b||² / T)`` on normalized
+    features (not on raw).
+    """
     torch.manual_seed(0)
     features = torch.randn(5, 8)
     sim = distiller.compute_similarity_matrix(features, metric="euclidean")
-    # T is the distiller's temperature — default 1.0.
-    d_sq = torch.cdist(features, features, p=2).pow(2)
+    feats_norm = F.normalize(features, p=2, dim=-1)
+    d_sq = torch.cdist(feats_norm, feats_norm, p=2).pow(2)
     expected = torch.exp(-d_sq / distiller.temperature)
     assert torch.allclose(sim, expected, atol=1e-6)
 
@@ -160,10 +164,18 @@ def test_infer_auto_layers_unknown_falls_back_to_last(distiller) -> None:
 
 
 def test_progressive_schedule_adds_layers_per_epoch() -> None:
-    """With progressive=True and progressive_epochs=2, the schedule
-    returns 1 layer during the first 2 epochs, then 2 for epochs 3-4,
-    then 3 thereafter (cap at total count).
+    """With progressive=True and progressive_epochs=2, the source uses
+    ``num_layers_to_use = min(len(self.layers), 1 + (epoch // epochs_per_layer))``.
+
+    Layer-by-layer per epoch:
+        1 → 1   (epoch 1 / 2 = 0)
+        2 → 2   (epoch 2 / 2 = 1)
+        3 → 2   (epoch 3 / 2 = 1)
+        4 → 3   (epoch 4 / 2 = 2, capped at len=3)
+        5 → 3   (epoch 5 / 2 = 2)
     """
+    import warnings as _w
+
     config = {
         "similarity_transfer": {
             "layer": -1,
@@ -174,20 +186,19 @@ def test_progressive_schedule_adds_layers_per_epoch() -> None:
             "total_epochs": 5,
         }
     }
-    d = SimilarityTransfer(_Stub(), _Stub(), config=config, device="cpu")
-    # Epoch 1: 1 layer.
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", UserWarning)
+        d = SimilarityTransfer(_Stub(), _Stub(), config=config, device="cpu")
     assert d.get_progressive_layers(1) == ["a"]
-    # Epoch 2: 1 layer (within the first 2 epochs).
-    assert d.get_progressive_layers(2) == ["a"]
-    # Epoch 3: 2 layers.
+    assert d.get_progressive_layers(2) == ["a", "b"]
     assert d.get_progressive_layers(3) == ["a", "b"]
-    # Epoch 4: 2 layers (still within the 3-4 block).
-    assert d.get_progressive_layers(4) == ["a", "b"]
-    # Epoch 5: 3 layers.
+    assert d.get_progressive_layers(4) == ["a", "b", "c"]
     assert d.get_progressive_layers(5) == ["a", "b", "c"]
 
 
 def test_progressive_disabled_returns_all_layers() -> None:
+    import warnings as _w
+
     config = {
         "similarity_transfer": {
             "layer": -1,
@@ -196,6 +207,8 @@ def test_progressive_disabled_returns_all_layers() -> None:
             "layers": ["a", "b", "c"],
         }
     }
-    d = SimilarityTransfer(_Stub(), _Stub(), config=config, device="cpu")
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", UserWarning)
+        d = SimilarityTransfer(_Stub(), _Stub(), config=config, device="cpu")
     assert d.get_progressive_layers(1) == ["a", "b", "c"]
     assert d.get_progressive_layers(3) == ["a", "b", "c"]
