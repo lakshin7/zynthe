@@ -48,10 +48,13 @@ PAIRS = {
         "input_shape": (4, 32),  # batch, seq — sample shape is (seq,)
     },
     "vit": {
-        "teacher": "google/vit-base-patch16-224-in21k",
+        # Same teacher / student (load the same architecture with two
+        # random seeds) so the KL-divergence smoke loss lines up by
+        # number of logits. Real distillation needs aligned heads.
+        "teacher": "facebook/deit-tiny-patch16-224",
         "student": "facebook/deit-tiny-patch16-224",
         "task": "image_classification",
-        "input_shape": (3, 224, 224),  # ViT-trained input size — sample shape is (3, 224, 224)
+        "input_shape": (3, 224, 224),
     },
     "gpt2": {
         "teacher": "sshleifer/tiny-gpt2",
@@ -200,6 +203,13 @@ def _factory_for_pair(pair_name: str, pair: dict):
 # ----------------------------------------------------------------------------
 
 
+_ARG_SEED = 1
+
+
+def args_seed() -> int:
+    return _ARG_SEED
+
+
 def run_pair(
     pair_name: str,
     pair: dict,
@@ -215,6 +225,17 @@ def run_pair(
     t_load_start = time.time()
     try:
         teacher, student, model_loader = load_pair_models(pair)
+        # Make sure teacher and student have the same output dim —
+        # KL-divergence smoke needs matched logits. Where the smoke
+        # gate shares one architecture for both, we re-seed the
+        # student's init so weights differ.
+        if teacher.config.architectures == student.config.architectures:
+            torch.manual_seed(args_seed())
+            for p in student.parameters():
+                if p.dim() >= 2:
+                    torch.nn.init.normal_(p, std=0.02)
+                else:
+                    torch.nn.init.zeros_(p)
     except Exception as exc:  # noqa: BLE001 — smoke gate reports the error.
         return {
             "pair": pair_name,
