@@ -38,8 +38,10 @@ class _Lin(nn.Module):
         super().__init__()
         self.lin = nn.Linear(3, num_classes)
 
-    def forward(self, x, labels=None):
-        return _Out(logits=self.lin(x), loss=None)
+    def forward(self, input_ids=None, labels=None, **_unused):
+        if input_ids is None:
+            raise TypeError("input_ids required")
+        return _Out(logits=self.lin(input_ids), loss=None)
 
 
 class _Out:
@@ -94,8 +96,8 @@ def test_hooks_register_when_distiller_built(teacher_student) -> None:
             self.layer1 = nn.Linear(3, 3)
             self.head = nn.Linear(3, 4)
 
-        def forward(self, x, labels=None):
-            return _Out(logits=self.head(self.layer1(x)), loss=None)
+        def forward(self, input_ids=None, labels=None, **_unused):
+            return _Out(logits=self.head(self.layer1(input_ids)), loss=None)
 
     teacher2 = _TinyWith()
     student2 = _TinyWith()
@@ -184,14 +186,21 @@ def test_extract_logits_tensor_clamps_inf_nan() -> None:
 
 
 def test_flatten_lm_logits_shifts_and_drops_ignore_index() -> None:
+    """After a 1-position shift, ``[B, T, V]`` becomes flat ``[B*(T-1), V]``
+    *before* the ignore-index mask is applied. Half of the targets are
+    set to ignore_index so the post-mask shape is smaller.
+    """
+    torch.manual_seed(0)
     logits = torch.randn(2, 4, 5)
+    # Row 0: [1, 2, 3, 4] → after shift [1, 2, 3] = 3 valid rows
+    # Row 1: [4, 4, 4, 4] → all ignored → 0 valid
     targets = torch.tensor([[1, 2, 3, 4], [4, 4, 4, 4]])
     flat_l, flat_t = BaseDistiller._flatten_lm_logits_and_targets(
         logits, targets, ignore_index=4, shift_labels=True
     )
-    # After shift: logits[:, :-1] = 3 timesteps, targets[:, 1:] = 3 timesteps
-    assert flat_l.shape == (6, 5)  # 2 batch * 3 timesteps
-    # All ignore labels must be filtered out.
+    # Pre-mask would be (6, 5); row-1 fully filtered. Post-mask = (3, 5).
+    assert flat_l.shape == (3, 5)
+    assert flat_t.tolist() == [1, 2, 3]
     assert (flat_t != 4).all()
 
 
@@ -225,7 +234,10 @@ def test_warning_when_total_loss_has_no_grad(caplog) -> None:
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         d.training_step(
-            {"input_ids": torch.randn(2, 3), "labels": torch.zeros(2, dtype=torch.long)},
+            {
+                "input_ids": torch.randn(2, 3),
+                "labels": torch.zeros(2, dtype=torch.long),
+            },
             optimizer=optimizer,
         )
     assert any("grad_fn" in str(warning.message).lower() for warning in w)
