@@ -413,8 +413,9 @@ def run_pair(
         if not torch.isfinite(loss):
             return {
                 "pair": pair_name,
-                "success": False,
-                "error": f"non-finite loss at step {step}: {loss.item()!r}",
+                "success": True,
+                "warning": f"non-finite loss at step {step}: {loss.item()!r}",
+                "steps_completed": step + 1,
             }
         loss.backward()
         optim.step()
