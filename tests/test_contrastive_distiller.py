@@ -71,13 +71,13 @@ def _info_nce_reference(z_s: torch.Tensor, z_t: torch.Tensor, temperature: float
 
 
 @pytest.mark.parametrize(
-    "shape",
-    [(4, 16), (4, 8, 16), (4, 16, 4, 4)],
+    "shape,expected_channels",
+    [((4, 16), 16), ((4, 8, 16), 16), ((4, 16, 4, 4), 16)],
 )
-def test_pool_reduces_to_batch_features(shape) -> None:
+def test_pool_reduces_to_batch_features(shape, expected_channels) -> None:
     """_pool maps (B, C) / (B, T, C) / (B, C, H, W) -> (B, C)."""
     out = ContrastiveDistiller._pool(torch.randn(*shape))
-    assert out.shape == (shape[0], shape[-1])
+    assert out.shape == (shape[0], expected_channels)
 
 
 # ----------------------------------------------------------------------------
@@ -260,7 +260,8 @@ def test_memory_bank_grows_and_evicts() -> None:
     student_features = {"layers.3": torch.randn(2, 8)}
     teacher_features = {"layers.3": torch.randn(2, 8)}
 
-    # Need heads first.
+    # Need heads first — _compute_crd populates the bank from the
+    # teacher batch.
     d._compute_crd(student_features, teacher_features)
     bank = d._memory_bank
     assert bank is not None
@@ -347,7 +348,7 @@ def test_gradient_flows_through_student_projection_only() -> None:
     )
 
     student_features = {"layers.3": torch.randn(4, 8, requires_grad=True)}
-    teacher_features = {"layers.3": torch.randn(4, 8)}
+    teacher_features = {"layers.3": torch.randn(4, 8, requires_grad=True)}
 
     loss = d._compute_crd(student_features, teacher_features)
     loss.backward()
@@ -355,6 +356,7 @@ def test_gradient_flows_through_student_projection_only() -> None:
     # Student projection head's parameters received gradient.
     for p in d._student_head.parameters():
         assert p.grad is not None and p.grad.abs().sum() > 0
-    # The student's underlying layer should NOT have gradient (teacher
-    # features are detached inside the path).
-    assert student_features["layers.3"].grad is None
+
+    # Teacher features are detached inside the CRD path — even though
+    # the input has requires_grad=True, no gradient flows back to it.
+    assert teacher_features["layers.3"].grad is None

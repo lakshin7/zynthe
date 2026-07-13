@@ -91,6 +91,16 @@ class ContrastiveDistiller(BaseDistiller):
         self.contrastive_weight = float(crd_config.get("contrastive_weight", 1.0))
         self.supervised_weight = float(crd_config.get("supervised_weight", 1.0))
 
+        # Phase-0 strict_layer_match flag is honoured by BaseDistiller
+        # but isn't an attribute on the class — we read it lazily from
+        # config when registering hooks.
+        self.strict_layer_match = bool(
+            crd_config.get(
+                "strict_layer_match",
+                config.get("strict_layer_match", False),
+            )
+        )
+
         self._student_head: Optional[_ProjectionHead] = None
         self._teacher_head: Optional[_ProjectionHead] = None
         self._memory_bank: Optional[torch.Tensor] = None
@@ -232,8 +242,12 @@ class ContrastiveDistiller(BaseDistiller):
             negatives = torch.cat(
                 [negatives, self._memory_bank.to(z_t.device)], dim=0
             )
-        sim_neg = z_s @ negatives.T
-        diag_mask = torch.eye(B, device=z_s.device, dtype=torch.bool)
+        sim_neg = z_s @ negatives.T  # [B, B + M]
+        # Mask only the in-batch diagonal of the *in-batch portion*
+        # (columns 0..B-1). The memory-bank columns (B..B+M-1) stay
+        # negative samples.
+        diag_mask = torch.zeros(B, negatives.shape[0], device=z_s.device, dtype=torch.bool)
+        diag_mask[:, :B] = torch.eye(B, device=z_s.device, dtype=torch.bool)
         sim_neg = sim_neg.masked_fill(diag_mask, float("-inf"))
 
         logits = torch.cat([sim_pos, sim_neg], dim=1) / max(self.temperature, 1e-6)
