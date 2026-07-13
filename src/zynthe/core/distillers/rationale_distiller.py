@@ -120,26 +120,28 @@ class RationaleDistiller(BaseDistiller):
         # Label loss: shape (B, V) vs (B,).
         flat_label_logits = label_logits.reshape(-1, label_logits.size(-1))
         flat_label_ids = label_ids.reshape(-1).to(label_logits.device)
-        label_loss = F.cross_entropy(
-            flat_label_logits,
-            flat_label_ids,
-            ignore_index=self.ignore_index,
-        )
-        # When every label token is the ignore index, PyTorch's CE
-        # returns NaN (0/0).  Treat that as "no label signal" — a
-        # rationale-only training step returns zero label loss.
-        if torch.isnan(label_loss):
+        if (flat_label_ids != self.ignore_index).any():
+            label_loss = F.cross_entropy(
+                flat_label_logits,
+                flat_label_ids,
+                ignore_index=self.ignore_index,
+            )
+        else:
+            # Every label token is the ignore index — no label signal
+            # in this batch.  Treat as zero loss (rationale term
+            # still carries the optimisation signal).
             label_loss = torch.zeros((), device=label_logits.device)
 
         # Rationale loss: shape (B, R, V) vs (B, R). Reshape to (B*R, V) vs (B*R,).
         flat_rat_logits = rationale_logits.reshape(-1, rationale_logits.size(-1))
         flat_rat_ids = rationale_ids.reshape(-1).to(rationale_logits.device)
-        rationale_loss = F.cross_entropy(
-            flat_rat_logits,
-            flat_rat_ids,
-            ignore_index=self.ignore_index,
-        )
-        if torch.isnan(rationale_loss):
+        if (flat_rat_ids != self.ignore_index).any():
+            rationale_loss = F.cross_entropy(
+                flat_rat_logits,
+                flat_rat_ids,
+                ignore_index=self.ignore_index,
+            )
+        else:
             rationale_loss = torch.zeros((), device=rationale_logits.device)
 
         total = self.label_weight * label_loss + self.rationale_weight * rationale_loss
