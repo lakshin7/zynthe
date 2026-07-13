@@ -147,6 +147,117 @@ def test_hinton_loss_matches_closed_form(
 
 
 # ----------------------------------------------------------------------------
+# Phase 3 — entropy regularizer + dynamic temperature (report §219, §221)
+# ----------------------------------------------------------------------------
+
+
+def test_entropy_regularizer_is_zero_when_distributions_match() -> None:
+    """If student_soft == teacher_soft, |H(s) - H(t)| == 0."""
+    torch.manual_seed(10)
+    teacher = _RefModel(num_classes=5)
+    student = _RefModel(num_classes=5)
+    # Force the same weights.
+    student.load_state_dict(teacher.state_dict())
+    distiller = KDHintonDistiller(
+        teacher,
+        student,
+        config={
+            "temperature": 2.0,
+            "alpha": 0.5,
+            "entropy_regularizer_weight": 1.0,
+        },
+        device="cpu",
+    )
+    x = torch.randn(3, 4)
+    y = torch.randint(0, 5, (3,))
+    with torch.no_grad():
+        t_out = teacher(x)
+        s_out = student(x)
+    _, breakdown = distiller.compute_loss(s_out, t_out, y)
+    assert breakdown["entropy_reg"] < 1e-5
+
+
+def test_entropy_regularizer_changes_loss() -> None:
+    """Different teacher / student → entropy regularizer is non-zero."""
+    torch.manual_seed(11)
+    teacher = _RefModel(num_classes=5)
+    student = _RefModel(num_classes=5)
+    d_off = KDHintonDistiller(
+        teacher, student,
+        config={"temperature": 2.0, "alpha": 0.5, "entropy_regularizer_weight": 0.0},
+        device="cpu",
+    )
+    d_on = KDHintonDistiller(
+        teacher, student,
+        config={"temperature": 2.0, "alpha": 0.5, "entropy_regularizer_weight": 1.0},
+        device="cpu",
+    )
+    x = torch.randn(3, 4)
+    y = torch.randint(0, 5, (3,))
+    with torch.no_grad():
+        t_out = teacher(x)
+        s_out = student(x)
+    loss_off = d_off.compute_loss(s_out, t_out, y)[0]
+    loss_on = d_on.compute_loss(s_out, t_out, y)[0]
+    assert not torch.allclose(loss_off, loss_on, atol=1e-4)
+
+
+def test_learnable_temperature_registered_when_dynamic() -> None:
+    """`dynamic_temperature: 'learnable'` registers an nn.Parameter."""
+    teacher = _RefModel(num_classes=5)
+    student = _RefModel(num_classes=5)
+    d = KDHintonDistiller(
+        teacher, student,
+        config={
+            "temperature": 2.0,
+            "alpha": 0.5,
+            "dynamic_temperature": "learnable",
+        },
+        device="cpu",
+    )
+    assert d._learnable_temperature is not None
+    assert isinstance(d._learnable_temperature, torch.nn.Parameter)
+
+
+def test_learnable_temperature_default_off() -> None:
+    teacher = _RefModel(num_classes=5)
+    student = _RefModel(num_classes=5)
+    d = KDHintonDistiller(
+        teacher, student,
+        config={"temperature": 2.0, "alpha": 0.5},
+        device="cpu",
+    )
+    assert d._learnable_temperature is None
+
+
+def test_learnable_temperature_gradient_flows() -> None:
+    """With `dynamic_temperature: 'learnable'`, the τ parameter
+    receives gradient from the KD loss.
+    """
+    teacher = _RefModel(num_classes=5)
+    student = _RefModel(num_classes=5)
+    d = KDHintonDistiller(
+        teacher, student,
+        config={
+            "temperature": 2.0,
+            "alpha": 0.5,
+            "dynamic_temperature": "learnable",
+        },
+        device="cpu",
+    )
+    d.train()
+    x = torch.randn(3, 4)
+    y = torch.randint(0, 5, (3,))
+    with torch.no_grad():
+        t_out = teacher(x)
+    s_out = student(x)
+    loss, _ = d.compute_loss(s_out, t_out, y)
+    loss.backward()
+    assert d._learnable_temperature.grad is not None
+    assert d._learnable_temperature.grad.abs().item() > 0
+
+
+# ----------------------------------------------------------------------------
 # Hint path is additive
 # ----------------------------------------------------------------------------
 

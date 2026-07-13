@@ -451,6 +451,33 @@ class KDHintonDistiller(BaseDistiller):
             scheduler_type=temp_sched_cfg.get("type", "cosine"),
         )
 
+        # Phase-3 report §219 — entropy-based regularizer.  We add
+        # |H(σ(s/T)) - H(σ(t/T))| to the KD loss when configured.
+        self.entropy_regularizer_weight = float(
+            kd_config.get(
+                "entropy_regularizer_weight",
+                config.get("entropy_regularizer_weight", 0.0),
+            )
+        )
+
+        # Phase-3 report §221 — dynamic temperature.  When set to
+        # "learnable", we register a learnable temperature parameter
+        # and ignore the scheduler (the optimiser adapts τ per
+        # gradient step).  Otherwise the scheduler controls τ as
+        # before.
+        self.dynamic_temperature_mode = str(
+            kd_config.get(
+                "dynamic_temperature",
+                config.get("dynamic_temperature", ""),
+            )
+        ).lower()
+        if self.dynamic_temperature_mode == "learnable":
+            self._learnable_temperature = nn.Parameter(
+                torch.tensor(float(self.temperature))
+            )
+        else:
+            self._learnable_temperature = None
+
         # Hint loss function mapping
         self.hint_loss_fns = {
             "mse": HintLossFunctions.mse_loss,
@@ -651,7 +678,10 @@ class KDHintonDistiller(BaseDistiller):
         shift_labels = bool(self.config.get("distillation", {}).get("shift_labels", True))
 
         # Get current temperature
-        current_temp = self.temp_scheduler.step() if self.training else self.temperature
+        if self._learnable_temperature is not None:
+            current_temp = self._learnable_temperature.clamp(min=0.1, max=10.0)
+        else:
+            current_temp = self.temp_scheduler.step() if self.training else self.temperature
 
         # 1. Classical Hinton KD Loss (task-aware)
         if (
@@ -700,6 +730,25 @@ class KDHintonDistiller(BaseDistiller):
 
         total_loss += self.alpha * kd_loss
         loss_dict["kd_loss"] = kd_loss.item()
+
+        # 1b. Entropy-based regularizer (Phase-3 report §219).
+        # Add |H(σ(s/T)) - H(σ(t/T))| mean over the batch.  Only
+        # meaningful for classification (2-D logits) where softmax
+        # produces a discrete distribution.
+        if (
+            self.entropy_regularizer_weight > 0.0
+            and student_logits.dim() == 2
+        ):
+            student_p = student_soft.exp()
+            teacher_p = teacher_soft
+            eps = 1e-8
+            h_student = -(student_p * student_p.clamp_min(eps).log()).sum(dim=1)
+            h_teacher = -(teacher_p * teacher_p.clamp_min(eps).log()).sum(dim=1)
+            entropy_reg = (h_student - h_teacher).abs().mean()
+            total_loss = total_loss + self.entropy_regularizer_weight * entropy_reg
+            loss_dict["entropy_reg"] = entropy_reg.item()
+            loss_dict["H_student"] = h_student.mean().item()
+            loss_dict["H_teacher"] = h_teacher.mean().item()
 
         # 2. Supervised Cross-Entropy Loss
         if targets is not None:
