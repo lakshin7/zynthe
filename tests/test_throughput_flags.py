@@ -10,6 +10,8 @@ Pins:
 
 from __future__ import annotations
 
+import math
+
 import pytest
 import torch
 import torch.nn as nn
@@ -122,9 +124,10 @@ def test_compile_flag_keeps_eager_when_compile_disabled() -> None:
     student = _TwoHeadMod()
     d = _KDHLikeDistiller(teacher, student, device="cpu")
     assert d.compile_model is False
-    # student is still a plain nn.Module, not OptimizedModule.
-    from torch._dynamo.optimized import OptimizedModule
-    assert not isinstance(d.student, OptimizedModule)
+    # student is still a plain nn.Module, not torch.compile's wrapped
+    # variant.  Avoid importing internal torch paths — instead check
+    # the type stays as the original class.
+    assert isinstance(d.student, _TwoHeadMod)
 
 
 def test_compile_flag_records_flag() -> None:
