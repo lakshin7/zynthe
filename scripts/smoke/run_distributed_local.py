@@ -49,11 +49,12 @@ def _main() -> int:
         p_.requires_grad = False
     optim = torch.optim.SGD(student.parameters(), lr=args.lr)
 
-    # Wire through accelerate.
+    # Wire through accelerate.  num_processes defaults to "auto" so
+    # accelerate picks it up from the torchrun env (or, in this
+    # single-GPU smoke, defaults to 1).
     cfg = DistributedConfig(
         enabled=True,
         mixed_precision="no",
-        num_processes=1,  # single-GPU on Modal L4
     )
     bundle = prepare_distillation(teacher, student, optim, dataloader=None, config=cfg)
     print(f"[distributed] prepare_distillation OK; accelerator={type(bundle.accelerator).__name__}")

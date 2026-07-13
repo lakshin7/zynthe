@@ -106,7 +106,10 @@ def prepare_distillation(
         kwargs["mixed_precision_dtype"] = cfg.mixed_precision_dtype
     if cfg.cpu:
         kwargs["cpu"] = True
-    elif cfg.num_processes != "auto":
+    # accelerate (1.0.x) does NOT accept num_processes — that's a
+    # torchrun-only env var.  Only pass it when the user explicitly
+    # forces a non-default count.
+    elif cfg.num_processes != "auto" and not cfg.cpu:
         kwargs["num_processes"] = cfg.num_processes
     if cfg.gradient_accumulation_steps > 1:
         kwargs["gradient_accumulation_steps"] = cfg.gradient_accumulation_steps
