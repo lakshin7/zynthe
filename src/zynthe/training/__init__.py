@@ -6,6 +6,8 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "DistributedConfig": ("zynthe.core.training.distributed", "DistributedConfig"),
+    "prepare_distillation": ("zynthe.core.training.distributed", "prepare_distillation"),
     "OptimizerFactory": ("zynthe.training.optimizer", "OptimizerFactory"),
     "GradientManager": ("zynthe.training.optimizer", "GradientManager"),
     "AdaptiveOptimizer": ("zynthe.training.optimizer", "AdaptiveOptimizer"),
