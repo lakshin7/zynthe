@@ -27,41 +27,93 @@ Experiment #1) and the docs/benchmarks.md update.
 
 ## Done
 
-### Iteration 1 — ContrastiveDistiller (CRD) [report §205-207]
+### Iteration 7 — full smoke gate verification on Modal L4
 
-- Added `ContrastiveDistiller` in `src/zynthe/core/distillers/contrastive_distiller.py`:
-  - Per-sample projection heads (student + teacher) — small 2-layer MLPs with L2-normalised output.
-  - InfoNCE loss on (student, teacher) projections with in-batch negatives; optional memory bank.
-  - Pooling for 2-D / 3-D / 4-D feature tensors.
-  - Phase-0 `strict_layer_match` flag raises `ConfigError` on missing layers.
-- Wired into `DistillerRegistry` as `'contrastive'` and `'crd'`.
-- Exposed `ContrastiveDistiller` from `zynthe.core.distillers`.
-- Added `tests/test_contrastive_distiller.py` with 12 tests:
-  - Pooling across 2-D / 3-D / 4-D shapes.
-  - L2-normalisation of projection-head output.
-  - InfoNCE reference value (closed-form vs the distiller).
-  - 2-D feature path.
-  - Batch size 1 returns zero (degenerate).
-  - Projection heads trainable; teacher backbone still frozen.
-  - Memory bank grows up to its size then evicts oldest.
-  - Strict layer match raises `ConfigError`.
-  - FP16 stability under extreme inputs.
-  - Gradient flow through student projection only (teacher detached).
-- Verified on Modal L4: 12/12 pass with `-W error::UserWarning`.
+- Modal-verified: 222/222 unit tests pass under `-W error::UserWarning`.
+- Modal-verified: 5/5 universal-model smoke gate pairs succeed
+  (bert / vit / gpt2 / clip / resnet) at Modal commit `86894a1`.
+
+### Iteration 6 — baseline-distillation smoke experiment + docs/benchmarks.md [Experiment #1, §227-249]
+
+- Added `scripts/smoke/run_baseline_distill.py` (Modal wrapper) and
+  `scripts/smoke/run_baseline_distill_local.py` (CPU/GPU-runnable
+  sibling).
+- 30 SGD steps on Modal L4 in 1.3s; first loss 0.3526 → last loss
+  0.3384; smoke criterion (finite + decay > 0) met.
+- Wrote `docs/benchmarks.md` documenting the result + the Phase-2
+  universal-model smoke gate.
+
+### Iteration 5 — KD-Hinton entropy + dynamic temperature [§219, §221]
+
+- New `entropy_regularizer_weight` config knob (default 0.0): when
+  enabled, adds `|H(σ(s/T)) − H(σ(t/T))|` to the KD loss.
+- New `dynamic_temperature: 'learnable'` config knob: registers an
+  `nn.Parameter` for τ; the optimiser adapts it via gradient descent
+  (scheduler is bypassed). τ is clamped to `[0.1, 10.0]` for
+  numerical stability.
+- 5 new tests; total KD-Hinton tests: 15 (all green).
+
+### Iteration 4 — AuxHeadDistiller (intermediate classifiers) [§215-217, Experiment #4]
+
+- New `AuxHeadDistiller`: lazy aux heads attached to configured
+  student layers, each a small MLP; loss = mean of per-layer CE on
+  labels.
+- Wired as `'aux_head'` and `'aux'` in DistillerRegistry.
+- 9 new tests pin aux head output shape, loss composition, strict
+  layer match, FP16 stability, gradient flow, pooling.
+
+### Iteration 3 — ProjectionDistiller (translator projection) [§213]
+
+- New `ProjectionDistiller`: learnable translator MLP maps student
+  features to teacher's hidden dim; MSE loss on aligned hidden states.
+- Wired as `'projection'` and `'translator'` in DistillerRegistry.
+- 10 new tests pin translator dim, closed-form MSE reference,
+  mismatched widths, strict layer match, FP16 stability, gradient
+  flow, pooling.
+
+### Iteration 2 — RelationalDistiller (PKT) [§209-211, Experiment #3]
+
+- New `RelationalDistiller`: PKT-style loss — pairwise cosine
+  similarity matrix between student and teacher features; MSE
+  between the two similarity matrices.
+- Wired as `'relational'` and `'pkt'` in DistillerRegistry.
+- 10 new tests pin pairwise cosine properties, closed-form MSE
+  reference, FP16 stability, mismatched widths, strict layer match.
+
+### Iteration 1 — ContrastiveDistiller (CRD) [§205-207, Experiment #2]
+
+- New `ContrastiveDistiller`: InfoNCE-style loss on projected
+  student/teacher features with in-batch negatives; optional
+  memory bank for negative samples.
+- Wired as `'contrastive'` and `'crd'` in DistillerRegistry.
+- 12 new tests pin pooling, L2-normalisation, reference value,
+  FP16 stability, gradient flow, memory bank eviction, strict
+  layer match.
 
 ### Iteration 0 — scaffolding
 
 - Created `docs/phase3_status.md` to track progress.
 
-## Pending (aligned with plan)
+## Done
 
-- [ ] Iteration 2: `RelationalDistiller` + tests (plan #2, Experiment #3)
-- [ ] Iteration 3: `ProjectionDistiller` + tests (plan #3)
-- [ ] Iteration 4: `AuxHeadDistiller` + tests (plan #4, Experiment #4)
-- [ ] Iteration 5: `KDHintonDistiller` entropy + dynamic-τ extensions (plan #5, #6)
-- [ ] Iteration 6: baseline-distillation smoke experiment + `docs/benchmarks.md` (Experiment #1)
-- [ ] Iteration 7: full smoke gate on Modal L4 — verification round
+- [x] Iteration 1: ContrastiveDistiller + tests
+- [x] Iteration 2: RelationalDistiller + tests
+- [x] Iteration 3: ProjectionDistiller + tests
+- [x] Iteration 4: AuxHeadDistiller + tests
+- [x] Iteration 5: KDHinton entropy + dynamic-τ extensions
+- [x] Iteration 6: baseline-distillation smoke + benchmarks.md
+- [x] Iteration 7: full smoke gate on Modal L4
+
+## Remaining (next phases, not Phase 3)
+
+- [ ] Phase 4: bf16 autocast + torch.compile + gradient_checkpointing
+- [ ] Phase 4: Quantization (PTQ benchmarks, docs/quant.md)
+- [ ] Phase 5: Distributed training (accelerate + DDP smoke)
+- [ ] Phase 5: Preset DSL rewrite + docs site
 
 ## Upcoming
 
-- Iteration 2 next: `RelationalDistiller` from the report's §209-211 with pairwise cosine matrix loss on student/teacher features.
+- Phase 4: throughput hardening (bf16 / torch.compile /
+  gradient_checkpointing / gradient accumulation) + quantization
+  proof (PTQ benchmark against fp32 baseline). Will land under a
+  similar per-iteration status file: `docs/phase4_status.md`.
