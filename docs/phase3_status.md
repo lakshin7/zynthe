@@ -27,13 +27,34 @@ Experiment #1) and the docs/benchmarks.md update.
 
 ## Done
 
+### Iteration 1 — ContrastiveDistiller (CRD) [report §205-207]
+
+- Added `ContrastiveDistiller` in `src/zynthe/core/distillers/contrastive_distiller.py`:
+  - Per-sample projection heads (student + teacher) — small 2-layer MLPs with L2-normalised output.
+  - InfoNCE loss on (student, teacher) projections with in-batch negatives; optional memory bank.
+  - Pooling for 2-D / 3-D / 4-D feature tensors.
+  - Phase-0 `strict_layer_match` flag raises `ConfigError` on missing layers.
+- Wired into `DistillerRegistry` as `'contrastive'` and `'crd'`.
+- Exposed `ContrastiveDistiller` from `zynthe.core.distillers`.
+- Added `tests/test_contrastive_distiller.py` with 12 tests:
+  - Pooling across 2-D / 3-D / 4-D shapes.
+  - L2-normalisation of projection-head output.
+  - InfoNCE reference value (closed-form vs the distiller).
+  - 2-D feature path.
+  - Batch size 1 returns zero (degenerate).
+  - Projection heads trainable; teacher backbone still frozen.
+  - Memory bank grows up to its size then evicts oldest.
+  - Strict layer match raises `ConfigError`.
+  - FP16 stability under extreme inputs.
+  - Gradient flow through student projection only (teacher detached).
+- Verified on Modal L4: 12/12 pass with `-W error::UserWarning`.
+
 ### Iteration 0 — scaffolding
 
 - Created `docs/phase3_status.md` to track progress.
 
 ## Pending (aligned with plan)
 
-- [ ] Iteration 1: `ContrastiveDistiller` + tests + smoke CRD pair (plan #1, Experiment #2)
 - [ ] Iteration 2: `RelationalDistiller` + tests (plan #2, Experiment #3)
 - [ ] Iteration 3: `ProjectionDistiller` + tests (plan #3)
 - [ ] Iteration 4: `AuxHeadDistiller` + tests (plan #4, Experiment #4)
@@ -43,4 +64,4 @@ Experiment #1) and the docs/benchmarks.md update.
 
 ## Upcoming
 
-- Iteration 1 next: `ContrastiveDistiller` from the report's §205-207 with projection head + InfoNCE on teacher/student features. Will land a smoke pair in `scripts/smoke/universal_smoke.py` so the universal-model gate exercises CRD too.
+- Iteration 2 next: `RelationalDistiller` from the report's §209-211 with pairwise cosine matrix loss on student/teacher features.
