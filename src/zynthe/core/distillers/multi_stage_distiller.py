@@ -44,6 +44,7 @@ from .contrastive_distiller import ContrastiveDistiller
 from .feature_distiller import FeatureDistiller
 from .kd_hinton import KDHintonDistiller
 from .presets import get_preset, list_presets
+from .projection_distiller import ProjectionDistiller
 from .relational_distiller import RelationalDistiller
 from .similarity_transfer import SimilarityTransfer
 
@@ -187,6 +188,8 @@ class DistillerRegistry:
             "crd": ContrastiveDistiller,
             "relational": RelationalDistiller,
             "pkt": RelationalDistiller,
+            "projection": ProjectionDistiller,
+            "translator": ProjectionDistiller,
             "similarity": SimilarityTransfer,
             "similarity_transfer": SimilarityTransfer,
             "multi_stage": MultiStageDistiller,  # Full multi-stage orchestrator

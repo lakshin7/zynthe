@@ -7,6 +7,7 @@ from .causal_lm import SafeCausalLMTrainer
 from .contrastive_distiller import ContrastiveDistiller
 from .feature_distiller import FeatureDistiller
 from .kd_hinton import KDHintonDistiller
+from .projection_distiller import ProjectionDistiller
 from .relational_distiller import RelationalDistiller
 from .similarity_transfer import SimilarityTransfer
 
@@ -28,6 +29,7 @@ __all__ = [
     "FeatureDistiller",
     "KDHintonDistiller",
     "MultiStageDistiller",
+    "ProjectionDistiller",
     "RelationalDistiller",
     "SimilarityTransfer",
     "DistillationToolkit",
