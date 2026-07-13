@@ -39,6 +39,20 @@ from zynthe.core.utils.device_utils import (
 logger = logging.getLogger(__name__)
 
 
+class _NullContext:
+    """No-op context manager — used when bf16 autocast is not requested.
+
+    Equivalent to ``contextlib.nullcontext`` but kept local to avoid
+    an import in a hot path.
+    """
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
 class BaseDistiller(nn.Module):
     """
     Base class for all knowledge distillation methods.
@@ -101,6 +115,43 @@ class BaseDistiller(nn.Module):
         # Move models to device
         self.teacher = self.teacher.to(self.device)
         self.student = self.student.to(self.device)
+
+        # Phase-4 throughput flags.  Default off; opt-in via config.
+        self.precision = str(
+            (self.config.get("distill") or {}).get("precision", "fp32")
+        ).lower()
+        self.compile_model = bool(
+            (self.config.get("distill") or {}).get("compile", False)
+        )
+        self.grad_checkpointing = bool(
+            (self.config.get("distill") or {}).get("grad_checkpointing", False)
+        )
+
+        # Optional student grad-checkpointing (HF students only).
+        if self.grad_checkpointing:
+            if hasattr(self.student, "gradient_checkpointing_enable"):
+                try:
+                    self.student.gradient_checkpointing_enable()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "grad_checkpointing_enable failed; falling back: %s", exc
+                    )
+            else:
+                logger.debug(
+                    "grad_checkpointing requested but student %s does not "
+                    "support gradient_checkpointing_enable; skipping.",
+                    type(self.student).__name__,
+                )
+
+        # Optional student torch.compile opt-in.
+        if self.compile_model:
+            try:
+                self.student = torch.compile(self.student)  # type: ignore[assignment]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "torch.compile failed (%s); falling back to eager mode.",
+                    exc,
+                )
 
         # Freeze teacher and set to eval mode
         if freeze_teacher:
@@ -615,24 +666,40 @@ class BaseDistiller(nn.Module):
             inputs = self._move_to_device(inputs)
             targets = self._move_to_device(targets) if targets is not None else None
 
-        # Forward pass with feature extraction
-        forward_result = self.forward(inputs, return_features=True)
-        if len(forward_result) == 4:
-            student_outputs, teacher_outputs, teacher_features, student_features = forward_result
-        else:
-            student_outputs, teacher_outputs = forward_result  # type: ignore[misc]
-            teacher_features, student_features = {}, {}
+        # Phase-4: optional bf16 autocast around the student forward +
+        # loss computation.  Teacher is kept in fp32 (frozen) so its
+        # outputs stay numerically stable as soft targets.
+        autocast_ctx = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if self.precision == "bf16" and self.device.type == "cuda"
+            else _NullContext()
+        )
+        with autocast_ctx:
+            # Forward pass with feature extraction
+            forward_result = self.forward(inputs, return_features=True)
+            if len(forward_result) == 4:
+                (
+                    student_outputs,
+                    teacher_outputs,
+                    teacher_features,
+                    student_features,
+                ) = forward_result
+            else:
+                student_outputs, teacher_outputs = forward_result  # type: ignore[misc]
+                teacher_features, student_features = {}, {}
 
-        # Compute loss
-        total_loss, loss_dict = self.compute_loss(
-            student_outputs=student_outputs,
-            teacher_outputs=teacher_outputs,
+            # Compute loss
+            total_loss, loss_dict = self.compute_loss(
+                student_outputs=student_outputs,
+                teacher_outputs=teacher_outputs,
             targets=targets,
             student_features=student_features,
             teacher_features=teacher_features,
         )
 
-        # Backward pass
+        # Backward pass (autocast is still active so the loss tensor
+        # carries bf16 dtype if precision=bf16; we let the optimiser
+        # decide whether to upcast for the actual step).
         opt = optimizer or self.optimizer
         if opt is None:
             raise ValueError("No optimizer provided. Either pass optimizer or set self.optimizer")
