@@ -24,7 +24,11 @@ from zynthe.core.distillers.base_distiller import BaseDistiller
 
 
 class _TwoHeadMod(nn.Module):
-    """A tiny student/teacher that exposes .logits via forward."""
+    """A tiny student/teacher that exposes .logits via forward.
+
+    Output shape is (B, num_classes) — 2-D — so cross-entropy on
+    logits vs. (B,) targets lines up without reshaping.
+    """
 
     def __init__(self, num_classes: int = 4, hidden: int = 8) -> None:
         super().__init__()
@@ -35,7 +39,12 @@ class _TwoHeadMod(nn.Module):
     def forward(self, input_ids=None, labels=None, **_unused):
         if input_ids is None:
             raise TypeError("input_ids required")
-        return type("O", (), {"logits": self.head(self.embed(input_ids))})()
+        # Mean-pool the sequence dim to get (B, hidden) -> (B, num_classes).
+        return type(
+            "O",
+            (),
+            {"logits": self.head(self.embed(input_ids).mean(dim=1))},
+        )()
 
 
 class _KDHLikeDistiller(BaseDistiller):
