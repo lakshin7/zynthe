@@ -208,7 +208,7 @@ def test_ignore_index_excludes_label_tokens() -> None:
     )
     assert breakdown["label"] == 0.0
     # Total = 0 * 1.0 + rationale_loss * 1.0 (default).
-    assert torch.allclose(total, breakdown["rationale"], atol=1e-6)
+    assert torch.allclose(total, torch.tensor(breakdown["rationale"]), atol=1e-6)
 
 
 # ----------------------------------------------------------------------------
