@@ -125,6 +125,11 @@ class RationaleDistiller(BaseDistiller):
             flat_label_ids,
             ignore_index=self.ignore_index,
         )
+        # When every label token is the ignore index, PyTorch's CE
+        # returns NaN (0/0).  Treat that as "no label signal" — a
+        # rationale-only training step returns zero label loss.
+        if torch.isnan(label_loss):
+            label_loss = torch.zeros((), device=label_logits.device)
 
         # Rationale loss: shape (B, R, V) vs (B, R). Reshape to (B*R, V) vs (B*R,).
         flat_rat_logits = rationale_logits.reshape(-1, rationale_logits.size(-1))
@@ -134,6 +139,8 @@ class RationaleDistiller(BaseDistiller):
             flat_rat_ids,
             ignore_index=self.ignore_index,
         )
+        if torch.isnan(rationale_loss):
+            rationale_loss = torch.zeros((), device=rationale_logits.device)
 
         total = self.label_weight * label_loss + self.rationale_weight * rationale_loss
         return total, {
