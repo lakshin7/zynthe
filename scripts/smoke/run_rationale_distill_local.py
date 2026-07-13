@@ -78,33 +78,46 @@ def _build_student_and_teacher(model_name: str, device: torch.device):
     return model, tokenizer
 
 
-def _forward_two_heads(model, tokenizer, batch, device, max_target_len: int = 8):
-    """Run the student on the two task-prefixed views and return logits."""
+def _forward_two_heads(model, batch, device):
+    """Run the student on the two task-prefixed views and return logits.
+
+    We pass the targets as ``decoder_input_ids`` (teacher forcing) so
+    the decoder output length matches the target length — that way
+    cross-entropy against the targets lines up position-by-position
+    with the logits without us having to truncate.
+    """
     label_ids = batch["label_input_ids"].to(device)
     label_mask = batch["label_attention_mask"].to(device)
     rationale_ids = batch["rationale_input_ids"].to(device)
     rationale_mask = batch["rationale_attention_mask"].to(device)
+    label_target = batch["label_ids"].to(device)
+    rationale_target = batch["rationale_ids"].to(device)
 
     label_out = model(
         input_ids=label_ids,
         attention_mask=label_mask,
-        labels=label_ids,  # dummy for shape; we don't compute loss
+        decoder_input_ids=_shift_right(label_target, model.config.decoder_start_token_id),
     )
-    # The decoder returns logits; shape (B, T_dec, V). For the smoke
-    # we project to (B, T_dec, vocab).  Use the model's lm_head on the
-    # decoder hidden states — the simpler shortcut is to use the full
-    # seq2seq logits directly and trim to the last time step (we
-    # need a per-position logit vector for cross-entropy, so we use
-    # the full output).
-    label_logits = label_out.logits  # (B, T_dec, V)
+    label_logits = label_out.logits  # (B, T_target, V)
 
     rationale_out = model(
         input_ids=rationale_ids,
         attention_mask=rationale_mask,
-        labels=rationale_ids,
+        decoder_input_ids=_shift_right(rationale_target, model.config.decoder_start_token_id),
     )
-    rationale_logits = rationale_out.logits  # (B, T_dec, V)
+    rationale_logits = rationale_out.logits  # (B, T_target, V)
     return label_logits, rationale_logits
+
+
+def _shift_right(input_ids: torch.Tensor, decoder_start_token_id: int) -> torch.Tensor:
+    """T5-style shift-right: prepend decoder_start_token, drop last.
+
+    Operates on the last dimension of a 2-D tensor (B, T).
+    """
+    shifted = input_ids.new_zeros(input_ids.shape)
+    shifted[:, 0] = decoder_start_token_id
+    shifted[:, 1:] = input_ids[:, :-1]
+    return shifted
 
 
 def main() -> int:
@@ -205,20 +218,23 @@ def main() -> int:
         ex = ds[step % len(ds)]
         batch = _encode(ex)
         optim.zero_grad()
-        label_logits, rationale_logits = _forward_two_heads(
-            student, tokenizer, batch, device
-        )
-        # Trim to target lengths to align with the labels.
-        label_target = batch["label_ids"].to(device)[:, : label_logits.size(1)]
-        rationale_target = batch["rationale_ids"].to(device)[:, : rationale_logits.size(1)]
+        label_logits, rationale_logits = _forward_two_heads(student, batch, device)
+        # Logits length matches target length because we teacher-forced
+        # the decoder with the targets.
+        label_target = batch["label_ids"].to(device)
+        rationale_target = batch["rationale_ids"].to(device)
+        # Trim logits to the target length in case the model's decoder
+        # produced one extra / fewer tokens.
+        L = min(label_logits.size(1), label_target.size(1))
+        R = min(rationale_logits.size(1), rationale_target.size(1))
         label_loss = F.cross_entropy(
-            label_logits.reshape(-1, label_logits.size(-1)),
-            label_target.reshape(-1),
+            label_logits[:, :L].reshape(-1, label_logits.size(-1)),
+            label_target[:, :L].reshape(-1),
             ignore_index=-100,
         )
         rationale_loss = F.cross_entropy(
-            rationale_logits.reshape(-1, rationale_logits.size(-1)),
-            rationale_target.reshape(-1),
+            rationale_logits[:, :R].reshape(-1, rationale_logits.size(-1)),
+            rationale_target[:, :R].reshape(-1),
             ignore_index=-100,
         )
         if torch.isnan(label_loss):
