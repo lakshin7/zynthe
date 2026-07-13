@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .attention_transfer import AttentionTransferDistiller
 from .causal_lm import SafeCausalLMTrainer
+from .contrastive_distiller import ContrastiveDistiller
 from .feature_distiller import FeatureDistiller
 from .kd_hinton import KDHintonDistiller
 from .similarity_transfer import SimilarityTransfer
@@ -22,6 +23,7 @@ except Exception:  # pragma: no cover - optional dependency chain (viz libs)
 
 __all__ = [
     "AttentionTransferDistiller",
+    "ContrastiveDistiller",
     "FeatureDistiller",
     "KDHintonDistiller",
     "MultiStageDistiller",

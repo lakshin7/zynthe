@@ -40,6 +40,7 @@ from zynthe.core.adapters import AdapterRegistry
 from zynthe.evaluation.metrics_extended import CompressionAwareScore, DistillationEfficacyIndex
 
 from .base_distiller import BaseDistiller
+from .contrastive_distiller import ContrastiveDistiller
 from .feature_distiller import FeatureDistiller
 from .kd_hinton import KDHintonDistiller
 from .presets import get_preset, list_presets
@@ -181,6 +182,8 @@ class DistillerRegistry:
             "kd": KDHintonDistiller,
             "kd_hinton": KDHintonDistiller,
             "feature": FeatureDistiller,
+            "contrastive": ContrastiveDistiller,
+            "crd": ContrastiveDistiller,
             "similarity": SimilarityTransfer,
             "similarity_transfer": SimilarityTransfer,
             "multi_stage": MultiStageDistiller,  # Full multi-stage orchestrator
