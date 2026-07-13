@@ -5,9 +5,10 @@ preprocessing pipelines for distillation training.
 
 Quick Start::
 
-    from zynthe.data import create_dataloaders, JsonlDataset
+    from zynthe.data import create_dataloaders, JsonlDataset, RationaleDataset
 
     train_loader, val_loader = create_dataloaders(config, tokenizer)
+    rationale_ds = RationaleDataset("rationales.jsonl")
 """
 
 from __future__ import annotations
@@ -15,9 +16,11 @@ from __future__ import annotations
 from .augmentations import TextAugmenter, build_text_augmenter
 from .dataloaders import JsonlDataset, create_dataloaders, load_sample_data
 from .preprocess import PreprocessConfig, apply_preprocess_pipeline, build_preprocess_config
+from .rationale_dataset import RationaleDataset
 
 __all__ = [
     "JsonlDataset",
+    "RationaleDataset",
     "create_dataloaders",
     "load_sample_data",
     "TextAugmenter",

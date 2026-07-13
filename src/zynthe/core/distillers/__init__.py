@@ -9,6 +9,7 @@ from .contrastive_distiller import ContrastiveDistiller
 from .feature_distiller import FeatureDistiller
 from .kd_hinton import KDHintonDistiller
 from .projection_distiller import ProjectionDistiller
+from .rationale_distiller import RationaleDistiller
 from .relational_distiller import RelationalDistiller
 from .similarity_transfer import SimilarityTransfer
 
@@ -32,6 +33,7 @@ __all__ = [
     "KDHintonDistiller",
     "MultiStageDistiller",
     "ProjectionDistiller",
+    "RationaleDistiller",
     "RelationalDistiller",
     "SimilarityTransfer",
     "DistillationToolkit",
