@@ -43,6 +43,33 @@ on every smoke run; commit hash is recorded inside the JSON).
 
 ---
 
+## Rationale Distillation (Distill step-by-step, §Iteration 8)
+
+Tiny T5 → T5 with synthetic (input, label, rationale) arithmetic
+triples.  Multi-task loss = CE_label + λ·CE_rationale.
+
+| Field | Value |
+|---|---|
+| Teacher | (none — student is its own teacher; no LLM at training time) |
+| Student | `patrickvonplaten/t5-tiny-random` |
+| Rationales | 64 synthetic triples (`a + b`, label, one-sentence rationale) |
+| Loss | `CE_label + 1.0 * CE_rationale` |
+| Steps | 20 |
+| Hardware | Modal L4 |
+| Duration | ~1.9 s |
+| **First loss** | 18.46 |
+| **Last loss** | 17.34 |
+| **Min loss** | 16.44 |
+| **Decay** | 1.12 |
+
+Smoke criterion: **loss is finite and decay > 0 over the run**.
+Achieved — the rationale multi-task loss decreases by 1.12 over 20
+steps.
+
+Source JSON: `tests/smoke/results/rationale.json`.
+
+---
+
 ## Universal-Model Smoke Gate (5 families)
 
 The full 5-pair gate from `scripts/smoke/universal_smoke.py` (also

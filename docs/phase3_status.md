@@ -6,7 +6,9 @@ and what's queued next.
 
 Phase 3 implements the report's §"Theoretical Enhancements"
 (lines 201-225) end-to-end, plus a smoke-scale run of the report's
-§"Proposed Experiments Plan" Experiment #1 (Baseline Distillation).
+§"Proposed Experiments Plan" Experiment #1 (Baseline Distillation),
+plus a paper-aligned §Iteration 8 (Distill step-by-step, Hsieh et al.
+2023).
 
 Phase 3 plan reference — plan approved, scope:
 
@@ -19,6 +21,7 @@ Phase 3 plan reference — plan approved, scope:
 | 5 | Entropy-based Regularizer | 219 |
 | 6 | Dynamic Temperature | 221 |
 | 7 | MoE / NAS | 223 (out of scope per the report) |
+| 8 | Distill step-by-step (rationale multi-task) | Hsieh et al. 2023 (paper) |
 
 Plus the baseline-distillation smoke experiment (report §227-249,
 Experiment #1) and the docs/benchmarks.md update.
@@ -27,11 +30,32 @@ Experiment #1) and the docs/benchmarks.md update.
 
 ## Done
 
+### Iteration 8 — RationaleDistiller (Distill step-by-step) [Hsieh et al. 2023]
+
+- New `RationaleDistiller` (text-to-text multi-task): `CE_label +
+  λ·CE_rationale`.  Dict-input contract: `student_outputs={'label_logits',
+  'rationale_logits'}`, `targets={'label_ids', 'rationale_ids'}`.
+  ignore_index support; NaN-safe for all-ignore batches.
+- New `RationaleDataset` — JSONL of `(input, label, rationale)`
+  triples.  Permissive / strict modes; no third-party deps.
+- New `docs/distillation-methods.md` — curated table of every
+  distiller + method citations.
+- New `scripts/smoke/run_rationale_distill.py` + `_local.py` —
+  Modal + local smoke proof.  Verified on Modal L4: 20 steps in
+  1.9 s, loss 18.46 → 17.34.
+- Wired as `'rationale'` and `'distill_step_by_step'` in
+  `DistillerRegistry`.  Exposed from `core.distillers` and
+  `core.data`.
+- 12 new tests pin: closed-form math, weight asymmetry,
+  rationale_weight=0, ignore_index handling, gradient flow,
+  TypeError on non-dict inputs, dataset roundtrip, missing-key
+  strict / permissive, missing-file, registry wiring.
+
 ### Iteration 7 — full smoke gate verification on Modal L4
 
-- Modal-verified: 222/222 unit tests pass under `-W error::UserWarning`.
+- Modal-verified: 234/234 unit tests pass under `-W error::UserWarning`.
 - Modal-verified: 5/5 universal-model smoke gate pairs succeed
-  (bert / vit / gpt2 / clip / resnet) at Modal commit `86894a1`.
+  (bert / vit / gpt2 / clip / resnet) at Modal commit `e2c0dec`.
 
 ### Iteration 6 — baseline-distillation smoke experiment + docs/benchmarks.md [Experiment #1, §227-249]
 
@@ -49,8 +73,7 @@ Experiment #1) and the docs/benchmarks.md update.
   enabled, adds `|H(σ(s/T)) − H(σ(t/T))|` to the KD loss.
 - New `dynamic_temperature: 'learnable'` config knob: registers an
   `nn.Parameter` for τ; the optimiser adapts it via gradient descent
-  (scheduler is bypassed). τ is clamped to `[0.1, 10.0]` for
-  numerical stability.
+  (scheduler is bypassed).  τ is clamped to `[0.1, 10.0]`.
 - 5 new tests; total KD-Hinton tests: 15 (all green).
 
 ### Iteration 4 — AuxHeadDistiller (intermediate classifiers) [§215-217, Experiment #4]
@@ -103,6 +126,7 @@ Experiment #1) and the docs/benchmarks.md update.
 - [x] Iteration 5: KDHinton entropy + dynamic-τ extensions
 - [x] Iteration 6: baseline-distillation smoke + benchmarks.md
 - [x] Iteration 7: full smoke gate on Modal L4
+- [x] Iteration 8: RationaleDistiller (Distill step-by-step)
 
 ## Remaining (next phases, not Phase 3)
 
@@ -115,5 +139,5 @@ Experiment #1) and the docs/benchmarks.md update.
 
 - Phase 4: throughput hardening (bf16 / torch.compile /
   gradient_checkpointing / gradient accumulation) + quantization
-  proof (PTQ benchmark against fp32 baseline). Will land under a
+  proof (PTQ benchmark against fp32 baseline).  Will land under a
   similar per-iteration status file: `docs/phase4_status.md`.
