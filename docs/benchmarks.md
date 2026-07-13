@@ -70,6 +70,27 @@ Source JSON: `tests/smoke/results/rationale.json`.
 
 ---
 
+## Quantization (Phase 4 Iteration 2)
+
+Dynamic int8 PTQ on `prajjwal1/bert-tiny` via
+`torch.ao.quantization.quantize_dynamic`.  Smoke criterion: int8
+model loads, forward-passes, logits finite.
+
+| Field | Value |
+|---|---|
+| Model | `prajjwal1/bert-tiny` (4.39 M params) |
+| Strategy | dynamic int8 (Linear layers only) |
+| Time | 0.15 s |
+| **fp32 size** | 16.73 MB |
+| **Int8 model** | Loads + forward OK; logits shape (1, 2) |
+
+Smoke criterion: **forward pass succeeds with finite logits**.
+Achieved.
+
+Source JSON: `tests/smoke/results/ptq_summary.json`.
+
+---
+
 ## Universal-Model Smoke Gate (5 families)
 
 The full 5-pair gate from `scripts/smoke/universal_smoke.py` (also
