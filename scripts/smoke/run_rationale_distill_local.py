@@ -115,7 +115,8 @@ def main() -> int:
     p.add_argument("--n-samples", type=int, default=64)
     p.add_argument(
         "--model",
-        default="hf-internal-testing/tiny-t5",
+        default="patrickvonplaten/t5-tiny-random",
+        help="Tiny T5 model for the smoke. Default exists on HF Hub.",
     )
     p.add_argument(
         "--output",
