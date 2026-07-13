@@ -39,6 +39,7 @@ from torch.utils.data import DataLoader
 from zynthe.core.adapters import AdapterRegistry
 from zynthe.evaluation.metrics_extended import CompressionAwareScore, DistillationEfficacyIndex
 
+from .aux_head_distiller import AuxHeadDistiller
 from .base_distiller import BaseDistiller
 from .contrastive_distiller import ContrastiveDistiller
 from .feature_distiller import FeatureDistiller
@@ -190,6 +191,8 @@ class DistillerRegistry:
             "pkt": RelationalDistiller,
             "projection": ProjectionDistiller,
             "translator": ProjectionDistiller,
+            "aux_head": AuxHeadDistiller,
+            "aux": AuxHeadDistiller,
             "similarity": SimilarityTransfer,
             "similarity_transfer": SimilarityTransfer,
             "multi_stage": MultiStageDistiller,  # Full multi-stage orchestrator
