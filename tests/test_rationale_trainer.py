@@ -152,6 +152,8 @@ def test_train_step_returns_loss_and_breakdown(trainer) -> None:
     """
     class _StubDistiller:
         def compute_loss(self, student_outputs, targets):
+            # Reshape to (B*T, V) vs (B*T,) and use ignore_index=-100
+            # to handle the masked positions.
             label_loss = torch.nn.functional.cross_entropy(
                 student_outputs["label_logits"].float().view(-1, student_outputs["label_logits"].size(-1)),
                 targets["label_ids"].view(-1),
@@ -199,7 +201,8 @@ def test_train_step_returns_loss_and_breakdown(trainer) -> None:
 def test_train_step_calls_distiller_compute_loss(trainer) -> None:
     """The trainer's train_step must pass the distiller a dict the
     distiller can consume (label_logits, rationale_logits, label_ids,
-    rationale_ids).
+    rationale_ids).  The distiller returns a loss that depends on
+    the inputs so backward() works.
     """
     captured: dict = {}
 
@@ -207,7 +210,26 @@ def test_train_step_calls_distiller_compute_loss(trainer) -> None:
         def compute_loss(self, student_outputs, targets):
             captured["student_outputs"] = student_outputs
             captured["targets"] = targets
-            return torch.tensor(0.0), {"total": 0.0}
+            # Use the logit-sum so the loss is a real scalar with grad_fn.
+            loss = student_outputs["label_logits"].float().sum() * 1e-6
+            return loss, {"total": loss.item()}
+
+    tokenizer = trainer.tokenizer
+    batch = {
+        "input": "a sample",
+        "label_ids": tokenizer(
+            "pos", return_tensors="pt", padding="max_length", max_length=4, truncation=True
+        )["input_ids"],
+        "rationale_ids": tokenizer(
+            "because", return_tensors="pt", padding="max_length", max_length=4, truncation=True
+        )["input_ids"],
+    }
+    optim = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+    trainer.train_step(batch, distiller=_CapturingDistiller(), optimizer=optim)
+    assert "label_logits" in captured["student_outputs"]
+    assert "rationale_logits" in captured["student_outputs"]
+    assert "label_ids" in captured["targets"]
+    assert "rationale_ids" in captured["targets"]
 
     tokenizer = trainer.tokenizer
     batch = {

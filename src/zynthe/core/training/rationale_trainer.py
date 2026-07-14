@@ -151,25 +151,28 @@ class MultiTaskT5Trainer:
     def forward_label(
         self, input_text: str, *, max_length: int = 128
     ) -> torch.Tensor:
-        """Run the model once with the [label] prefix, returning logits.
+        """Inference path: run the model once with the [label] prefix
+        and return the decoder logits.
 
-        Output shape: ``(1, decoder_seq_len, vocab_size)``.
-
-        Gradients flow through the model — this is the training path.
-        At eval time, wrap in ``torch.no_grad()`` at the call site.
+        Wrapped in ``torch.no_grad()`` — this is the inference /
+        inspection path, not the training path.  For training, use
+        :meth:`train_step`, which teacher-forces the decoder and
+        propagates gradients.
         """
         encoded = self._encode(self.label_prefix + input_text, max_length=max_length)
-        return self.model(**encoded).logits
+        with torch.no_grad():
+            return self.model(**encoded).logits
 
     def forward_rationale(
         self, input_text: str, *, max_length: int = 128
     ) -> torch.Tensor:
-        """Run the model with the [rationale] prefix, returning logits.
+        """Inference path: run the model with the [rationale] prefix.
 
-        Gradients flow through the model — this is the training path.
+        See :meth:`forward_label` for the inference/training contract.
         """
         encoded = self._encode(self.rationale_prefix + input_text, max_length=max_length)
-        return self.model(**encoded).logits
+        with torch.no_grad():
+            return self.model(**encoded).logits
 
     def forward_both(
         self, input_text: str, *, max_length: int = 128
