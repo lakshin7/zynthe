@@ -222,7 +222,12 @@ def test_cli_roundtrip_writes_jsonl(tmp_path: Path, monkeypatch, capsys) -> None
     extract_rationales, verify outputs JSONL has the right shape.
     """
     import sys as _sys
-    from scripts import extract_rationales as er  # noqa: E402  (path already on sys.path)
+    # Re-add scripts/ to sys.path — pytest's per-test sandbox can
+    # wipe the path between top-level imports and the test body.
+    _SCRIPTS = str(Path(__file__).parent.parent / "scripts")
+    if _SCRIPTS not in _sys.path:
+        _sys.path.insert(0, _SCRIPTS)
+    import extract_rationales as er
 
     inp = tmp_path / "in.jsonl"
     out = tmp_path / "out.jsonl"
