@@ -38,6 +38,20 @@ def trainer() -> MultiTaskT5Trainer:
     return MultiTaskT5Trainer.from_pretrained(TEST_MODEL, device="cpu")
 
 
+@pytest.fixture()
+def trainer_eval(trainer) -> MultiTaskT5Trainer:
+    """Per-test fixture: trainer with model switched to eval mode.
+
+    Used for inference-path tests (forward_label /
+    forward_rationale / forward_both).  T5 seq2seq needs
+    ``decoder_input_ids`` if it's in train mode, but in eval mode it
+    uses ``decoder_start_token_id`` automatically.
+    """
+    trainer.model.eval()
+    yield trainer
+    trainer.model.train()
+
+
 # ----------------------------------------------------------------------------
 # Construction
 # ----------------------------------------------------------------------------
@@ -94,50 +108,50 @@ def test_teacher_forcing_shifts_right(trainer) -> None:
 # ----------------------------------------------------------------------------
 
 
-def test_forward_label_returns_logits(trainer) -> None:
+def test_forward_label_returns_logits(trainer_eval) -> None:
     with torch.no_grad():
-        logits = trainer.forward_label("a sentence")
+        logits = trainer_eval.forward_label("a sentence")
     assert logits.dim() == 3
     # T5's vocab size is in the 30k+ range; we just check it's > 100.
     assert logits.shape[-1] > 100
 
 
-def test_forward_rationale_returns_logits(trainer) -> None:
+def test_forward_rationale_returns_logits(trainer_eval) -> None:
     with torch.no_grad():
-        logits = trainer.forward_rationale("a sentence")
+        logits = trainer_eval.forward_rationale("a sentence")
     assert logits.dim() == 3
     assert logits.shape[-1] > 100
 
 
-def test_forward_label_and_rationale_have_same_vocab(trainer) -> None:
+def test_forward_label_and_rationale_have_same_vocab(trainer_eval) -> None:
     """Both views must agree on vocab size so the distiller's CE lines up."""
     with torch.no_grad():
-        a = trainer.forward_label("same input")
-        b = trainer.forward_rationale("same input")
+        a = trainer_eval.forward_label("same input")
+        b = trainer_eval.forward_rationale("same input")
     assert a.shape[-1] == b.shape[-1]
 
 
-def test_forward_both_returns_distiller_dict(trainer) -> None:
+def test_forward_both_returns_distiller_dict(trainer_eval) -> None:
     with torch.no_grad():
-        out = trainer.forward_both("a sentence", max_length=32)
+        out = trainer_eval.forward_both("a sentence", max_length=32)
     assert set(out.keys()) == {"label_logits", "rationale_logits"}
     assert out["label_logits"].dim() == 3
     assert out["rationale_logits"].dim() == 3
 
 
-def test_label_prefix_actually_prepends(trainer) -> None:
+def test_label_prefix_actually_prepends(trainer_eval) -> None:
     """Tokenising with the prefix differs from tokenising without it."""
-    bare = trainer._encode("a sentence", max_length=32)
-    with_prefix = trainer._encode(trainer.label_prefix + "a sentence", max_length=32)
+    bare = trainer_eval._encode("a sentence", max_length=32)
+    with_prefix = trainer_eval._encode(trainer_eval.label_prefix + "a sentence", max_length=32)
     # The two input_ids sequences should differ.
     assert not torch.equal(bare["input_ids"], with_prefix["input_ids"])
 
 
-def test_label_and_rationale_logits_differ(trainer) -> None:
+def test_label_and_rationale_logits_differ(trainer_eval) -> None:
     """The two views should produce different logit distributions."""
     with torch.no_grad():
-        a = trainer.forward_label("a sentence")
-        b = trainer.forward_rationale("a sentence")
+        a = trainer_eval.forward_label("a sentence")
+        b = trainer_eval.forward_rationale("a sentence")
     assert not torch.allclose(a.float(), b.float(), atol=1e-3)
 
 
