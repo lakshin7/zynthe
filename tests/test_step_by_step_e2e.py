@@ -128,6 +128,19 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
             rationale_prefix=kwargs.get("rationale_prefix", "rationale: "),
         )
 
+    def _patched_from_pretrained(cls, model_name, **kwargs):
+        return _local_trainer(model_name, **kwargs)
+
+    # Patch the from_pretrained classmethod on the *real* class.  The
+    # recipe imports MultiTaskT5Trainer into its own local scope; by
+    # monkeypatching the classmethod we intercept every caller,
+    # including the recipe's.  Patching the rt_mod attribute is
+    # insufficient because the recipe's reference is captured
+    # locally at import time.
+    monkeypatch.setattr(
+        RealTrainer, "from_pretrained", classmethod(_patched_from_pretrained)
+    )
+
     class _StubTokenizer:
         def __call__(self, text, return_tensors=None, padding=None, max_length=None, truncation=None, **_):
             ids = [ord(c) % 64 for c in text[:max_length or 32]]
