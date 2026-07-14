@@ -159,9 +159,7 @@ class MultiTaskT5Trainer:
         :meth:`train_step`, which teacher-forces the decoder and
         propagates gradients.
         """
-        encoded = self._encode(self.label_prefix + input_text, max_length=max_length)
-        with torch.no_grad():
-            return self.model(**encoded).logits
+        return self._forward_no_grad(self.label_prefix + input_text, max_length=max_length)
 
     def forward_rationale(
         self, input_text: str, *, max_length: int = 128
@@ -170,9 +168,30 @@ class MultiTaskT5Trainer:
 
         See :meth:`forward_label` for the inference/training contract.
         """
-        encoded = self._encode(self.rationale_prefix + input_text, max_length=max_length)
+        return self._forward_no_grad(self.rationale_prefix + input_text, max_length=max_length)
+
+    def _forward_no_grad(self, full_text: str, *, max_length: int) -> torch.Tensor:
+        """Shared inference path: build the decoder input from
+        ``decoder_start_token_id`` and run the model under no_grad.
+
+        The tiny / randomly-initialised T5 we use in the smoke has no
+        ``decoder_start_token_id`` baked into the config, so we fall
+        back to building a single-token decoder input of zeros.
+        """
+        encoded = self._encode(full_text, max_length=max_length)
+        bsz = encoded["input_ids"].shape[0]
+        decoder_input_ids = torch.full(
+            (bsz, 1),
+            int(self.label_decoder_start_token_id),
+            dtype=torch.long,
+            device=self.device,
+        )
         with torch.no_grad():
-            return self.model(**encoded).logits
+            return self.model(
+                input_ids=encoded["input_ids"],
+                attention_mask=encoded["attention_mask"],
+                decoder_input_ids=decoder_input_ids,
+            ).logits
 
     def forward_both(
         self, input_text: str, *, max_length: int = 128
