@@ -154,18 +154,22 @@ class MultiTaskT5Trainer:
         """Run the model once with the [label] prefix, returning logits.
 
         Output shape: ``(1, decoder_seq_len, vocab_size)``.
+
+        Gradients flow through the model — this is the training path.
+        At eval time, wrap in ``torch.no_grad()`` at the call site.
         """
         encoded = self._encode(self.label_prefix + input_text, max_length=max_length)
-        with torch.no_grad():
-            return self.model(**encoded).logits
+        return self.model(**encoded).logits
 
     def forward_rationale(
         self, input_text: str, *, max_length: int = 128
     ) -> torch.Tensor:
-        """Run the model with the [rationale] prefix, returning logits."""
+        """Run the model with the [rationale] prefix, returning logits.
+
+        Gradients flow through the model — this is the training path.
+        """
         encoded = self._encode(self.rationale_prefix + input_text, max_length=max_length)
-        with torch.no_grad():
-            return self.model(**encoded).logits
+        return self.model(**encoded).logits
 
     def forward_both(
         self, input_text: str, *, max_length: int = 128

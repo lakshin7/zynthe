@@ -95,27 +95,31 @@ def test_teacher_forcing_shifts_right(trainer) -> None:
 
 
 def test_forward_label_returns_logits(trainer) -> None:
-    logits = trainer.forward_label("a sentence")
+    with torch.no_grad():
+        logits = trainer.forward_label("a sentence")
     assert logits.dim() == 3
     # T5's vocab size is in the 30k+ range; we just check it's > 100.
     assert logits.shape[-1] > 100
 
 
 def test_forward_rationale_returns_logits(trainer) -> None:
-    logits = trainer.forward_rationale("a sentence")
+    with torch.no_grad():
+        logits = trainer.forward_rationale("a sentence")
     assert logits.dim() == 3
     assert logits.shape[-1] > 100
 
 
 def test_forward_label_and_rationale_have_same_vocab(trainer) -> None:
     """Both views must agree on vocab size so the distiller's CE lines up."""
-    a = trainer.forward_label("same input")
-    b = trainer.forward_rationale("same input")
+    with torch.no_grad():
+        a = trainer.forward_label("same input")
+        b = trainer.forward_rationale("same input")
     assert a.shape[-1] == b.shape[-1]
 
 
 def test_forward_both_returns_distiller_dict(trainer) -> None:
-    out = trainer.forward_both("a sentence", max_length=32)
+    with torch.no_grad():
+        out = trainer.forward_both("a sentence", max_length=32)
     assert set(out.keys()) == {"label_logits", "rationale_logits"}
     assert out["label_logits"].dim() == 3
     assert out["rationale_logits"].dim() == 3
@@ -131,8 +135,9 @@ def test_label_prefix_actually_prepends(trainer) -> None:
 
 def test_label_and_rationale_logits_differ(trainer) -> None:
     """The two views should produce different logit distributions."""
-    a = trainer.forward_label("a sentence")
-    b = trainer.forward_rationale("a sentence")
+    with torch.no_grad():
+        a = trainer.forward_label("a sentence")
+        b = trainer.forward_rationale("a sentence")
     assert not torch.allclose(a.float(), b.float(), atol=1e-3)
 
 
