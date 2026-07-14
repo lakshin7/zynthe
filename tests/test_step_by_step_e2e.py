@@ -83,6 +83,12 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
+    # Stub the SST-2 loader so we don't hit HF Hub.
+    def _fake_sst2(n, seed):
+        # Returns inputs only (no labels) — that's the right contract
+        # for the recipe's _maybe_load_sst2.
+        return _mod._synthetic_sst2(n, seed)
+
     # Stub model: a tiny T5 constructed in-process (no network).
     import sys as _sys
     if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
@@ -205,6 +211,7 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
         )
 
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
+    monkeypatch.setattr(_mod, "_maybe_load_sst2", _fake_sst2)
     monkeypatch.setattr(rt_mod, "MultiTaskT5Trainer", _local_trainer)
 
     payload = run_recipe(
