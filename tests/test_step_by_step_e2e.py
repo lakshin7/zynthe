@@ -13,8 +13,11 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import torch
+import torch.nn as nn
 
 
 _SCRIPTS = str(Path(__file__).parent.parent / "scripts")
@@ -84,25 +87,47 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
     import sys as _sys
     if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
         _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-    from scripts import extract_rationales as er  # noqa: E402
+    import extract_rationales as er  # noqa: E402
     from zynthe.core.training import rationale_trainer as rt_mod  # noqa: E402
     from zynthe.core.training.rationale_trainer import (  # noqa: E402
         MultiTaskT5Trainer as RealTrainer,
     )
-    from transformers import (  # noqa: E402
-        AutoModelForSeq2SeqLM,
-        AutoTokenizer,
-    )
 
     def _local_trainer(model_name: str, **kwargs):
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        # Build a fresh tiny in-process model so we never hit HF Hub.
+        torch.manual_seed(0)
+        # 1-layer T5-like wrapper: an embed, a single linear, an LM head.
+        class _TinySeq2Seq(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = SimpleNamespace(
+                    decoder_start_token_id=0,
+                    vocab_size=64,
+                )
+                self.shared = nn.Embedding(64, 16)
+                self.body = nn.Linear(16, 16)
+                self.lm_head = nn.Linear(16, 64)
+
+            def forward(self, input_ids, attention_mask=None, decoder_input_ids=None, **kw):
+                x = self.shared(input_ids)
+                x = self.body(x)
+                dec = self.shared(decoder_input_ids)
+                dec = self.body(dec)
+                return SimpleNamespace(logits=self.lm_head(dec))
+
         return RealTrainer(
-            model=model,
-            tokenizer=tokenizer,
+            model=_TinySeq2Seq(),
+            tokenizer=_StubTokenizer(),
             label_prefix=kwargs.get("label_prefix", "label: "),
             rationale_prefix=kwargs.get("rationale_prefix", "rationale: "),
         )
+
+    class _StubTokenizer:
+        def __call__(self, text, return_tensors=None, padding=None, max_length=None, truncation=None, **_):
+            ids = [ord(c) % 64 for c in text[:max_length or 32]]
+            while padding == "max_length" and len(ids) < (max_length or 32):
+                ids.append(0)
+            return SimpleNamespace(input_ids=torch.tensor([ids], dtype=torch.long))
 
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
     monkeypatch.setattr(rt_mod, "MultiTaskT5Trainer", _local_trainer)
@@ -146,22 +171,35 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
     import sys as _sys
     if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
         _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-    from scripts import extract_rationales as er  # noqa: E402
+    import extract_rationales as er  # noqa: E402
     from zynthe.core.training import rationale_trainer as rt_mod  # noqa: E402
     from zynthe.core.training.rationale_trainer import (  # noqa: E402
         MultiTaskT5Trainer as RealTrainer,
     )
-    from transformers import (  # noqa: E402
-        AutoModelForSeq2SeqLM,
-        AutoTokenizer,
-    )
 
     def _local_trainer(model_name: str, **kwargs):
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        torch.manual_seed(0)
+        class _TinySeq2Seq(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = SimpleNamespace(
+                    decoder_start_token_id=0,
+                    vocab_size=64,
+                )
+                self.shared = nn.Embedding(64, 16)
+                self.body = nn.Linear(16, 16)
+                self.lm_head = nn.Linear(16, 64)
+
+            def forward(self, input_ids, attention_mask=None, decoder_input_ids=None, **kw):
+                x = self.shared(input_ids)
+                x = self.body(x)
+                dec = self.shared(decoder_input_ids)
+                dec = self.body(dec)
+                return SimpleNamespace(logits=self.lm_head(dec))
+
         return RealTrainer(
-            model=model,
-            tokenizer=tokenizer,
+            model=_TinySeq2Seq(),
+            tokenizer=_StubTokenizer(),
             label_prefix=kwargs.get("label_prefix", "label: "),
             rationale_prefix=kwargs.get("rationale_prefix", "rationale: "),
         )
