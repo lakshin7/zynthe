@@ -76,12 +76,15 @@ def _main() -> int:
     )
     bundle = prepare_distillation(teacher, student, optim, dataloader=None, config=cfg)
 
+    # Pick the device the prepared student lives on.
+    device = next(bundle.student.parameters()).device
+
     losses: list[float] = []
     started = time.time()
     for step in range(args.steps):
         torch.manual_seed(rank_seed + step)
-        x = torch.randint(0, 1000, (4, 8), dtype=torch.long)
-        y = torch.randint(0, 2, (4,))
+        x = torch.randint(0, 1000, (4, 8), dtype=torch.long, device=device)
+        y = torch.randint(0, 2, (4,), device=device)
         with torch.no_grad():
             t_out = bundle.teacher(input_ids=x)
         optim.zero_grad()
