@@ -80,11 +80,24 @@ exercise it.
 
 ## Why we don't ship a numerics-parity test yet
 
-Quantized inference can drift from fp32 by 1-3 % accuracy on
-classification tasks.  Pinning that drift requires a real GLUE /
-ImageNet / Wikitext evaluation, which lives in Phase 5 (DX) — the
-smoke here only proves the int8 model **loads and forward-passes**
-with finite logits.
+We *do* now ship a numerics-parity smoke — `scripts/smoke/run_ptq_parity.py`
+records the per-tensor logit difference between fp32 and int8 on a
+deterministic synthetic input, plus the argmax agreement and the
+size delta.  Verified on Modal L4 (Phase 5 Iteration 4):
+
+| Field | Value |
+|---|---|
+| Model | `prajjwal1/bert-tiny` |
+| fp32 size | 16.73 MB |
+| int8 size (fp32-labelled) | 15.16 MB |
+| abs logit diff max | 0.0125 |
+| abs logit diff mean | 0.0124 |
+| **argmax agreement** | **True** |
+
+The smoke proves the *bit-level delta* is small and the prediction is
+preserved.  A real GLUE accuracy number (vs. fp32) still lives in
+the v1.0 plan-talk — it needs a labelled dataset and a real benchmark
+harness, not just a forward pass on synthetic data.
 
 ## References
 

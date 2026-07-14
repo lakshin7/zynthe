@@ -91,6 +91,52 @@ Source JSON: `tests/smoke/results/ptq_summary.json`.
 
 ---
 
+## PTQ Numerics-Parity (Phase 5 Iteration 4)
+
+`prajjwal1/bert-tiny` on a deterministic synthetic input.  Compares
+the same input through fp32 and dynamic-int8 inference.
+
+| Field | Value |
+|---|---|
+| Model | `prajjwal1/bert-tiny` |
+| Strategy | dynamic int8 (Linear layers only) |
+| fp32 size | 16.73 MB |
+| int8 size (fp32-labelled) | 15.16 MB |
+| **Argmax agreement** | **True** (fp32 = 1, int8 = 1) |
+| Abs logit diff max | 0.0125 |
+| Abs logit diff mean | 0.0124 |
+
+Smoke criterion: **argmax agreement on a deterministic input**.
+Achieved — int8 quantisation preserves the predicted class and the
+per-logit error is <1.3 % of the max logit magnitude.
+
+Source JSON: `tests/smoke/results/ptq_parity.json`.
+
+---
+
+## Distributed Training (Phase 5 Iteration 1)
+
+Tiny distillation (KD-Hinton) of `prajjwal1/bert-tiny`, wrapped via
+HuggingFace `accelerate.prepare` (single-GPU on Modal L4).  This
+proves the `prepare_distillation` integration is wired and the bundle
+survives a real SGD loop.  For multi-GPU DDP, see `docs/distributed.md`.
+
+| Field | Value |
+|---|---|
+| Model | `prajjwal1/bert-tiny` |
+| Strategy | KD-Hinton (T=2.0) |
+| Accelerator | `Accelerator(mixed_precision="no")` |
+| Steps | 20 |
+| Duration | 1.0 s |
+| **First loss** | 0.6821 |
+| **Last loss** | 0.6501 |
+| **Min loss** | 0.6501 |
+| **Decay** | 0.0320 |
+
+Source JSON: `tests/smoke/results/distributed.json`.
+
+---
+
 ## Universal-Model Smoke Gate (5 families)
 
 The full 5-pair gate from `scripts/smoke/universal_smoke.py` (also
