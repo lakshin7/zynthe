@@ -44,5 +44,13 @@ nav:
   - Usage Guide: usage_guide.md
   - Examples:
     - Kaggle SST-2 Tutorial: examples/kaggle_sst2.md
+  - Distillation Methods: distillation-methods.md
   - Architecture & Adapters: adapters.md
+  - Quantization: quant.md
+  - Distributed Training: distributed.md
+  - Benchmarks: benchmarks.md
+  - Phase 3 Status: phase3_status.md
+  - Phase 4 Status: phase4_status.md
+  - Plan-Talk Handoff: HANDOFF.md
   - API Reference: api_reference.md
+  - Audit: audit.md
