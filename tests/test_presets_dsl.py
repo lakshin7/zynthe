@@ -154,9 +154,9 @@ def test_new_preset_typed_plan_loads(preset_name: str) -> None:
     assert plan.name == preset_name
     assert len(plan.stages) > 0
     assert plan.epochs >= 1
-    # Each stage is a real distiller key (not 'unknown').
-    for s in plan.stages:
-        assert s.loss in get_preset  # proxy: it's a non-empty string
+        # Each stage is a real distiller key (not 'unknown').
+        for s in plan.stages:
+            assert isinstance(s.loss, str) and s.loss
 
 
 def test_register_plan_adds_to_library() -> None:
