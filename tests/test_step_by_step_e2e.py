@@ -30,6 +30,15 @@ _mod = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_mod)
 run_recipe = _mod.run_recipe
 
+# Also load the extract_rationales module + the rationale_trainer
+# module so the test can patch their attributes.  Re-use the
+# sys.path insertion above.
+import sys as _sys
+if _SCRIPTS not in _sys.path:
+    _sys.path.insert(0, _SCRIPTS)
+import extract_rationales as _mod_er  # noqa: E402
+from zynthe.core.training import rationale_trainer as _mod_rt  # noqa: E402
+
 
 def _stub_llm(responses):
     """Build a stub extractor LLM callable (signature: list[str] -> list[str])."""
@@ -71,18 +80,12 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
-    # Re-insert scripts/ on sys.path — pytest's per-test sandbox can
-    # wipe the top-level path.
-    import sys as _sys
-    _SCRIPTS = str(Path(__file__).parent.parent / "scripts")
-    if _SCRIPTS not in _sys.path:
-        _sys.path.insert(0, _SCRIPTS)
-    from scripts import extract_rationales as er
-    from zynthe.core.training import rationale_trainer as rt
+    # Use the importlib-loaded module from the module-level import.
+    er = _mod_er  # populated by the top-level bootstrap below
+    rt = _mod_rt
 
     # Stub the extractor so we don't need an LLM.
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
-    # Stub the model loader so we use the smallest possible T5.
     monkeypatch.setattr(rt, "MultiTaskT5Trainer", None)
     from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer as RealTrainer
 
@@ -136,12 +139,7 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
-    # Same sys.path bootstrap as the other test.
-    import sys as _sys
-    _SCRIPTS = str(Path(__file__).parent.parent / "scripts")
-    if _SCRIPTS not in _sys.path:
-        _sys.path.insert(0, _SCRIPTS)
-    from scripts import extract_rationales as er
+    er = _mod_er
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
 
     payload = run_recipe(
