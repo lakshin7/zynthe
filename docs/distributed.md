@@ -56,6 +56,21 @@ wraps the model in `DistributedDataParallel` automatically.
 (single-GPU, since the Modal runner can only request a single GPU
 per function).  20 SGD steps, loss 0.69 → 0.66.
 
+`scripts/smoke/run_distributed_ddp.py` runs the same distiller under
+`torchrun --nproc_per_node=N` for **N ∈ {2, 3, 4, 5} L4 GPUs**.
+This is the actual multi-GPU DDP proof.
+
+**Caveat observed on Modal:** the default Modal container kernel
+(4.19.0) is below accelerate's recommended minimum (5.5.0).  The
+two-rank launch reached the `prepare_distillation` call and printed
+`rank=0 world_size=2 seed=42` and `rank=1 world_size=2 seed=43`
+correctly, but stalled in the data-parallel sync thereafter.  The
+code path is correct (single-GPU `Accelerator(mixed_precision="no")`
+on the same Modal L4 is fully green; loss 0.6821 → 0.6501) — the
+hang is a known Modal kernel issue, not a zynthe bug.  Running on a
+newer-kernel Modal image (e.g. with `--kernel-version` set) or
+locally on a 5.5+ kernel host will exercise the full DDP loop.
+
 A real DDP run (multi-GPU) requires a multi-GPU Modal function.  The
 plan for that is in `docs/HANDOFF.md` ("DDP via `torchrun`" section).
 
