@@ -84,10 +84,11 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
     er = _mod_er  # populated by the top-level bootstrap below
     rt = _mod_rt
 
+    # Capture the real class BEFORE patching, so subclassing works.
+    from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer as RealTrainer
+
     # Stub the extractor so we don't need an LLM.
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
-    monkeypatch.setattr(rt, "MultiTaskT5Trainer", None)
-    from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer as RealTrainer
 
     class _TinyStubTrainer(RealTrainer):
         @classmethod
