@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zynthe"
-version = "0.2.6"
+version = "0.3.0"
 description = "Universal knowledge distillation toolkit for text, code, vision, and multimodal models"
 readme = "README.md"
 license = "MIT"
