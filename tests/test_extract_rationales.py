@@ -22,13 +22,12 @@ import pytest
 # Load the script via its file path so we don't need scripts/ on
 # pythonpath (Modal's test runner caches pyproject, so adding
 # scripts/ to pythonpath in CI doesn't always take effect).
-_SPEC = importlib.util.spec_from_file_location(
-    "_extract_rationales_for_test",
-    Path(__file__).parent.parent / "scripts" / "extract_rationales.py",
-)
-assert _SPEC is not None and _SPEC.loader is not None
-_mod = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_mod)
+import sys as _sys
+_PATH = str(Path(__file__).parent.parent / "scripts" / "extract_rationales.py")
+if _PATH not in _sys.path:
+    _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+import extract_rationales as _mod  # noqa: E402  (path inserted above)
 
 ESNLI_PRESET = _mod.ESNLI_PRESET
 SST2_PRESET = _mod.SST2_PRESET
