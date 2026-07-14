@@ -70,34 +70,42 @@ def test_synthetic_sst2_separate_seeds_diverge() -> None:
 
 
 def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
-    """Patch the LLM callable to a deterministic stub and run the
-    full recipe on a tiny synthetic dataset.
+    """Patch the LLM callable AND the model loader with deterministic
+    stubs and run the full recipe on a tiny synthetic dataset.
     """
-    # Make sure the distiller + trainer see a deterministic stub.
+    # Stub extractor: deterministic, no LLM.
     def _patched_extractor(triples):
         return [
             {"input": r["input"], "label": "positive", "rationale": "positive words"}
             for r in triples
         ]
 
-    # Use the importlib-loaded module from the module-level import.
-    er = _mod_er  # populated by the top-level bootstrap below
-    rt = _mod_rt
+    # Stub model: a tiny T5 constructed in-process (no network).
+    import sys as _sys
+    if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from scripts import extract_rationales as er  # noqa: E402
+    from zynthe.core.training import rationale_trainer as rt_mod  # noqa: E402
+    from zynthe.core.training.rationale_trainer import (  # noqa: E402
+        MultiTaskT5Trainer as RealTrainer,
+    )
+    from transformers import (  # noqa: E402
+        AutoModelForSeq2SeqLM,
+        AutoTokenizer,
+    )
 
-    # Capture the real class BEFORE patching, so subclassing works.
-    from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer as RealTrainer
+    def _local_trainer(model_name: str, **kwargs):
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        return RealTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            label_prefix=kwargs.get("label_prefix", "label: "),
+            rationale_prefix=kwargs.get("rationale_prefix", "rationale: "),
+        )
 
-    # Stub the extractor so we don't need an LLM.
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
-
-    class _TinyStubTrainer(RealTrainer):
-        @classmethod
-        def from_pretrained(cls, model_name, **kwargs):
-            return RealTrainer.from_pretrained(
-                "patrickvonplaten/t5-tiny-random", **kwargs
-            )
-
-    monkeypatch.setattr(rt, "MultiTaskT5Trainer", _TinyStubTrainer)
+    monkeypatch.setattr(rt_mod, "MultiTaskT5Trainer", _local_trainer)
 
     payload = run_recipe(
         task="sst2",
@@ -109,7 +117,6 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
         output_dir=tmp_path,
     )
 
-    # Output JSON has all expected keys.
     for k in [
         "task",
         "train_triples_extracted",
@@ -121,13 +128,9 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
         "eval_loss_total_avg",
     ]:
         assert k in payload, f"missing key: {k}"
-
-    # Sanity: 4 train + 2 eval triples, 2 steps.
     assert payload["train_triples_extracted"] == 4
     assert payload["eval_triples_extracted"] == 2
     assert payload["steps"] == 2
-
-    # The summary JSON file was written.
     summary = json.loads((tmp_path / "step_by_step.json").read_text())
     assert summary["task"] == "sst2"
 
@@ -140,8 +143,31 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
-    er = _mod_er
+    import sys as _sys
+    if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from scripts import extract_rationales as er  # noqa: E402
+    from zynthe.core.training import rationale_trainer as rt_mod  # noqa: E402
+    from zynthe.core.training.rationale_trainer import (  # noqa: E402
+        MultiTaskT5Trainer as RealTrainer,
+    )
+    from transformers import (  # noqa: E402
+        AutoModelForSeq2SeqLM,
+        AutoTokenizer,
+    )
+
+    def _local_trainer(model_name: str, **kwargs):
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        return RealTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            label_prefix=kwargs.get("label_prefix", "label: "),
+            rationale_prefix=kwargs.get("rationale_prefix", "rationale: "),
+        )
+
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
+    monkeypatch.setattr(rt_mod, "MultiTaskT5Trainer", _local_trainer)
 
     payload = run_recipe(
         task="sst2",
@@ -153,7 +179,6 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
         output_dir=tmp_path,
     )
 
-    # First and last training losses are finite.
     for key in ("label", "rationale", "total"):
         assert key in payload["train_loss_first"]
         assert key in payload["train_loss_last"]
