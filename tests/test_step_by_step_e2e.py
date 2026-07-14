@@ -71,7 +71,12 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
+    # Re-insert scripts/ on sys.path — pytest's per-test sandbox can
+    # wipe the top-level path.
     import sys as _sys
+    _SCRIPTS = str(Path(__file__).parent.parent / "scripts")
+    if _SCRIPTS not in _sys.path:
+        _sys.path.insert(0, _SCRIPTS)
     from scripts import extract_rationales as er
     from zynthe.core.training import rationale_trainer as rt
 
@@ -131,6 +136,11 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
+    # Same sys.path bootstrap as the other test.
+    import sys as _sys
+    _SCRIPTS = str(Path(__file__).parent.parent / "scripts")
+    if _SCRIPTS not in _sys.path:
+        _sys.path.insert(0, _SCRIPTS)
     from scripts import extract_rationales as er
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
 
