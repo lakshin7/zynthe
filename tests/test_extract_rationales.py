@@ -23,9 +23,9 @@ import pytest
 # pythonpath (Modal's test runner caches pyproject, so adding
 # scripts/ to pythonpath in CI doesn't always take effect).
 import sys as _sys
-_PATH = str(Path(__file__).parent.parent / "scripts" / "extract_rationales.py")
-if _PATH not in _sys.path:
-    _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+_SCRIPTS = str(Path(__file__).parent.parent / "scripts")
+if _SCRIPTS not in _sys.path:
+    _sys.path.insert(0, _SCRIPTS)
 
 import extract_rationales as _mod  # noqa: E402  (path inserted above)
 
@@ -222,7 +222,7 @@ def test_cli_roundtrip_writes_jsonl(tmp_path: Path, monkeypatch, capsys) -> None
     extract_rationales, verify outputs JSONL has the right shape.
     """
     import sys as _sys
-    from scripts import extract_rationales as er
+    from scripts import extract_rationales as er  # noqa: E402  (path already on sys.path)
 
     inp = tmp_path / "in.jsonl"
     out = tmp_path / "out.jsonl"
