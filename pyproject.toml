@@ -92,7 +92,7 @@ packages = ["src/zynthe"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]
 addopts = "-ra"
 # Phase 1: silence third-party deprecations that we cannot fix (matplotlib
 # -> pyparsing), keep our own UserWarnings visible. Use `-W error::UserWarning`
