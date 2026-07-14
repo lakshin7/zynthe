@@ -8,6 +8,7 @@ from typing import Any
 _EXPORTS: dict[str, tuple[str, str]] = {
     "DistributedConfig": ("zynthe.core.training.distributed", "DistributedConfig"),
     "prepare_distillation": ("zynthe.core.training.distributed", "prepare_distillation"),
+    "MultiTaskT5Trainer": ("zynthe.core.training.rationale_trainer", "MultiTaskT5Trainer"),
     "OptimizerFactory": ("zynthe.training.optimizer", "OptimizerFactory"),
     "GradientManager": ("zynthe.training.optimizer", "GradientManager"),
     "AdaptiveOptimizer": ("zynthe.training.optimizer", "AdaptiveOptimizer"),
