@@ -174,6 +174,9 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
+    def _fake_sst2(n, seed):
+        return _mod._synthetic_sst2(n, seed)
+
     import sys as _sys
     if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
         _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
