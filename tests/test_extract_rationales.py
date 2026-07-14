@@ -13,21 +13,31 @@ Pins:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
-from scripts.extract_rationales import (
-    ESNLI_PRESET,
-    SST2_PRESET,
-    PRESETS,
-    build_prompt,
-    default_llm_callable,
-    extract_rationales,
-    parse_label,
-    parse_rationale,
+# Load the script via its file path so we don't need scripts/ on
+# pythonpath (Modal's test runner caches pyproject, so adding
+# scripts/ to pythonpath in CI doesn't always take effect).
+_SPEC = importlib.util.spec_from_file_location(
+    "_extract_rationales_for_test",
+    Path(__file__).parent.parent / "scripts" / "extract_rationales.py",
 )
+assert _SPEC is not None and _SPEC.loader is not None
+_mod = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_mod)
+
+ESNLI_PRESET = _mod.ESNLI_PRESET
+SST2_PRESET = _mod.SST2_PRESET
+PRESETS = _mod.PRESETS
+build_prompt = _mod.build_prompt
+default_llm_callable = _mod.default_llm_callable
+extract_rationales = _mod.extract_rationales
+parse_label = _mod.parse_label
+parse_rationale = _mod.parse_rationale
 
 
 # ----------------------------------------------------------------------------
