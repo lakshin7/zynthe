@@ -49,14 +49,21 @@ def test_mkdocs_yml_parses() -> None:
 
 
 def test_mkdocs_nav_files_exist(mkdocs_nav) -> None:
-    """Every markdown file referenced in mkdocs nav must exist on disk."""
+    """Every markdown file referenced in mkdocs nav must exist on disk.
+
+    MkDocs' default ``docs_dir`` is ``docs/``; nav paths are
+    repo-root-relative.  So ``index.md`` resolves to ``docs/index.md``.
+    """
     missing: list = []
     for path in _flatten_nav(mkdocs_nav):
         if not path.endswith(".md"):
             continue
-        # Nav paths are repo-root-relative; e.g. 'docs/index.md' or
-        # 'index.md' (top-level).
-        if not (REPO_ROOT / path).exists():
+        # 1) explicit docs/ prefix already on the path?
+        candidate = REPO_ROOT / path
+        if not candidate.exists():
+            # 2) try under docs/ — that's mkdocs' default docs_dir.
+            candidate = REPO_ROOT / "docs" / path
+        if not candidate.exists():
             missing.append(path)
     assert not missing, f"mkdocs nav references missing files: {missing}"
 
