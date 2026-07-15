@@ -83,6 +83,18 @@ def test_run_recipe_end_to_end(tmp_path: Path, monkeypatch) -> None:
             for r in triples
         ]
 
+    # Stub the LLM callable factory: the recipe constructs this even
+    # though it never actually calls the LLM (because the extractor
+    # is patched).  Construction triggers an HF Hub load.
+    def _fake_default_llm_callable(*args, **kwargs):
+        def _call(prompts):
+            return [
+                "Reasoning: positive words\nAnswer: positive"
+                for _ in prompts
+            ]
+
+        return _call
+
     # Stub the SST-2 loader so we don't hit HF Hub.
     def _fake_sst2(n, seed):
         # Returns inputs only (no labels) — that's the right contract
@@ -190,6 +202,15 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
     def _fake_sst2(n, seed):
         return _mod._synthetic_sst2(n, seed)
 
+    def _fake_default_llm_callable(*args, **kwargs):
+        def _call(prompts):
+            return [
+                "Reasoning: negative words\nAnswer: negative"
+                for _ in prompts
+            ]
+
+        return _call
+
     import sys as _sys
     if str(Path(__file__).parent.parent / "scripts") not in _sys.path:
         _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -227,6 +248,7 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
         )
 
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
+    monkeypatch.setattr(er, "default_llm_callable", _fake_default_llm_callable)
     monkeypatch.setattr(_mod, "_maybe_load_sst2", _fake_sst2)
     monkeypatch.setattr(rt_mod, "MultiTaskT5Trainer", _local_trainer)
 
