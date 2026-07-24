@@ -125,6 +125,76 @@ def _read_jsonl(path: Path) -> List[Dict[str, str]]:
     return items
 
 
+# ----------------------------------------------------------------------------
+# Offline fallback T5 (no HF Hub access)
+# ----------------------------------------------------------------------------
+
+
+def _build_offline_t5_trainer():
+    """Build a tiny seq2seq stub wrapped in a MultiTaskT5Trainer.
+
+    Used when ``MultiTaskT5Trainer.from_pretrained(...)`` fails (e.g.
+    on Modal without internet or local CI without HF).  The stub has
+    a random-init embedding + linear + lm_head, so the multi-task
+    loss is real (just numbers are different from the real T5).
+    """
+    from types import SimpleNamespace
+
+    import torch
+    import torch.nn as nn
+
+    from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer
+
+    class _OfflineStubTokenizer:
+        """Encode a string by hashing chars to a vocab id."""
+
+        def __call__(
+            self,
+            text,
+            return_tensors=None,
+            padding=None,
+            max_length=None,
+            truncation=None,
+            **_unused,
+        ):
+            max_length = max_length or 32
+            ids = [ord(c) % 64 for c in text[:max_length]]
+            if padding == "max_length":
+                while len(ids) < max_length:
+                    ids.append(0)
+            return SimpleNamespace(input_ids=torch.tensor([ids], dtype=torch.long))
+
+    class _OfflineTinySeq2Seq(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(
+                decoder_start_token_id=0,
+                vocab_size=64,
+            )
+            torch.manual_seed(0)
+            self.shared = nn.Embedding(64, 16)
+            self.body = nn.Linear(16, 16)
+            self.lm_head = nn.Linear(16, 64)
+
+        def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            decoder_input_ids=None,
+            **_unused,
+        ):
+            x = self.body(self.shared(input_ids))
+            dec = self.body(self.shared(decoder_input_ids))
+            return SimpleNamespace(logits=self.lm_head(dec))
+
+    return MultiTaskT5Trainer(
+        model=_OfflineTinySeq2Seq(),
+        tokenizer=_OfflineStubTokenizer(),
+        label_prefix="label: ",
+        rationale_prefix="rationale: ",
+    )
+
+
 def run_recipe(
     *,
     task: str,
@@ -185,11 +255,23 @@ def run_recipe(
     from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer
     from zynthe.core.distillers.rationale_distiller import RationaleDistiller
 
-    trainer = MultiTaskT5Trainer.from_pretrained(
-        "patrickvonplaten/t5-tiny-random",
-        label_prefix="label: ",
-        rationale_prefix="rationale: ",
-    )
+    # Try to load the real T5; fall back to a self-contained tiny
+    # seq2seq stub when the network is unavailable (Modal sandbox,
+    # local CI without internet, etc.).
+    trainer = None
+    try:
+        trainer = MultiTaskT5Trainer.from_pretrained(
+            "patrickvonplaten/t5-tiny-random",
+            label_prefix="label: ",
+            rationale_prefix="rationale: ",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not load 'patrickvonplaten/t5-tiny-random' from HF Hub (%s); "
+            "falling back to an offline stub T5.",
+            exc,
+        )
+        trainer = _build_offline_t5_trainer()
     distiller = RationaleDistiller(
         teacher=trainer.model,
         student=trainer.model,
