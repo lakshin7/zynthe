@@ -359,18 +359,22 @@ def run_recipe(
     eval_losses: List[Dict[str, float]] = []
     started = time.time()
     for rec in eval_triples:
+        # Tokenize the label / rationale inputs up to the same
+        # max_length the trainer will use for the forward pass.  The
+        # stub tokenizer has vocab_size=64 so we just rely on
+        # ignore_index masking to drop the padding.
         label_target = trainer.tokenizer(
             rec["label"],
             return_tensors="pt",
             padding="max_length",
-            max_length=8,
+            max_length=32,
             truncation=True,
         )["input_ids"]
         rationale_target = trainer.tokenizer(
             rec["rationale"],
             return_tensors="pt",
             padding="max_length",
-            max_length=24,
+            max_length=32,
             truncation=True,
         )["input_ids"]
         with torch.no_grad():
