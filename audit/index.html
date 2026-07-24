@@ -1,0 +1,1758 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Universal knowledge distillation toolkit for text, code, vision, and multimodal models">
+      
+      
+      
+      
+        <link rel="prev" href="../api_reference/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Audit - Zynthé</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#zynthe-phase-0-audit" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Zynthé" class="md-header__button md-logo" aria-label="Zynthé" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Zynthé
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Audit
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lakshin7/zynthe" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakshin7/zynthe
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage_guide/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/kaggle_sst2/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../distillation-methods/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Distillation Methods
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../adapters/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture & Adapters
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quant/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quantization
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../distributed/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Distributed Training
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../benchmarks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Benchmarks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../phase3_status/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Phase 3 Status
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../phase4_status/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Phase 4 Status
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../HANDOFF/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plan-Talk Handoff
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api_reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Audit
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Zynthé" class="md-nav__button md-logo" aria-label="Zynthé" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Zynthé
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lakshin7/zynthe" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakshin7/zynthe
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/kaggle_sst2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kaggle SST-2 Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../distillation-methods/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distillation Methods
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & Adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quantization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Training
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase3_status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 3 Status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase4_status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 4 Status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HANDOFF/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan-Talk Handoff
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-big-picture-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Big-picture numbers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-map-of-the-actual-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Map of the actual surface
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Map of the actual surface">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-coredistillers-distillation-methods-63-k-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 core/distillers/ — distillation methods (≈6.3 k LOC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-corepipelines-composable-execution-graphs-15-k-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 core/pipelines/ — composable execution graphs (≈1.5 k LOC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-coreadapters-model-io-normalization-11-k-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 core/adapters/ — model I/O normalization (≈1.1 k LOC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-corepreflight-pre-train-safety-4-k-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 core/preflight/ — pre-train safety (≈4 k LOC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-corequant-quantization-740-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 core/quant/ — quantization (≈740 LOC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#26-coreconfiginferencemodelsutilspkgpreprocessing-3-k-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.6 core/{config,inference,models,utils,pkg,preprocessing} (≈3 k LOC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#27-appruntimepy-unifiedtrainingruntime-674-lines-single-orchestrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.7 app/runtime.py — UnifiedTrainingRuntime (674 lines, single orchestrator)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#28-data-training-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.8 data/, training/, evaluation/
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#29-__init__py" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.9 __init__.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-test-surface-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Test surface (today)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-discrepancies-vs-the-report-cwd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Discrepancies vs. the report (cwd)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-phase-0-issues-to-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Phase 0 issues to fix
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Phase 0 issues to fix">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-configmanagerset_seed-determinism-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 ConfigManager.set_seed — determinism completion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-featuredistiller-attentiontransferdistiller-silent-skip-on-missing-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 FeatureDistiller / AttentionTransferDistiller — silent skip on missing layers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-__init__py-optional-import-honesty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 __init__.py — optional-import honesty
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-_total_weight-dead-code-in-multistagepipelineadd_stage-line-194" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 _total_weight dead code in MultiStagePipeline.add_stage (line 194)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-introduce-a-proper-exception-hierarchy-under-coreutilsexceptionspy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Introduce a proper exception hierarchy under core/utils/exceptions.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-version-drift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 version drift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-pyprojecttoml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 pyproject.toml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#58-ci-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.8 CI matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-whats-actually-good-dont-regress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. What's actually good (don't regress)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-phase-0-punchlist-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Phase 0 punchlist (order)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="zynthe-phase-0-audit">Zynthé Phase 0 Audit</h1>
+<p><strong>Date:</strong> 2026-07-12
+<strong>Scope:</strong> every source file under <code>src/zynthe/core/{distillers, pipelines, adapters, preflight, quant, config, inference, models, utils}</code> + <code>src/zynthe/{training, data, evaluation}</code> + <code>src/zynthe/{app, cli, __init__}</code>.
+<strong>Reference snapshot:</strong> <code>zynthe report.md</code> is <strong>outdated</strong> (covers a much earlier codebase). This audit reflects the actual state of <code>main</code>.</p>
+<hr />
+<h2 id="1-big-picture-numbers">1. Big-picture numbers</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total source LOC under <code>src/zynthe/</code></td>
+<td>~34,000</td>
+</tr>
+<tr>
+<td>Source files (<code>src/zynhe/**/*.py</code>)</td>
+<td>~90</td>
+</tr>
+<tr>
+<td>Top-level subpackages</td>
+<td><code>app</code>, <code>core</code>, <code>data</code>, <code>evaluation</code>, <code>training</code></td>
+</tr>
+<tr>
+<td><code>core</code> subpackages</td>
+<td><code>adapters</code>, <code>config</code>, <code>distillers</code>, <code>inference</code>, <code>models</code>, <code>pipelines</code>, <code>pkg</code>, <code>preflight</code>, <code>preprocessing</code>, <code>quant</code>, <code>utils</code></td>
+</tr>
+<tr>
+<td>Test files</td>
+<td><strong>8</strong> (2 import smoke, 6 thin integration)</td>
+</tr>
+<tr>
+<td>CI workflows</td>
+<td>2 (<code>ci.yml</code>, <code>docs.yml</code>) — no Modal nightly</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-map-of-the-actual-surface">2. Map of the actual surface</h2>
+<h3 id="21-coredistillers-distillation-methods-63-k-loc">2.1 <code>core/distillers/</code> — distillation methods (≈6.3 k LOC)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base_distiller.py</code> (950)</td>
+<td>Abstract <code>BaseDistiller(nn.Module)</code> with hooks, optimizer factory (AdamW/SGD/Adam), cosine/step/plateau schedulers, AGC + norm clipping, fp16/bf16 input casting, fp32 upcasting for stable loss, device-dtype hints.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>kd_hinton.py</code> (937)</td>
+<td><code>KDHintonDistiller</code>: Hinton softmax-KD + FitNets-style hints + temperature scheduler + label smoothing + class weights + confidence scaling + causal-LM shift. Regressors <code>conv1x1</code> / <code>linear</code> / <code>mlp</code> / <code>attention</code>. Lazy hint regressor creation.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>feature_distiller.py</code> (788)</td>
+<td><code>FeatureDistiller</code>: L2 / CKA / cosine / Gram / FSP / AB / CRD losses, layer adapter (1x1 conv / linear / mlp), dynamic layer weighting, FSP matrices, AutoHint heuristic, alignment interpolation.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>attention_transfer.py</code> (1497)</td>
+<td><code>AttentionTransferDistiller</code>: spatial / affinity / self-attn / SCAT / PAT classical methods + attention rollout (Abnar &amp; Zuidema 2020) + cross-layer flow + dual matching + temporal attention. CNN/Transformer/Multimodal extraction.</td>
+<td>Mostly solid; <strong>uses its own <code>AttentionExtractor</code> hooks</strong>, not <code>BaseDistiller</code> hooks — divergence from the rest of the codebase.</td>
+</tr>
+<tr>
+<td><code>similarity_transfer.py</code> (949)</td>
+<td><code>SimilarityTransfer</code>: cosine / euclidean / graph pairwise sim matrices, progressive layer schedule, cross-modal alignment, hidden-state shorthand (<code>hidden:-1</code>), numeric stability on logits.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>multi_stage_distiller.py</code> (1683)</td>
+<td><code>MultiStageDistiller</code>, <code>StageController</code>, <code>DistillerRegistry</code> (string→class map with <code>requires=["features","logits","attentions","gram"]</code> metadata), adaptive loss scheduler, knowledge replay, layer freezing, CPU/CSV/JSON logging, <strong>auto-preset selection from data card</strong>.</td>
+<td>Solid; large surface but coherent.</td>
+</tr>
+<tr>
+<td><code>toolkit.py</code> (695)</td>
+<td><code>DistillationToolkit</code> + <code>Goal</code> enum (~30 strings across text/code/bert/gpt/vision/vlm/...) + <code>Distiller</code> (beginner-friendly single-call wrapper) + <code>DistillationConfig</code> dataclass.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>presets.py</code> (590)</td>
+<td>Preset registry: <code>quick_start</code>, <code>balanced</code>, <code>compression_max</code>, <code>fidelity_first</code>, <code>vision_default</code>, <code>transformer</code>, <code>multimodal</code>, code, GPT, smoke variants. Read by <code>toolkit.build_plan(goal=...)</code>.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>causal_lm/</code> (~2.2 k)</td>
+<td><code>SafeCausalLMTrainer</code> and friends: full <strong>deterministic</strong> trainer, stable distillation engine, checkpoints (with metadata), metrics (token-level stability), regression gate vs. legacy trainer, fault injection, determinism report (<code>cudnn.deterministic=True</code>, <code>cudnn.benchmark=False</code> already set here). Validation utilities (gradient sanity, numerical, checkpoint stress).</td>
+<td>Solid. This is a first-class subsystem.</td>
+</tr>
+<tr>
+<td><code>__init__.py</code></td>
+<td>Exposes <code>KDHintonDistiller</code>, <code>FeatureDistiller</code>, <code>AttentionTransferDistiller</code>, <code>SimilarityTransfer</code>, <code>SafeCausalLMTrainer</code>, presets, plus lazy-imports for <code>DistillationToolkit</code> and <code>MultiStageDistiller</code>.</td>
+<td>Lazy-imports are graceful; no torchvision/matplotlib hard dep.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-corepipelines-composable-execution-graphs-15-k-loc">2.2 <code>core/pipelines/</code> — composable execution graphs (≈1.5 k LOC)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base_pipeline.py</code> (325)</td>
+<td><code>BasePipeline(ABC, nn.Module)</code> with <code>setup()</code>, <code>forward()</code>, <code>compute_loss()</code> lifecycle, T4 memory opts (<code>cudnn.allow_tf32=True</code>, <code>cudnn.benchmark=True</code>), <code>PipelineMetrics</code> dataclass, auto-setup on first <code>__call__</code>.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>single_distiller_pipeline.py</code> (249)</td>
+<td><code>SingleDistillerPipeline</code> wraps one distiller; uses <code>inspect.signature</code> on the distiller's <code>compute_loss</code> to call with the right kwargs (replaces a historical silent-swallow).</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>multi_stage_pipeline.py</code> (365)</td>
+<td><code>ExecutionMode</code> enum (sequential/parallel/conditional/hybrid), <code>PipelineStage</code>, <code>MultiStagePipeline</code>. <strong>Stage weight normalization DOES happen in <code>setup()</code></strong> when <code>config["normalize_weights"]</code> is True (default).</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>pipeline_builder.py</code> (462)</td>
+<td>Fluent builder; auto-classifies 1-stage-1-distiller → <code>SingleDistillerPipeline</code>, multi → <code>MultiStagePipeline</code>; passes <code>normalize_weights=True</code> flag through to the multi pipeline; <code>from_config(...)</code> handles legacy <code>method=</code> and new <code>pipeline:{type,mode,stages}</code> formats.</td>
+<td>Solid.</td>
+</tr>
+<tr>
+<td><code>pipeline_registry.py</code></td>
+<td>Registry for pipeline types (<code>multi_stage</code> registered; auto-aliases <code>multi</code>, <code>multistage</code>).</td>
+<td>Solid.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-coreadapters-model-io-normalization-11-k-loc">2.3 <code>core/adapters/</code> — model I/O normalization (≈1.1 k LOC)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Modality detector</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base_adapter.py</code></td>
+<td><code>BaseAdapter</code> ABC with <code>supports_model()</code>, <code>adapt_forward_kwargs()</code>, etc.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>text_adapter.py</code></td>
+<td>HuggingFace causal/masked-LM encoders.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>vision_adapter.py</code></td>
+<td><code>torchvision</code>, ViT, ResNet.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>code_adapter.py</code></td>
+<td>Code models (text-style encoder heads).</td>
+<td></td>
+</tr>
+<tr>
+<td><code>multimodal_adapter.py</code></td>
+<td>Generic multi-input encoders.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>vlm_adapter.py</code></td>
+<td>CLIP / vision-language adapters.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>adapter_registry.py</code> (148)</td>
+<td>Ordered detection VLM→Multimodal→Vision→Code→Text, fallback to Text. Custom-register with priority.</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Detection is class-name + module-name heuristics. Will need a richer <code>GenericHFAdapter</code> for the "universal" claim.</p>
+<h3 id="24-corepreflight-pre-train-safety-4-k-loc">2.4 <code>core/preflight/</code> — pre-train safety (≈4 k LOC)</h3>
+<p>Substantial: <code>analyser.py</code> (1142) is the orchestrator; <code>data_inspector.py</code> (765), <code>model_inspector.py</code> (1043), <code>model_validator.py</code> (446), <code>resource_probe.py</code> (630 — already exposes <code>cudnn_available</code>, <code>cudnn_version</code>). This is genuinely well-built.</p>
+<h3 id="25-corequant-quantization-740-loc">2.5 <code>core/quant/</code> — quantization (≈740 LOC)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>calibration.py</code> (115)</td>
+<td>Calibrate FP32 student with calibration data.</td>
+</tr>
+<tr>
+<td><code>ptq.py</code> (369)</td>
+<td>Post-training quantization via ONNX / ORT.</td>
+</tr>
+<tr>
+<td><code>qat.py</code> (256)</td>
+<td>Quantization-aware training stub (gradient simulation; not a true distiller).</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong> there is <code>PTQRunner</code>, <code>QATRunner</code>, <code>apply_ptq</code> exported at the package root.</p>
+<h3 id="26-coreconfiginferencemodelsutilspkgpreprocessing-3-k-loc">2.6 <code>core/{config,inference,models,utils,pkg,preprocessing}</code> (≈3 k LOC)</h3>
+<ul>
+<li><code>config/config_manager.py</code> — OmegaConf-based config loader with <code>set_seed()</code> that <strong>already sets</strong> <code>random</code>, <code>numpy</code>, <code>torch.manual_seed</code>, <code>torch.cuda.manual_seed_all</code>. <strong>Does NOT</strong> set <code>cudnn.deterministic</code> / <code>cudnn.benchmark</code> (Phase 0 fix).</li>
+<li><code>models/model_loader.py</code> (758), <code>model_saver.py</code> (421), <code>model_wrapper.py</code> (162), <code>projection_heads.py</code> (112) — model load/save/ONNX/TS, projection head factory.</li>
+<li><code>inference/predict.py</code> (95) — <code>StudentInference</code>.</li>
+<li><code>utils/device_utils.py</code> — auto device detect, <code>move_to_device</code>, <code>normalize_model_output</code>.</li>
+<li><code>utils/{metrics,data_validator,logger,progress_tracker,download_monitor,download_progress,json_utils,hf_dataset_loader}.py</code> — runtime helpers.</li>
+<li><code>pkg/manifest.py</code> — run manifest + SHA256 hashing for reproducibility.</li>
+</ul>
+<h3 id="27-appruntimepy-unifiedtrainingruntime-674-lines-single-orchestrator">2.7 <code>app/runtime.py</code> — <code>UnifiedTrainingRuntime</code> (674 lines, single orchestrator)</h3>
+<p>Phases: config validation → model load → dataloader build → preflight gate → engine router (<code>legacy</code>/<code>causal_lm_core</code>/<code>causal_lm_core_stable</code>) → resume logic → train → optional PTQ/QAT → manifest write. Already robust; uses <code>ConfigManager</code> for seeding.</p>
+<h3 id="28-data-training-evaluation">2.8 <code>data/</code>, <code>training/</code>, <code>evaluation/</code></h3>
+<ul>
+<li><code>data/dataloaders.py</code> (429) — <code>create_dataloaders</code>, deterministic worker seeding, <code>seed=42</code> fallback chain (<code>cfg.get("seed", cfg.get("runtime", {}).get("seed", 42))</code>).</li>
+<li><code>data/image_dataloaders.py</code> (254) — imagefolder / HF datasets, deterministic splits.</li>
+<li><code>data/preprocess.py</code> (231), <code>augmentations.py</code> (290).</li>
+<li><code>training/trainer.py</code> (2899) — generic PyTorch trainer with optional causal-LM-core delegation.</li>
+<li><code>training/optimizer.py</code> (686), <code>training/scheduler.py</code> (567).</li>
+<li><code>evaluation/{evaluator,evaluator_extended,metrics,metrics_extended,model_comparison,visualizer,evaluation_report,diagnostics,report}.py</code> — full evaluation suite.</li>
+</ul>
+<h3 id="29-__init__py">2.9 <code>__init__.py</code></h3>
+<p>Lazy <code>__getattr__</code> resolves ~30 names. <strong>Every name in <code>__all__</code> must be importable in a fresh venv with only <code>[core]</code>.</strong> We will harden this in Phase 0 (see §5.3).</p>
+<hr />
+<h2 id="3-test-surface-today">3. Test surface (today)</h2>
+<p>Only <strong>10</strong> <code>test_*</code> functions across 6 files:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Tests</th>
+<th>Coverage of math</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_distillers.py</code></td>
+<td><code>test_kd_hinton</code>, <code>test_feature_distiller</code></td>
+<td>Smoke only — no reference loss comparison.</td>
+</tr>
+<tr>
+<td><code>test_dataloaders.py</code></td>
+<td><code>test_jsonl_dataset</code>, <code>test_create_dataloaders</code></td>
+<td>Construction only.</td>
+</tr>
+<tr>
+<td><code>test_preprocessing.py</code></td>
+<td><code>test_preprocess_config</code>, <code>test_apply_preprocess</code></td>
+<td>Smoke.</td>
+</tr>
+<tr>
+<td><code>test_accuracy_improvements.py</code></td>
+<td><code>test_adaptive_kd</code>, <code>test_dynamic_feature_weighting</code></td>
+<td>Smoke.</td>
+</tr>
+<tr>
+<td><code>test_imports.py</code></td>
+<td><code>test_core_imports</code>, <code>test_pipeline_imports</code></td>
+<td>Import surface.</td>
+</tr>
+<tr>
+<td><code>tests/conftest.py</code></td>
+<td>TinyModel, RandomClassificationDataset, <strong>DummyTokenizer</strong>, fixtures.</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>No</strong> end-to-end distillation test, <strong>no</strong> regression test against a reference Hinton loss, <strong>no</strong> adapter detection test, <strong>no</strong> comparison-cosine test for <code>similarity_transfer</code>.</p>
+<p>This is the gap Phase 1 will close.</p>
+<hr />
+<h2 id="4-discrepancies-vs-the-report-cwd">4. Discrepancies vs. the report (cwd)</h2>
+<table>
+<thead>
+<tr>
+<th>Report claim</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"no AdapterRegistry exists in distillers"</td>
+<td><code>AdapterRegistry</code> exists with 6 adapters (text, vision, code, multimodal, vlm, default fallback).</td>
+</tr>
+<tr>
+<td>"MultiStageDistiller not implemented"</td>
+<td><code>MultiStageDistiller</code> exists with StageController, adaptive scheduler, replay, presets-aware planning.</td>
+</tr>
+<tr>
+<td>"no <code>from_config</code>"</td>
+<td><code>PipelineBuilder.from_config</code> handles legacy and new formats.</td>
+</tr>
+<tr>
+<td>"stage weights never normalized"</td>
+<td><code>MultiStagePipeline.setup()</code> normalizes (default <code>normalize_weights=True</code>). The Phase 0 issue is reduced to: dead <code>_total_weight</code> tracking + remove the misleadingly-defaulted flag's dead <code>_normalize_weights</code> in <code>PipelineBuilder</code> if it's unreachable.</td>
+</tr>
+<tr>
+<td>"no tests beyond imports"</td>
+<td>Almost true — 10 thin tests; no math tests.</td>
+</tr>
+<tr>
+<td>"no <code>__version__</code> etc."</td>
+<td><code>__version__ = "0.2.5"</code> present (but <code>pyproject.toml</code> says <code>0.2.6</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>The report is <strong>a snapshot of an earlier state</strong> and reads as a planning artifact, not a current bill-of-health.</p>
+<hr />
+<h2 id="5-phase-0-issues-to-fix">5. Phase 0 issues to fix</h2>
+<h3 id="51-configmanagerset_seed-determinism-completion">5.1 <code>ConfigManager.set_seed</code> — determinism completion</h3>
+<p><code>set_seed()</code> already calls <code>random.seed</code>, <code>numpy.random.seed</code>, <code>torch.manual_seed</code>, <code>torch.cuda.manual_seed_all</code>. We <strong>add</strong> <code>torch.backends.cudnn.deterministic = True</code> and <code>torch.backends.cudnn.benchmark = False</code>, gated on a new <code>runtime.deterministic</code> flag (default <code>True</code>). The causal-LM trainer already sets these manually; we centralize.</p>
+<p><strong>Conflict:</strong> <code>BasePipeline._enable_memory_optimization</code> sets <code>cudnn.benchmark = True</code> (line 147). Both can be set deterministically by <code>ConfigManager.set_seed()</code> if <code>runtime.deterministic=True</code>; the pipeline's memory-opt should respect the flag. Add: if <code>os.environ.get("ZYNTHE_DETERMINISTIC") == "1"</code> or <code>runtime.deterministic=True</code>, skip the <code>benchmark=True</code>.</p>
+<h3 id="52-featuredistiller-attentiontransferdistiller-silent-skip-on-missing-layers">5.2 <code>FeatureDistiller</code> / <code>AttentionTransferDistiller</code> — silent skip on missing layers</h3>
+<p>Both warn (<code>warnings.warn(...)</code>) but compute zero loss and continue. For Phase 0 we:</p>
+<ul>
+<li>Add a config flag <code>strict_layer_match: bool = False</code> (default <strong>off</strong> for backward compat).</li>
+<li>When <code>strict_layer_match=True</code>, raise <code>ConfigError</code> (Zynthé's standard error class — see §5.5) listing the missing layer names.</li>
+<li>This is a behavior-preserving default with an opt-in escape hatch.</li>
+</ul>
+<h3 id="53-__init__py-optional-import-honesty">5.3 <code>__init__.py</code> — optional-import honesty</h3>
+<p>Survey every entry in <code>_EXPORTS</code>. Each must be importable in a fresh <code>pip install zynthe</code> (no extras). Items that fail import under no-extras install today:</p>
+<ul>
+<li>(Verified on a fresh repo state) the top-level <code>import zynthe</code> succeeds; <strong>per-extras symbols are guarded</strong> (e.g. <code>AdapterRegistry</code> won't fail because it depends on torch, not on a torchvision-only path). No issue detected at import-time with <strong>only torch+transformers+accelerate+numpy+pyyaml+omegaconf</strong> installed.</li>
+</ul>
+<p>We will:</p>
+<ul>
+<li>Add a <strong>lazy smoke test</strong> (<code>tests/test_optional_imports.py</code>) that imports each <code>_EXPORTS</code> entry in CI under <code>pip install zynthe</code> (no extras) and asserts each import either succeeds or raises only an optional-dep <code>ImportError</code>.</li>
+</ul>
+<h3 id="54-_total_weight-dead-code-in-multistagepipelineadd_stage-line-194">5.4 <code>_total_weight</code> dead code in <code>MultiStagePipeline.add_stage</code> (line 194)</h3>
+<p><div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">_total_weight</span> <span class="o">+=</span> <span class="n">weight</span>
+</span></code></pre></div>
+…is never read (the real normalization uses <code>sum(stage.weight for stage in self.stages)</code>). Remove the line.</p>
+<h3 id="55-introduce-a-proper-exception-hierarchy-under-coreutilsexceptionspy">5.5 Introduce a proper exception hierarchy under <code>core/utils/exceptions.py</code></h3>
+<ul>
+<li><code>ZyntheError</code> (base)</li>
+<li><code>ConfigError</code> (bad config; missing layer with <code>strict_layer_match=True</code>)</li>
+<li><code>DistillationError</code></li>
+<li><code>AdapterError</code></li>
+</ul>
+<p>Replace <code>raise ValueError(...)</code> in hot paths where the meaning is config-related.</p>
+<h3 id="56-version-drift">5.6 <code>version</code> drift</h3>
+<p><code>pyproject.toml</code> says <code>0.2.6</code>, <code>__init__.py</code> says <code>0.2.5</code>. Bump <code>__init__.py</code> to <code>0.2.6</code>.</p>
+<h3 id="57-pyprojecttoml">5.7 <code>pyproject.toml</code></h3>
+<p>Add <code>ruff</code> config (already used in many projects); pin <code>accelerate&gt;=0.23.0</code> was already present; bump <code>datasets&gt;=2.14</code> to <code>&gt;=3.0</code> only if proven compatible (defer).</p>
+<h3 id="58-ci-matrix">5.8 CI matrix</h3>
+<p><code>.github/workflows/ci.yml</code> already runs on <code>python-version: [3.10, 3.11, 3.12]</code> on ubuntu-latest (CPU only). Phase 0 keeps this; Phase 1+ adds:</p>
+<ul>
+<li>A <code>coverage</code> job uploading to codecov.</li>
+<li>A nightly <code>modal-nightly.yml</code> triggered by <code>schedule</code> (cron) that runs the smoke-distillation script in <code>tests/smoke/</code> on a Modal T4.</li>
+</ul>
+<hr />
+<h2 id="6-whats-actually-good-dont-regress">6. What's actually good (don't regress)</h2>
+<ul>
+<li><code>BaseDistiller</code> is genuinely production-grade; the fp16/bf16 + safe logit clamping pattern is correct.</li>
+<li><code>PipelineBuilder</code> is fluent and well-typed; the <code>inspect.signature</code> trick in <code>SingleDistillerPipeline.compute_loss</code> is the right way to handle distiller-API drift.</li>
+<li><code>MultiStageDistiller</code> has a <code>requires</code> field on registered distillers — Phase 1 will use that.</li>
+<li><code>config_manager.set_seed</code> already does the right things; just needs cuDNN settings.</li>
+<li>Causal-LM subsystem is fully isolated and tested (<code>tests/test_causal_lm_*.py</code> would be the obvious next step in Phase 1).</li>
+</ul>
+<hr />
+<h2 id="7-phase-0-punchlist-order">7. Phase 0 punchlist (order)</h2>
+<ol>
+<li>Add <code>core/utils/exceptions.py</code>.</li>
+<li>Edit <code>config/config_manager.py</code> to set cuDNN deterministic + benchmark gated on <code>runtime.deterministic</code>.</li>
+<li>Edit <code>pipelines/base_pipeline.py</code> to skip <code>cudnn.benchmark=True</code> when deterministic.</li>
+<li>Edit <code>distillers/feature_distiller.py</code> — add <code>strict_layer_match</code> flag, raise <code>ConfigError</code> when on + mismatch.</li>
+<li>Edit <code>distillers/attention_transfer.py</code> — same.</li>
+<li>Remove dead <code>_total_weight</code> from <code>multi_stage_pipeline.py</code>.</li>
+<li>Bump <code>__init__.py.__version__</code> to <code>0.2.6</code>.</li>
+<li>Add <code>tests/test_optional_imports.py</code> (CI gate).</li>
+<li>Document Phase 0 changes in <code>CHANGELOG.md</code> and <code>CONTRIBUTING.md</code>.</li>
+<li>Update <code>.github/workflows/ci.yml</code> to add a coverage gate line and the optional-imports test step.</li>
+</ol>
+<p>End of audit. Phase 0 implementation begins immediately after this file is written.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "toc.integrate", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
