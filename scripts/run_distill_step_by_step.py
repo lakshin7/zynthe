@@ -288,6 +288,13 @@ def run_recipe(
             exc,
         )
         trainer = _build_offline_t5_trainer()
+
+    # Make sure the stub model's parameters require grad — RationaleDistiller's
+    # __init__ freezes the teacher's params, but when teacher and student
+    # are the same object (the offline stub case) that freezes both.  Force
+    # grads back on so the train_step backward() has a path.
+    for p_ in trainer.model.parameters():
+        p_.requires_grad = True
     distiller = RationaleDistiller(
         teacher=trainer.model,
         student=trainer.model,
