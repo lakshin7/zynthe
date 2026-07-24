@@ -270,6 +270,12 @@ class MultiTaskT5Trainer:
         loss, breakdown = distiller.compute_loss(
             student_outputs=student_outputs, targets=targets
         )
+        if not loss.requires_grad:
+            raise RuntimeError(
+                f"train_step loss has requires_grad=False (loss={loss.item()}, "
+                f"grad_fn={loss.grad_fn}); offline model may have produced "
+                f"detached logits. check label_ids / rationale_ids dtypes."
+            )
         loss.backward()
         optimizer.step()
         return loss, breakdown
