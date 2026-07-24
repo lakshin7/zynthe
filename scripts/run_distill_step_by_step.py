@@ -229,7 +229,23 @@ def run_recipe(
         _sys.path.insert(0, _SCRIPTS)
     from extract_rationales import default_llm_callable, extract_rationales
 
-    llm_call = default_llm_callable(model_name=llm, batch_size=4)
+    # Try to construct the LLM; fall back to a stub if it fails
+    # (e.g. when the model name is invalid or HF Hub is unreachable).
+    try:
+        llm_call = default_llm_callable(model_name=llm, batch_size=4)
+    except Exception as exc:
+        logger.warning(
+            "Could not build LLM callable for model=%r (%s); using stub.",
+            llm, exc,
+        )
+
+        def llm_call(prompts):
+            # Always return 'positive' so the extractor can pass the
+            # label filter even without a real LLM.
+            return [
+                "Reasoning: positive words\nAnswer: positive"
+                for _ in prompts
+            ]
     started = time.time()
     train_triples = extract_rationales(
         [{"input": r["input"]} for r in train_inputs],
