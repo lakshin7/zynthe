@@ -248,7 +248,8 @@ def test_run_recipe_loss_finite(tmp_path: Path, monkeypatch) -> None:
         )
 
     monkeypatch.setattr(er, "extract_rationales", _patched_extractor)
-    monkeypatch.setattr(er, "default_llm_callable", _fake_default_llm_callable)
+    monkeypatch.setattr(_mod, "extract_rationales", _patched_extractor)
+    monkeypatch.setattr(_mod, "default_llm_callable", _fake_default_llm_callable)
     monkeypatch.setattr(_mod, "_maybe_load_sst2", _fake_sst2)
     monkeypatch.setattr(rt_mod, "MultiTaskT5Trainer", _local_trainer)
 
