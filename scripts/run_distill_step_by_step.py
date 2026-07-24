@@ -270,7 +270,6 @@ def run_recipe(
     # ------------------------------------------------------------------
     from zynthe.core.training.rationale_trainer import MultiTaskT5Trainer
     from zynthe.core.distillers.rationale_distiller import RationaleDistiller
-
     # Try to load the real T5; fall back to a self-contained tiny
     # seq2seq stub when the network is unavailable (Modal sandbox,
     # local CI without internet, etc.).
@@ -289,12 +288,6 @@ def run_recipe(
         )
         trainer = _build_offline_t5_trainer()
 
-    # Make sure the stub model's parameters require grad — RationaleDistiller's
-    # __init__ freezes the teacher's params, but when teacher and student
-    # are the same object (the offline stub case) that freezes both.  Force
-    # grads back on so the train_step backward() has a path.
-    for p_ in trainer.model.parameters():
-        p_.requires_grad = True
     distiller = RationaleDistiller(
         teacher=trainer.model,
         student=trainer.model,
@@ -307,6 +300,13 @@ def run_recipe(
         },
         device=trainer.device,
     )
+
+    # RationaleDistiller freezes the teacher's params.  In the offline
+    # stub case the same object is teacher + student, so both were
+    # frozen.  Re-enable grads on the shared model's parameters so the
+    # train_step backward() has a path.
+    for p_ in trainer.model.parameters():
+        p_.requires_grad = True
 
     optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-3)
     losses: List[Dict[str, float]] = []
