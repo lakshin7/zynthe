@@ -380,14 +380,18 @@ def run_recipe(
         with torch.no_grad():
             label_logits = trainer.forward_label(rec["input"], max_length=32)
             rationale_logits = trainer.forward_rationale(rec["input"], max_length=32)
+            # Align logits length with target length (the offline stub
+            # may produce 1 token; real HF models produce T tokens).
+            L = min(label_logits.size(1), label_target.size(1))
+            R = min(rationale_logits.size(1), rationale_target.size(1))
             label_loss = F.cross_entropy(
-                label_logits.float().view(-1, label_logits.size(-1)),
-                label_target.view(-1).to(label_logits.device),
+                label_logits[:, :L].float().view(-1, label_logits.size(-1)),
+                label_target[:, :L].view(-1).to(label_logits.device),
                 ignore_index=-100,
             )
             rationale_loss = F.cross_entropy(
-                rationale_logits.float().view(-1, rationale_logits.size(-1)),
-                rationale_target.view(-1).to(rationale_logits.device),
+                rationale_logits[:, :R].float().view(-1, rationale_logits.size(-1)),
+                rationale_target[:, :R].view(-1).to(rationale_logits.device),
                 ignore_index=-100,
             )
         eval_losses.append(
